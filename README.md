@@ -7,13 +7,7 @@
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-**TSL** is a glass-box regression model that fits a sum of *separable
-stages*, each a difference of two products of one-variable functions.
-Unlike additive models (GAMs, EBM, GA²M), which build up interactions one
-low-dimensional shape function at a time, a single TSL stage binds all
-features together through its rank-1 products — and remains fully
-inspectable, since every factor is a 1D function whose effect can be read
-off directly.
+TSL is a glass-box regression model for learning rich interactions without sacrificing interpretability. It represents predictions as a sum of stages, where each stage is an difference of two separable products of univariate functions. This gives TSL expressive interaction structure while keeping the model directly inspectable through its learned feature-wise components.
 
 ## Examples
 
@@ -30,6 +24,13 @@ home value, USD). The two stages decompose cleanly into a **coastal premium**
 (Stage 1) and an **inland correction** (Stage 2).
 
 #### Spatial backbone and 2D partial dependence
+
+The *partial-dependence* (PD) function on a feature subset $S \subseteq \\{1,\dots,p\\}$
+is the model averaged over the marginal distribution of the remaining features:
+
+$$
+\mathrm{PD}_S(\mathbf{x}_S) := \mathbb{E}_{\mathbf{X}_{-S}}\bigl[\hat{m}(\mathbf{x}_S, \mathbf{X}_{-S})\bigr].
+$$
 
 Each stage is a product of 1D factors, so its 2D PD over (longitude, latitude)
 is the product of the corresponding 1D factors (up to a scalar). The
@@ -94,6 +95,13 @@ is itself a 1D function, so its PD has no marginalization-induced smoothing
 and retains the sharp local structure near LA, SF, and the Bay Area.
 
 ## Installation
+
+TSL's core is a Rust crate; the `tsl-py` Python package is a thin
+[PyO3](https://pyo3.rs/) wrapper that builds the Rust extension via
+[maturin](https://www.maturin.rs/) during `pip install`. **A working Rust
+toolchain is therefore required before installing the Python package** —
+install Rust first (below), then either build the Rust crate directly or
+`pip install` the Python bindings.
 
 ### Rust
 
