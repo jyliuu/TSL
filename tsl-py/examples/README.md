@@ -12,6 +12,7 @@ exports, EBM/XGBoost comparison plots).
 python tsl-py/examples/california.py
 python tsl-py/examples/bike_sharing.py
 python tsl-py/examples/synthetic.py
+python tsl-py/examples/synthetic2.py
 ```
 
 Each script:
@@ -68,6 +69,31 @@ python tsl-py/examples/california.py --variant interpretable --out tsl-py/exampl
 | `ice_x1_xgboost.pdf` | XGBoost ICE (custom) |
 | `pd_x1_all_models.pdf` | 1D PD overlay: TSL + EBM + XGBoost |
 | `pd_x1_x2.pdf` | TSL `plot_2d_pd` (surface) |
+
+### Synthetic2 — backbone bimodality at epoch 0 ([`synthetic2.py`](synthetic2.py))
+
+Reconstructs the figure from Reviewer zSd4's rebuttal: at a single TSL stage,
+independently bagged grid tensors on the DGP
+
+    f(x1, x2) = exp(sin(x1) * cos(x2)) + x1,    x1, x2 ~ U[-4, 4],
+    y = f(x1, x2),  n = 5000
+
+converge to two distinct backbone representations (clearly bimodal on
+Feature 0). The similarity-filtering step (Algorithm 11) recovers a single
+coherent set.
+
+| Output file | Description |
+|---|---|
+| `backbone_bimodal_epoch0.pdf` | 3-row x 2-col panel of backbones `b_j^{(ℓ)}(x_j)` at stage `ℓ = 1`: row 1 splits 17 bottom-λ + 17 top-λ bagged grids by `λ+ + λ-`; row 2 shows the top-`k = ceil((1 - ξ) * n_grids)` similarity-filtered candidates against the `(λ+, λ-)`-anchored reference grid; row 3 shows all `n_grids` bagged backbones colored by `λ+ + λ-`, with the combined backbone overlaid in black. |
+
+The script does a single TSL fit with `similarity_threshold = 1 - ξ` (default
+`ξ = 0.9`, giving `|K| = 39` kept candidates out of 389), reads all 389
+bagged grids from `stage_predictors[0].grid_tensors`, and computes the
+Algorithm 11 reference (closest to the `(λ+, λ-)`-centroid) and combined
+similarity scores in Python for the row-2 highlight. Fitting takes a few
+seconds on a laptop with rayon enabled. Pass `--seed N` to fix all
+stochastic components, or `--n-trees`, `--xi`, `--alpha`, etc. to vary the
+configuration.
 
 ## Pre-rendered output
 
