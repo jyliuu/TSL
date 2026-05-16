@@ -1,0 +1,378 @@
+"""Synthetic PD-cancellation example.
+
+Reproduces the data-generating process from the TSL paper's
+`reproducibility/data_generation.py`:
+
+    X1 ~ Normal(0, std_x1^2)
+    X2 ~ Normal(-1, std_x2^2)
+    X3 ~ Normal(-1, std_x3^2)
+    y = X1^2 * X2 + X1^2 * X2 * X3 + ε
+
+X1 has zero first-order partial dependence by construction (PD cancellation),
+even though it strongly drives predictions via interactions. Figures:
+
+  * pd_difference_plot.pdf
+      Combined 2×3 (stages × features) PD difference plot. [library]
+
+  * pd_difference_plot_x{1,2,3}.pdf
+      Per-feature, stage-1-only split-outs of the above (one square each).
+
+  * tilt_diagnostics.pdf
+      Four-curve tilt diagnostics per (stage, feature) cell — tanh(d_j),
+      B_j*tanh(d_j), tanh(d_j - mean d_j), B_j*tanh(d_j - mean d_j) — for
+      x1, x2, x3.  [library: plot_tilt_diagnostics]
+
+  * ice_x1_tsl.pdf, ice_x1_ebm.pdf, ice_x1_xgboost.pdf
+      ICE curves for x1 with PDP overlay, one per model.
+
+  * pd_x1_all_models.pdf
+      1D PD for x1 overlaid for TSL, EBM, and XGBoost — illustrates PD
+      cancellation for all three.
+
+  * pd_x1_x2.pdf
+      TSL 2D PD surface over (x1, x2). [library]
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from typing import Optional
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+
+from tsl_py import TSL
+from tsl_py.plot import pd_difference_plot, plot_2d_pd, plot_ice, plot_tilt_diagnostics
+from tsl_py.plot._common import (
+    PALETTE,
+    PALETTE_CYCLE,
+    _apply_data_density,
+    _stage_backbone_tilt,
+)
+
+
+def make_dataset(
+    n: int, seed: int,
+    noise_std: float = 0.25,
+    std_x1: float = 1.0,
+    std_x2: float = 1.5,
+    std_x3: float = 0.8,
+):
+    rng = np.random.default_rng(seed)
+    x1 = rng.normal(0.0, std_x1, size=n).astype(np.float64)
+    x2 = rng.normal(-1.0, std_x2, size=n).astype(np.float64)
+    x3 = rng.normal(-1.0, std_x3, size=n).astype(np.float64)
+    X = np.column_stack([x1, x2, x3])
+    y = x1 ** 2 * x2 + x1 ** 2 * x2 * x3 + noise_std * rng.standard_normal(size=n)
+    return np.ascontiguousarray(X), np.ascontiguousarray(y.astype(np.float64))
+
+
+# ---------------------------------------------------------------------------
+# Figure 3.1 per-feature split (stage 1 only) — what the paper LaTeX includes
+# ---------------------------------------------------------------------------
+
+
+def save_pd_difference_plot_split_panels(
+    result, model, out: Path, stage: int = 0,
+    X_background: Optional[np.ndarray] = None, show_data_density: bool = False,
+) -> None:
+    """Save one square PDF per feature for a fixed stage (default: stage 1).
+
+    For feature x_j, writes `pd_difference_plot_x{j}.pdf`. Same data as the
+    combined plot — just one PDF per panel, re-drawn from the arrays in
+    `result`. The backbone overlay is `√(C+·C−)·b_j`.
+
+    If `show_data_density` is True, overlay a semi-transparent rug of
+    `X_background[:, feat_idx]` along the x-axis.
+    """
+    stage_predictor = model.stage_predictors[stage]
+    for i, feat_idx in enumerate(result.feature_indices):
+        x_vals = result.x_grids[i]
+        f_plus = result.f_plus[i, :, stage]
+        f_minus = result.f_minus[i, :, stage]
+        c_plus, c_minus = result.constants[i, stage]
+        feat_name = result.feature_names[i]
+        j = feat_idx + 1
+
+        y_plus = f_plus
+        y_minus = -f_minus
+        label_plus = rf"$\mathrm{{PD}}_{{+,{j}}}$"
+        label_minus = rf"$\mathrm{{PD}}_{{-,{j}}}$"
+        ylabel = rf"$\mathrm{{PD}}_{{\pm,{j}}}$"
+        overlay_label = r"$\sqrt{C_+ C_-}\,b_j$"
+        fname = f"pd_difference_plot_{feat_name}.pdf"
+
+        diff = y_plus - y_minus
+
+        fig, ax = plt.subplots(figsize=(4, 4))
+        ax.fill_between(x_vals, y_minus, y_plus, where=(diff >= 0),
+                        color="#34d399", alpha=0.28)
+        ax.fill_between(x_vals, y_minus, y_plus, where=(diff <  0),
+                        color="#f87171", alpha=0.28)
+        ax.plot(x_vals, y_plus,  lw=1.7, color="#10b981",
+                alpha=0.95, label=label_plus)
+        ax.plot(x_vals, y_minus, lw=1.7, color="#dc2626",
+                alpha=0.95, label=label_minus)
+
+        product = c_plus * (-c_minus)
+        if product > 0:
+            backbone, _ = _stage_backbone_tilt(stage_predictor, feat_idx, x_vals)
+            overlay = backbone * np.sqrt(product)
+            ax.plot(x_vals, overlay, lw=2.0, color=PALETTE["neutral_dark"],
+                    ls=":", alpha=0.95, label=overlay_label)
+        if show_data_density and X_background is not None:
+            _apply_data_density(ax, X_background[:, feat_idx], kind="rug")
+        ax.axhline(0, color=PALETTE["neutral_dark"], ls="--", lw=0.5, alpha=0.5)
+        ax.set_xlabel(f"${feat_name}$" if feat_name.startswith("x") else feat_name, fontsize=12)
+        ax.set_ylabel(ylabel, fontsize=12)
+        c_minus_disp = -c_minus
+        ax.set_title(
+            f"$C_+={c_plus:.4f}$, $C_-={c_minus_disp:.4f}$"
+            if abs(c_plus) < 1000 and abs(c_minus_disp) < 1000
+            else f"$C_+={c_plus:.2e}$, $C_-={c_minus_disp:.2e}$",
+            fontsize=12, color=PALETTE["neutral_dark"], fontweight="semibold",
+        )
+        ax.grid(True, alpha=0.25)
+        ax.legend(loc="best", fontsize=10)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        fig.tight_layout()
+        path = out / fname
+        fig.savefig(path, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  wrote {path}")
+
+
+# ---------------------------------------------------------------------------
+# Standard PD/ICE helpers for non-TSL models (EBM, XGBoost)
+# ---------------------------------------------------------------------------
+
+
+class _XGBPredictor:
+    """Thin wrapper that exposes `.predict(np.ndarray) -> np.ndarray` using
+    `xgboost.Booster.predict` directly. Avoids `XGBRegressor.load_model`'s
+    `_estimator_type` check in xgboost 2.x.
+    """
+
+    def __init__(self, booster):
+        self.booster = booster
+
+    def predict(self, X):
+        import xgboost as xgb
+        X_arr = np.asarray(X, dtype=np.float32)
+        return self.booster.predict(xgb.DMatrix(X_arr))
+
+
+def _load_xgb(path: Path) -> _XGBPredictor:
+    import xgboost as xgb
+    booster = xgb.Booster()
+    booster.load_model(str(path))
+    return _XGBPredictor(booster)
+
+
+def _ice_1d(predict_fn, X_ref: np.ndarray, feat_idx: int, x_grid: np.ndarray, n_ice: int, seed: int) -> np.ndarray:
+    """ICE matrix of shape (n_ice, len(x_grid))."""
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(X_ref.shape[0], size=min(n_ice, X_ref.shape[0]), replace=False)
+    X_sel = X_ref[idx]
+    p = X_ref.shape[1]
+    batch = np.repeat(X_sel, repeats=x_grid.shape[0], axis=0).reshape(-1, p)
+    batch[:, feat_idx] = np.tile(x_grid, reps=X_sel.shape[0])
+    preds = predict_fn(batch).reshape(X_sel.shape[0], x_grid.shape[0])
+    return preds
+
+
+def _plot_ice(out: Path, model_name: str, x_grid: np.ndarray, ice: np.ndarray, pd: np.ndarray) -> None:
+    fig, ax = plt.subplots(figsize=(7, 4))
+    for k in range(ice.shape[0]):
+        ax.plot(x_grid, ice[k], color=PALETTE["backbone"], alpha=0.10, lw=1)
+    ax.plot(x_grid, pd, color=PALETTE["neutral_dark"], lw=2.5, label="PDP")
+    ax.axhline(0, color=PALETTE["neutral_dark"], ls="--", lw=0.8, alpha=0.5)
+    ax.set_xlabel(r"$x_1$", fontsize=12)
+    ax.set_ylabel("prediction", fontsize=12)
+    ax.set_title(f"{model_name} — ICE for $x_1$",
+                 color=PALETTE["neutral_dark"], fontweight="semibold")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best")
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    fig.tight_layout()
+    path = out / f"ice_x1_{model_name}.pdf"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  wrote {path}")
+
+
+def _plot_combined_pd1_x1(out: Path, x_grid: np.ndarray, pd_tsl, pd_ebm, pd_xgb) -> None:
+    fig, ax = plt.subplots(figsize=(4, 4))
+    ax.plot(x_grid, pd_tsl, lw=2.2, color=PALETTE_CYCLE[0], label="TSL")
+    ax.plot(x_grid, pd_ebm, lw=2.2, color=PALETTE_CYCLE[1], label="EBM")
+    ax.plot(x_grid, pd_xgb, lw=2.2, color=PALETTE_CYCLE[2], label="XGBoost")
+    ax.axhline(0, color=PALETTE["neutral_dark"], ls="--", lw=0.8, alpha=0.6)
+    ax.set_xlabel(r"$x_1$", fontsize=12)
+    ax.set_ylabel(r"$\mathrm{PD}_1(x_1)$", fontsize=12)
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best", fontsize=10)
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    fig.tight_layout()
+    path = out / "pd_x1_all_models.pdf"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  wrote {path}")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
+def main(
+    out: Path,
+    tsl_path: Optional[Path], ebm_path: Optional[Path], xgb_path: Optional[Path],
+    n: int = 4000, seed: int = 0, refit: bool = False,
+) -> None:
+    out.mkdir(parents=True, exist_ok=True)
+
+    print(f"Generating synthetic data (n={n}, seed={seed}) ...")
+    X, y = make_dataset(n=n, seed=seed)
+    feature_names = ["x1", "x2", "x3"]
+
+    if not refit and tsl_path is not None and tsl_path.exists():
+        print(f"Loading pretrained TSL model from {tsl_path} ...")
+        model = TSL.load(str(tsl_path))
+    else:
+        print("Fitting TSL (2 stages) ...")
+        model, _ = TSL.fit(
+            X, y,
+            epochs=2, n_trees=16, n_iter=30, split_try=16,
+            colsample_bytree=1.0, seed=seed, verbosity=0,
+        )
+    pred = model.predict(X)
+    rmse = float(np.sqrt(np.mean((pred - y) ** 2)))
+    print(f"  stages = {len(model.stage_predictors)}  train RMSE = {rmse:.4f}")
+
+    print("PD difference plot (x1, x2, x3, both stages) ...")
+    r = pd_difference_plot(
+        model, X, feature_names=feature_names, grid_points=200,
+        show_data_density="rug",
+    )
+    r.fig.savefig(out / "pd_difference_plot.pdf", bbox_inches="tight")
+    plt.close(r.fig)
+    print(f"  wrote {out / 'pd_difference_plot.pdf'}")
+
+    # Per-feature stage-1 split-outs (raw).
+    save_pd_difference_plot_split_panels(
+        r, model, out, stage=0, X_background=X, show_data_density=True,
+    )
+
+    print("Tilt diagnostics (x1, x2, x3) ...")
+    r_tilt_diag = plot_tilt_diagnostics(
+        model, X, feature_names=feature_names, grid_points=200,
+    )
+    r_tilt_diag.fig.savefig(out / "tilt_diagnostics.pdf", bbox_inches="tight")
+    plt.close(r_tilt_diag.fig)
+    print(f"  wrote {out / 'tilt_diagnostics.pdf'}")
+
+    print("TSL ICE for x1 ...")
+    r_ice = plot_ice(model, X, "x1", feature_names=feature_names, n_ice=200, grid_points=200, seed=seed)
+    r_ice.fig.savefig(out / "ice_x1_tsl.pdf", bbox_inches="tight")
+    plt.close(r_ice.fig)
+    print(f"  wrote {out / 'ice_x1_tsl.pdf'}")
+
+    print("TSL 2D PD surface (x1 × x2) ...")
+    r2 = plot_2d_pd(
+        model, X,
+        feature_x="x1", feature_y="x2",
+        feature_names=feature_names, grid_points=40,
+    )
+    r2.fig.savefig(out / "pd_x1_x2.pdf", bbox_inches="tight")
+    plt.close(r2.fig)
+    print(f"  wrote {out / 'pd_x1_x2.pdf'}")
+
+    # Comparison plots (require EBM + XGBoost).
+    ebm_model = xgb_model = None
+    if ebm_path is not None and ebm_path.exists():
+        import joblib
+        ebm_model = joblib.load(ebm_path)
+        print(f"Loaded EBM from {ebm_path} ({type(ebm_model).__name__})")
+    if xgb_path is not None and xgb_path.exists():
+        xgb_model = _load_xgb(xgb_path)
+        print(f"Loaded XGBoost from {xgb_path}")
+
+    # x1 grid shared across the comparison plots.
+    x1_grid = np.linspace(X[:, 0].min(), X[:, 0].max(), 200)
+
+    # TSL 1D PD for x1: sum across all stages.
+    X_mean = X.mean(axis=0)
+    X_grid = np.tile(X_mean, (x1_grid.size, 1))
+    X_grid[:, 0] = x1_grid
+    first_order = model.compute_first_order_partial_dependence_functions(X_grid, X)
+    _, pd_values = first_order[0]
+    pd_tsl = (pd_values[:, ::2] + pd_values[:, 1::2]).sum(axis=1)
+
+    pd_ebm = pd_xgb = None
+    if ebm_model is not None:
+        print("EBM ICE for x1 ...")
+        ice_ebm = _ice_1d(ebm_model.predict, X, feat_idx=0, x_grid=x1_grid, n_ice=200, seed=seed)
+        pd_ebm = ice_ebm.mean(axis=0)
+        _plot_ice(out, "ebm", x1_grid, ice_ebm, pd_ebm)
+    else:
+        print(f"  skipping EBM ICE (no model at {ebm_path})")
+
+    if xgb_model is not None:
+        print("XGBoost ICE for x1 ...")
+        ice_xgb = _ice_1d(xgb_model.predict, X, feat_idx=0, x_grid=x1_grid, n_ice=200, seed=seed)
+        pd_xgb = ice_xgb.mean(axis=0)
+        _plot_ice(out, "xgboost", x1_grid, ice_xgb, pd_xgb)
+    else:
+        print(f"  skipping XGBoost ICE (no model at {xgb_path})")
+
+    if pd_ebm is not None and pd_xgb is not None:
+        print("Combined 1D PD for x1 (TSL vs EBM vs XGBoost) ...")
+        _plot_combined_pd1_x1(out, x1_grid, pd_tsl, pd_ebm, pd_xgb)
+    else:
+        print("  skipping combined PD plot (need both EBM and XGBoost)")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Synthetic PD-cancellation TSL figures")
+    parser.add_argument("--out", type=Path, default=Path("/tmp/tsl_examples/synthetic"))
+    _DEFAULT_MODELS = Path(__file__).resolve().parent / "models" / "synthetic"
+    parser.add_argument(
+        "--model-path",
+        type=Path,
+        default=_DEFAULT_MODELS / "mpf_model.bin",
+        help="Pretrained TSL model. Set to '' to force refit.",
+    )
+    parser.add_argument(
+        "--ebm-path",
+        type=Path,
+        default=_DEFAULT_MODELS / "ebm_model.pkl",
+        help="Pretrained EBM pickle for ICE/PD comparison. Set to '' to skip.",
+    )
+    parser.add_argument(
+        "--xgb-path",
+        type=Path,
+        default=_DEFAULT_MODELS / "xgb_model.json",
+        help="Pretrained XGBoost JSON for ICE/PD comparison. Set to '' to skip.",
+    )
+    parser.add_argument("--n", type=int, default=4000)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--refit", action="store_true",
+        help="Force refitting TSL even if a pretrained model file is available.",
+    )
+    args = parser.parse_args()
+    main(
+        out=args.out,
+        tsl_path=(args.model_path if str(args.model_path) else None),
+        ebm_path=(args.ebm_path if str(args.ebm_path) else None),
+        xgb_path=(args.xgb_path if str(args.xgb_path) else None),
+        n=args.n, seed=args.seed,
+        refit=args.refit,
+    )
