@@ -6,232 +6,504 @@
 from tsl_py import TSL, GridTensor, StagePredictor, FitResult, TSLRegressor
 ```
 
-- **`TSLRegressor`** (`python/tsl_py/sklearn.py`) — the scikit-learn estimator and **main
-  entry point** for most users.
+- **`TSLRegressor`** — the scikit-learn estimator and **main entry point** for most users.
 - **`TSL`** — the raw PyO3 binding to the boosted model, with the interpretation methods.
 - **`GridTensor`**, **`StagePredictor`**, **`FitResult`** — the lower-level pieces.
 
-Diagnostics/plotting live in `tsl_py.plot`, documented on the separate
-[Plotting reference](plotting.md) page. This page documents one section per user-callable
-function on the model objects.
+Diagnostics/plotting live in `tsl_py.plot`, documented on the [Plotting reference](plotting.md)
+page.
 
 !!! note "Array contract"
-    The PyO3 methods expect **C-contiguous `float64`** arrays. Wrap inputs with
-    `np.ascontiguousarray(...)` if in doubt. `TSLRegressor` handles this for you.
+    PyO3 methods expect **C-contiguous `float64`** arrays (wrap with
+    `np.ascontiguousarray(...)`). `TSLRegressor` handles this for you.
 
 ---
 
 ## `TSLRegressor`
 
-A standard scikit-learn regressor wrapping `TSL`. Construct it with flat hyperparameters,
-then `fit`/`predict`/`score` like any estimator.
+<span class="api-tag api-tag-class">class</span> &nbsp; `tsl_py.TSLRegressor` — a scikit-learn–compatible regressor wrapping [`TSL`](#tsl).
 
-### `TSLRegressor(...)` — constructor
+### `TSLRegressor` { #tslregressor-init }
 
-```python
-TSLRegressor(
-    epochs=10, n_trees=10, n_iter=10, decay=1.0,
-    split_try=10, colsample_bytree=0.8,
-    alpha=0.0, complexity_penalty=0.0, min_split_loss=0.0, min_interval_samples=1,
-    refinement_strategy="l2", prior_sample_size=0.0, update_clamp=float("inf"),
-    tilt_tau=0.01, tilt_rho=0.0,
-    split_strategy="random", top_k=10, must_fill_all_k=True,
-    similarity_threshold=0.0, bagged=False,
-    seed=42, verbosity=1, visualdb=None,
-)
-```
-
-Stores the hyperparameters; no fitting happens until `fit`. Every argument is described in
-the [Hyperparameters](../guides/hyperparameters.md) reference.
-
-### `fit(X, y)`
-
-Fit the model. Delegates to `TSL.fit`, storing the fitted core model in `core_estimator_`
-and the training diagnostics in `fit_result_`.
-
-- **`X`** — `(n_samples, n_features)` array (or DataFrame).
-- **`y`** — `(n_samples,)` target array.
-- **Returns** `self` (scikit-learn convention).
+<p class="api-sig"><span class="api-tag api-tag-method">constructor</span></p>
 
 ```python
-model = TSLRegressor(epochs=5, n_trees=16, n_iter=30, seed=0).fit(X_train, y_train)
+TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
+             colsample_bytree=0.8, alpha=0.0, complexity_penalty=0.0,
+             min_split_loss=0.0, min_interval_samples=1, refinement_strategy="l2",
+             prior_sample_size=0.0, update_clamp=float("inf"), tilt_tau=0.01,
+             tilt_rho=0.0, split_strategy="random", top_k=10, must_fill_all_k=True,
+             similarity_threshold=0.0, bagged=False, seed=42, verbosity=1, visualdb=None)
 ```
 
-### `predict(X)`
+Stores hyperparameters; no fitting happens until [`fit`](#tslregressor-fit). See the
+[Hyperparameters](../guides/hyperparameters.md) reference for tuning guidance.
 
-Predict targets for `X`. Requires a fitted model.
+**Parameters**
 
-- **`X`** — `(n_samples, n_features)`.
-- **Returns** `(n_samples,)` array of predictions.
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `epochs` | `int` | `10` | number of boosting rounds (stages) |
+| `n_trees` | `int` | `10` | bagged grid tensors per stage |
+| `n_iter` | `int` | `10` | split budget per grid |
+| `decay` | `float` | `1.0` | multiply `n_iter` by this after epoch 1 |
+| `split_try` | `int` | `10` | candidate split positions per (feature, interval) |
+| `colsample_bytree` | `float` | `0.8` | fraction of features sampled per split |
+| `alpha` | `float` | `0.0` | ridge regularization on the bin update |
+| `complexity_penalty` | `float` | `0.0` | penalty discouraging extra splits |
+| `min_split_loss` | `float` | `0.0` | minimum error reduction to accept a split |
+| `min_interval_samples` | `int` | `1` | minimum observations either side of a split |
+| `refinement_strategy` | `str` | `"l2"` | `"l2"` or `"huber"` |
+| `prior_sample_size` | `float` | `0.0` | parent-anchoring strength (advanced; `0.0` = off) |
+| `update_clamp` | `float` | `inf` | update-magnitude cap (advanced; `inf` = off) |
+| `tilt_tau` | `float` | `0.01` | $\ell_2$ coupling between $u_+$ and $u_-$ |
+| `tilt_rho` | `float` | `0.0` | $\ell_1$ coupling on $(u_+ - u_-)$ |
+| `split_strategy` | `str` | `"random"` | `"random"`, `"best_split"`, or `"top_k"` |
+| `top_k` | `int` | `10` | (for `top_k`) candidate pool size |
+| `must_fill_all_k` | `bool` | `True` | (for `top_k`) require all $k$ slots |
+| `similarity_threshold` | `float` | `0.0` | bag trim $\xi$ (`0` keeps all) |
+| `bagged` | `bool` | `False` | enable the bagged-aggregation path |
+| `seed` | `int` | `42` | RNG seed (fits are deterministic) |
+| `verbosity` | `int` | `1` | log verbosity |
+| `visualdb` | `str \| None` | `None` | evo-logging SQLite path |
 
-### `score(X, y)`
+### `fit` { #tslregressor-fit }
 
-The coefficient of determination $R^2$ of the prediction (via scikit-learn's `r2_score`).
+<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
 
-- **Returns** `float` — $R^2$ of `self.predict(X)` against `y`.
+```python
+TSLRegressor.fit(X, y) -> TSLRegressor
+```
 
-### `stage_predictors` (property)
+Fit the model. Delegates to [`TSL.fit`](#tsl-fit), storing the fitted core model in
+`core_estimator_` and training diagnostics in `fit_result_`.
 
-The list of fitted [`StagePredictor`](#stagepredictor) objects from the underlying `TSL`.
-Requires a fitted model.
+**Parameters**
 
-### `save(path)`
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `X` | `ndarray (n_samples, n_features)` | _required_ | training features (array or DataFrame) |
+| `y` | `ndarray (n_samples,)` | _required_ | training targets |
 
-Serialize the fitted core estimator to `path` (binary).
+**Returns**
 
-### `TSLRegressor.load(path)` (classmethod)
+| Type | Description |
+|------|-------------|
+| `TSLRegressor` | `self`, fitted (scikit-learn convention) |
 
-Load a model saved with `save`, returning a fitted `TSLRegressor`. Also reads the legacy
-MPF `.bin` format.
+### `predict` { #tslregressor-predict }
+
+<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+
+```python
+TSLRegressor.predict(X) -> np.ndarray
+```
+
+**Parameters**
+
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `X` | `ndarray (n_samples, n_features)` | _required_ | features to predict |
+
+**Returns**
+
+| Type | Description |
+|------|-------------|
+| `ndarray (n_samples,)` | predictions |
+
+### `score` { #tslregressor-score }
+
+<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+
+```python
+TSLRegressor.score(X, y) -> float
+```
+
+The coefficient of determination $R^2$ (via scikit-learn's `r2_score`).
+
+**Parameters**
+
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `X` | `ndarray (n_samples, n_features)` | _required_ | features |
+| `y` | `ndarray (n_samples,)` | _required_ | true targets |
+
+**Returns**
+
+| Type | Description |
+|------|-------------|
+| `float` | $R^2$ of `predict(X)` against `y` |
+
+### `save` { #tslregressor-save }
+
+<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+
+```python
+TSLRegressor.save(path) -> None
+```
+
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `path` | `str` | _required_ | destination file (binary) |
+
+### `load` { #tslregressor-load }
+
+<p class="api-sig"><span class="api-tag api-tag-classmethod">classmethod</span></p>
+
+```python
+TSLRegressor.load(path) -> TSLRegressor
+```
+
+Load a model saved with [`save`](#tslregressor-save); also reads the legacy MPF `.bin` format.
+
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `path` | `str` | _required_ | model file |
+
+**Returns**
+
+| Type | Description |
+|------|-------------|
+| `TSLRegressor` | a fitted estimator |
+
+### `stage_predictors` { #tslregressor-stage-predictors }
+
+<p class="api-sig"><span class="api-tag api-tag-property">property</span></p>
+
+The list of fitted [`StagePredictor`](#stagepredictor) objects. **Type:** `list[StagePredictor]`.
 
 ---
 
 ## `TSL`
 
-The core boosted model. Use it directly when you want the interpretation methods below;
-otherwise prefer `TSLRegressor`.
+<span class="api-tag api-tag-class">class</span> &nbsp; `tsl_py.TSL` — the core boosted model. Use it directly for the interpretation methods below; otherwise prefer [`TSLRegressor`](#tslregressor).
 
-### `TSL.fit(x, y, ...)` (classmethod)
+### `fit` { #tsl-fit }
 
-Fit a boosted TSL model. Takes the same flat hyperparameters as `TSLRegressor` (plus the
-data) and maps them onto the Rust builders.
+<p class="api-sig"><span class="api-tag api-tag-classmethod">classmethod</span></p>
 
 ```python
-model, fit_result = TSL.fit(
-    x, y,                         # C-contiguous float64
-    epochs=5, decay=1.0, n_trees=16, n_iter=30, split_try=16,
-    colsample_bytree=0.8, alpha=0.0, complexity_penalty=0.0,
-    min_split_loss=0.0, min_interval_samples=1,
-    refinement_strategy="l2", prior_sample_size=0.0, update_clamp=float("inf"),
-    tilt_tau=0.01, tilt_rho=0.0,
-    split_strategy="random", top_k=10, must_fill_all_k=True,
-    similarity_threshold=0.0, bagged=False, seed=0, verbosity=1, visualdb=None,
-)
+TSL.fit(x, y, epochs, decay, n_trees, n_iter, split_try, colsample_bytree, alpha,
+        complexity_penalty, min_split_loss, min_interval_samples, refinement_strategy,
+        prior_sample_size, update_clamp, tilt_tau, tilt_rho, split_strategy, top_k,
+        must_fill_all_k, similarity_threshold, bagged, seed, verbosity, visualdb=None)
+        -> tuple[TSL, FitResult]
 ```
 
-- **Returns** `(TSL, FitResult)`.
+Fit a boosted TSL model.
 
-### `predict(x)`
+**Parameters**
 
-- **`x`** — `(n_samples, n_features)` C-contiguous `float64`.
-- **Returns** `(n_samples,)` array (sum of all stage predictions).
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `x` | `ndarray (n_samples, n_features)` | _required_ | training features (C-contiguous `float64`) |
+| `y` | `ndarray (n_samples,)` | _required_ | training targets |
+| _hyperparameters_ | — | — | same names/types as the [`TSLRegressor` constructor](#tslregressor-init) |
 
-### `save(path)`
+**Returns**
 
-Serialize the model to a binary file at `path`.
+| Type | Description |
+|------|-------------|
+| `tuple[TSL, FitResult]` | the fitted model and its training diagnostics |
 
-### `TSL.load(path)` (classmethod)
+### `predict` { #tsl-predict }
 
-Load a model from `path`. Reads the native binary format and the legacy MPF `.bin` format.
+<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
 
-### `compute_partial_dependence_function(fixed_indices, fixed_values, data_x)`
+```python
+TSL.predict(x) -> np.ndarray
+```
 
-The model-native partial dependence (see
-[Partial dependence](../math/partial-dependence.md)). Marginalizes over the **empirical
-joint** of the non-fixed features in `data_x`.
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `x` | `ndarray (n_samples, n_features)` | _required_ | features (C-contiguous `float64`) |
 
-- **`fixed_indices`** — `list[int]`, the feature column(s) held fixed.
-- **`fixed_values`** — `(n_points, len(fixed_indices))` array of values to evaluate at.
-- **`data_x`** — `(n_samples, n_features)` background data to marginalize over.
-- **Returns** a tuple `(constants, pd_values)`: per stage the $(C_+, C_-)$ normalizing
-  constants, and an array of the branch curves
-  $[f_+^{(0)}, f_-^{(0)}, f_+^{(1)}, f_-^{(1)}, \dots]$ (one $(+)/(-)$ pair per stage).
+**Returns**
 
-### `compute_first_order_partial_dependence_functions(values_x, data_x)`
+| Type | Description |
+|------|-------------|
+| `ndarray (n_samples,)` | sum of all stage predictions |
 
-Convenience wrapper computing the 1D partial dependence for **every** feature at once.
+### `save` { #tsl-save }
 
-- **`values_x`** — `(grid_points, n_features)` evaluation grid (column $j$ supplies the
-  $x_j$ values for feature $j$).
-- **`data_x`** — background data.
-- **Returns** a `list` with one entry per feature, each `(constants_per_stage, pd_values)`
-  as in `compute_partial_dependence_function`.
+<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
 
-### `compute_ice_curves(observations, feature_index, x_range, data_x)`
+```python
+TSL.save(path) -> None
+```
 
-Individual Conditional Expectation curves: sweep one feature over a range for each given
-observation.
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `path` | `str` | _required_ | destination binary file |
 
-- **`observations`** — `(n_obs, n_features)` rows to trace.
-- **`feature_index`** — `int`, the feature to vary.
-- **`x_range`** — `(n_range,)` values to sweep.
-- **`data_x`** — background data.
-- **Returns** a `(n_obs, n_range, 2 * n_stages)` array, scaled by
-  `scaling_plus`/`scaling_minus`.
+### `load` { #tsl-load }
 
-### `compute_per_stage_feature_importance(data_x)`
+<p class="api-sig"><span class="api-tag api-tag-classmethod">classmethod</span></p>
 
-Per-stage importance of each feature, split into backbone and tilt.
+```python
+TSL.load(path) -> TSL
+```
 
-- **Returns** `(backbone_importance, tilt_importance)`, each a `(n_stages, n_features)`
-  array — $\mathrm{Var}[\log b_j]$ and $\mathrm{Var}[d_j]$ per stage.
+Reads the native binary format and the legacy MPF `.bin` format.
 
-### `compute_aggregated_feature_importance(data_x)`
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `path` | `str` | _required_ | model file |
 
-Roll the per-stage importances up to global, energy-weighted scores.
+**Returns** — `TSL`.
 
-- **Returns** `(global_backbone, global_tilt, stage_weights)`, each a 1D array
-  (`global_*` over features, `stage_weights` over stages).
+### `compute_partial_dependence_function` { #tsl-pd }
 
-### `compute_combined_feature_importance(data_x, gamma=1.0)`
+<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+
+```python
+TSL.compute_partial_dependence_function(fixed_indices, fixed_values, data_x)
+    -> tuple[list, np.ndarray]
+```
+
+Model-native partial dependence (see [Partial dependence](../math/partial-dependence.md)),
+marginalizing over the **empirical joint** of the non-fixed features.
+
+**Parameters**
+
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `fixed_indices` | `list[int]` | _required_ | feature column(s) held fixed |
+| `fixed_values` | `ndarray (n_points, len(fixed_indices))` | _required_ | values to evaluate at |
+| `data_x` | `ndarray (n_samples, n_features)` | _required_ | background data |
+
+**Returns**
+
+| Type | Description |
+|------|-------------|
+| `tuple[list, ndarray]` | per-stage $(C_+, C_-)$ constants, and branch curves $[f_+^{(0)}, f_-^{(0)}, f_+^{(1)}, \dots]$ |
+
+### `compute_first_order_partial_dependence_functions` { #tsl-pd1 }
+
+<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+
+```python
+TSL.compute_first_order_partial_dependence_functions(values_x, data_x) -> list
+```
+
+1D partial dependence for **every** feature at once.
+
+**Parameters**
+
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `values_x` | `ndarray (grid_points, n_features)` | _required_ | evaluation grid (column $j$ supplies $x_j$) |
+| `data_x` | `ndarray (n_samples, n_features)` | _required_ | background data |
+
+**Returns**
+
+| Type | Description |
+|------|-------------|
+| `list` | one `(constants_per_stage, pd_values)` entry per feature |
+
+### `compute_ice_curves` { #tsl-ice }
+
+<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+
+```python
+TSL.compute_ice_curves(observations, feature_index, x_range, data_x) -> np.ndarray
+```
+
+Individual Conditional Expectation curves: sweep one feature for each given observation.
+
+**Parameters**
+
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `observations` | `ndarray (n_obs, n_features)` | _required_ | rows to trace |
+| `feature_index` | `int` | _required_ | feature to vary |
+| `x_range` | `ndarray (n_range,)` | _required_ | values to sweep |
+| `data_x` | `ndarray (n_samples, n_features)` | _required_ | background data |
+
+**Returns**
+
+| Type | Description |
+|------|-------------|
+| `ndarray (n_obs, n_range, 2·n_stages)` | ICE curves, scaled by `scaling_plus`/`scaling_minus` |
+
+### `compute_per_stage_feature_importance` { #tsl-fi-stage }
+
+<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+
+```python
+TSL.compute_per_stage_feature_importance(data_x) -> tuple[np.ndarray, np.ndarray]
+```
+
+**Parameters**
+
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `data_x` | `ndarray (n_samples, n_features)` | _required_ | data to evaluate over |
+
+**Returns**
+
+| Type | Description |
+|------|-------------|
+| `tuple[ndarray, ndarray]` | `(backbone, tilt)` importance, each `(n_stages, n_features)` — $\mathrm{Var}[\log b_j]$ and $\mathrm{Var}[d_j]$ |
+
+### `compute_aggregated_feature_importance` { #tsl-fi-agg }
+
+<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+
+```python
+TSL.compute_aggregated_feature_importance(data_x)
+    -> tuple[np.ndarray, np.ndarray, np.ndarray]
+```
+
+Energy-weighted roll-up of the per-stage importances.
+
+**Parameters**
+
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `data_x` | `ndarray (n_samples, n_features)` | _required_ | data to evaluate over |
+
+**Returns**
+
+| Type | Description |
+|------|-------------|
+| `tuple[ndarray, ndarray, ndarray]` | `(global_backbone, global_tilt, stage_weights)`, each 1D |
+
+### `compute_combined_feature_importance` { #tsl-fi-combined }
+
+<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+
+```python
+TSL.compute_combined_feature_importance(data_x, gamma=1.0)
+    -> tuple[np.ndarray, np.ndarray, np.ndarray]
+```
 
 A single combined importance $I_j = I_j^b + \gamma\, I_j^d$ per feature.
 
-- **`gamma`** — weight on the tilt component (default `1.0`).
-- **Returns** `(combined, backbone, tilt)`, each a 1D array over features.
+**Parameters**
 
-### `stage_predictors` (property)
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `data_x` | `ndarray (n_samples, n_features)` | _required_ | data to evaluate over |
+| `gamma` | `float` | `1.0` | weight on the tilt component |
 
-The list of [`StagePredictor`](#stagepredictor) objects making up the model.
+**Returns**
+
+| Type | Description |
+|------|-------------|
+| `tuple[ndarray, ndarray, ndarray]` | `(combined, backbone, tilt)`, each 1D over features |
+
+### `stage_predictors` { #tsl-stage-predictors }
+
+<p class="api-sig"><span class="api-tag api-tag-property">property</span></p>
+
+The stages of the model. **Type:** `list[StagePredictor]`.
 
 ---
 
 ## `GridTensor`
 
-One fitted separable component (see [GridTensor](grid-tensor.md) for the internals).
+<span class="api-tag api-tag-class">class</span> &nbsp; `tsl_py.GridTensor` — one fitted separable component (internals: [GridTensor](grid-tensor.md)).
 
-### `GridTensor.fit(x, y, n_iter, split_try, colsample_bytree, complexity_penalty=0.0, seed=42)` (classmethod)
+### `fit` { #gridtensor-fit }
+
+<p class="api-sig"><span class="api-tag api-tag-classmethod">classmethod</span></p>
+
+```python
+GridTensor.fit(x, y, n_iter, split_try, colsample_bytree,
+               complexity_penalty=0.0, seed=42) -> tuple[GridTensor, FitResult]
+```
 
 Fit a single grid tensor (no boosting, no bagging).
 
-- **Returns** `(GridTensor, FitResult)`.
+**Parameters**
 
-### `predict(x)`
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `x` | `ndarray (n_samples, n_features)` | _required_ | training features |
+| `y` | `ndarray (n_samples,)` | _required_ | training targets |
+| `n_iter` | `int` | _required_ | split budget |
+| `split_try` | `int` | _required_ | candidate split positions |
+| `colsample_bytree` | `float` | _required_ | fraction of features per split |
+| `complexity_penalty` | `float` | `0.0` | penalty discouraging extra splits |
+| `seed` | `int` | `42` | RNG seed |
 
-- **`x`** — `(n_samples, n_features)`.
-- **Returns** `(n_samples,)` predictions for this component.
+**Returns** — `tuple[GridTensor, FitResult]`.
 
-### Attributes
+### `predict` { #gridtensor-predict }
 
-Read-only views of the fitted two-tensor: `splits`, `intervals`, `backbone_values`
-($b_j$ per interval per axis), `tilt_values` ($d_j$), `lambda_plus`, `lambda_minus`,
-`mean_factor` / `grid_values` (the per-interval $\prod_j b_j e^{d_j}$), and the legacy
-`scaling` (ignored in two-tensor mode).
+<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+
+```python
+GridTensor.predict(x) -> np.ndarray
+```
+
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `x` | `ndarray (n_samples, n_features)` | _required_ | features |
+
+**Returns** — `ndarray (n_samples,)`, this component's prediction.
+
+### Attributes { #gridtensor-attributes }
+
+<p class="api-sig"><span class="api-tag api-tag-attr">attributes</span></p>
+
+| Name | Type | Description |
+|------|------|-------------|
+| `splits` | `list[list[float]]` | split thresholds per axis |
+| `intervals` | `list` | interval count/bounds per axis |
+| `backbone_values` | `list[list[float]]` | $b_j \ge 0$ per interval per axis |
+| `tilt_values` | `list[list[float]]` | $d_j \in \mathbb{R}$ per interval per axis |
+| `lambda_plus`, `lambda_minus` | `float` | non-negative branch scalars |
+| `mean_factor` / `grid_values` | `list` | per-interval $\prod_j b_j e^{d_j}$ |
+| `scaling` | `float` | legacy; ignored in two-tensor mode |
 
 ---
 
 ## `StagePredictor`
 
-One boosting stage (see [StagePredictor](stage-predictor.md)).
+<span class="api-tag api-tag-class">class</span> &nbsp; `tsl_py.StagePredictor` — one boosting stage ([details](stage-predictor.md)).
 
-### `predict(x)`
+### `predict` { #stagepredictor-predict }
 
-- **Returns** the stage's contribution `(n_samples,)`, with OLS scaling applied.
+<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
 
-### Attributes
+```python
+StagePredictor.predict(x) -> np.ndarray
+```
 
-`grid_tensors` (the bag), `combined_grid_tensor` (the aggregated primary grid),
-`candidate_indices` (kept after similarity filtering), `scaling_plus`, `scaling_minus`.
+| Name | Type | Default | Description |
+|------|------|:--:|-------------|
+| `x` | `ndarray (n_samples, n_features)` | _required_ | features |
+
+**Returns** — `ndarray (n_samples,)`, the stage's contribution **with OLS scaling applied**.
+
+### Attributes { #stagepredictor-attributes }
+
+<p class="api-sig"><span class="api-tag api-tag-attr">attributes</span></p>
+
+| Name | Type | Description |
+|------|------|-------------|
+| `grid_tensors` | `list[GridTensor]` | the bag of fitted components |
+| `combined_grid_tensor` | `GridTensor` | the aggregated primary grid |
+| `candidate_indices` | `list[int] \| None` | bags kept after similarity filtering |
+| `scaling_plus`, `scaling_minus` | `float \| None` | OLS coefficients for $f_+$ and $-f_-$ |
 
 ---
 
 ## `FitResult`
 
-Returned alongside a fitted model. Read-only attributes:
+<span class="api-tag api-tag-class">class</span> &nbsp; `tsl_py.FitResult` — training diagnostics, returned alongside a fitted model.
 
-- **`err`** — final training loss.
-- **`residuals`** — `(n_samples,)` training residuals.
-- **`y_hat`** — `(n_samples,)` training predictions.
+### Attributes { #fitresult-attributes }
+
+<p class="api-sig"><span class="api-tag api-tag-attr">attributes</span></p>
+
+| Name | Type | Description |
+|------|------|-------------|
+| `err` | `float` | final training loss |
+| `residuals` | `ndarray (n_samples,)` | training residuals |
+| `y_hat` | `ndarray (n_samples,)` | training predictions |
 
 ---
 
@@ -246,5 +518,5 @@ VIRTUAL_ENV=/Users/jin/Documents/TSL/.venv \
   /Users/jin/Documents/TSL/.venv/bin/maturin develop
 ```
 
-Tests run through Python (`python -m pytest python/tests/`); the cdylib can't link
-libpython for `cargo test` on Linux. See [Getting started](../guides/getting-started.md).
+Tests run through Python (`python -m pytest python/tests/`). See
+[Getting started](../guides/getting-started.md).
