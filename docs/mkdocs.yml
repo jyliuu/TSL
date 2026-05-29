@@ -13,10 +13,13 @@ docs_dir: docs
 
 theme:
   name: material
+  logo: assets/img/logo.svg
+  favicon: assets/img/logo.svg
   icon:
     repo: fontawesome/brands/github
   features:
-    - navigation.sections
+    # Collapsible (drop-down) sidebar groups: omit navigation.sections so each
+    # top-level group expands/collapses on click.
     - navigation.indexes
     - navigation.top
     - navigation.tracking
@@ -64,6 +67,7 @@ nav:
   - Guide:
       - Getting started: guides/getting-started.md
       - Python API: code/python-api.md
+      - Plotting: code/plotting.md
       - Hyperparameters: guides/hyperparameters.md
       - Examples: guides/examples.md
       - Visualizing a fit: guides/visualizing.md
@@ -80,4 +84,3 @@ nav:
       - Fitting: math/fitting.md
       - Bagging & aggregation: math/bagging-aggregation.md
       - Partial dependence: math/partial-dependence.md
-      - Theory: math/theory.md

@@ -63,6 +63,12 @@ summaries up to a single scalar normalizer per stage and sign branch. TSL's 1D P
 therefore recover the fitted factor shapes (up to the constants $C^{(\ell)}_{\pm,j}$)
 **without a surrogate**.
 
+<figure markdown="span">
+  ![1D partial dependence on latitude](../assets/img/california_pd_latitude.png){ width="49%" }
+  ![1D partial dependence on longitude](../assets/img/california_pd_longitude.png){ width="49%" }
+  <figcaption>California housing: TSL's 1D PD on latitude/longitude retains the localized coastal peaks (the exact factor shapes), where marginalization-based baselines flatten them.</figcaption>
+</figure>
+
 !!! note "Implementation note — empirical marginalization"
     `TSL.compute_partial_dependence_function` (`tsl-py/src/lib.rs`) marginalizes over the
     **empirical joint** distribution of the other features, not a product-of-marginals
@@ -103,6 +109,11 @@ quadratic effect of $x_1$ while the tilt stays small, so the magnitude is expose
 though the signed PD cancels. This is the practical payoff of the two-tensor form. The
 `synthetic.py` example reproduces the figure; see [Examples](../guides/examples.md).
 
+<figure markdown="span">
+  ![Signed 1D PD on x1 across models for the masked interaction](../assets/img/synthetic_pd_x1_all_models.png){ width="100%" }
+  <figcaption>Masked interaction: the signed 1D PD of $x_1$ is ≈0 for every model (TSL, EBM, XGBoost), matching the population identity — yet TSL's backbone branch still recovers the quadratic effect.</figcaption>
+</figure>
+
 ## Derived diagnostics
 
 The Python layer builds several interpretation primitives on top of the PD math:
@@ -115,5 +126,10 @@ The Python layer builds several interpretation primitives on top of the PD math:
   `compute_aggregated_feature_importance` and `compute_combined_feature_importance` roll
   these up across stages weighted by stage energy.
 
+<figure markdown="span">
+  ![ICE curves on x1 for TSL](../assets/img/ice_x1_tsl.png){ width="80%" }
+  <figcaption>ICE curves trace each observation's prediction as one feature varies — the per-observation analogue of partial dependence.</figcaption>
+</figure>
+
 All of these are plotted by the `tsl_py.plot` helpers — see the
-[Python API](../code/python-api.md#plotting-tsl_pyplot).
+[Plotting reference](../code/plotting.md).

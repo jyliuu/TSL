@@ -1,37 +1,57 @@
 # TSL — Tensor Separation Learning
 
-**TSL** is a glass-box regression model. A fitted model is a sum of *stages*; each stage
-is the ordered difference of two non-negative rank-1 products of univariate functions:
+**TSL** is a glass-box regression model: it fits accurately *and* lets you read its learned
+structure directly off one-dimensional plots — with no post-hoc surrogate. A fitted model
+is a small sum of *stages*, each a separable product of per-feature curves, so every
+feature's effect is recoverable **exactly** from a partial-dependence curve.
 
-$$
-\hat{m}(\mathbf{x}) = \sum_{\ell=1}^{R}
-\Bigl(
-  \lambda_{+}^{(\ell)}\prod_{j=1}^{p}\hat{m}_{+,j}^{(\ell)}(x_j)
-  \;-\;
-  \lambda_{-}^{(\ell)}\prod_{j=1}^{p}\hat{m}_{-,j}^{(\ell)}(x_j)
-\Bigr),
-\qquad
-\hat{m}_{\pm,j}^{(\ell)} > 0,\quad \lambda_{\pm}^{(\ell)} \ge 0 .
-$$
+Everything below is produced by TSL itself (via the `tsl_py.plot` helpers) — these figures
+*are* the model, not an approximation of it.
 
-Because each stage is *separable* (a product of one-dimensional factors), its effect on
-any single feature can be read off **exactly** from a one-dimensional partial-dependence
-curve — without the marginalization artifacts that contaminate additive surrogates. This
-is what makes TSL a glass box rather than a model you explain after the fact.
+## What TSL shows you
 
-## The two-tensor / backbone–tilt form
+### Where a stage is active — the spatial backbone
 
-Each univariate factor is reparametrized into a **backbone** \(b_j \ge 0\) (a magnitude
-gate) and a **tilt** \(d_j \in \mathbb{R}\) (a signed direction):
+<figure markdown="span">
+  ![California spatial backbone and per-stage 2D partial dependence](assets/img/california_spatial_backbone.png){ width="100%" }
+  <figcaption>California housing: the <em>backbone</em> gates where each stage is active (along the coast near LA, SF, and the Bay Area), and the 2D partial dependence shows the signed correction each stage applies there.</figcaption>
+</figure>
 
-$$
-\hat{m}_{\pm,j}^{(\ell)}(x_j) = b_j^{(\ell)}(x_j)\, e^{\pm d_j^{(\ell)}(x_j)},
-\qquad\Longrightarrow\qquad
-\hat{m}^{(\ell)}(\mathbf{x}) = 2\, b^{(\ell)}(\mathbf{x})\, \sinh\!\bigl(d^{(\ell)}(\mathbf{x})\bigr).
-$$
+### Faithful 1-D partial dependence
 
-A near-zero backbone switches the stage off; the summed tilt sets its sign and size. See
-[The model](math/model.md) for the full derivation.
+<figure>
+  <div style="display:flex; gap:0.75rem; align-items:flex-start;">
+    <img src="assets/img/california_pd_latitude.png" alt="1D partial dependence on latitude" style="width:50%;">
+    <img src="assets/img/california_pd_longitude.png" alt="1D partial dependence on longitude" style="width:50%;">
+  </div>
+  <figcaption>TSL's 1D PD curves keep the localized spatial peaks; marginalization-based baselines flatten them. For a separable model the 1D curve recovers the factor shape exactly.</figcaption>
+</figure>
+
+### Feature importance — magnitude vs. direction
+
+<figure markdown="span">
+  ![Per-stage backbone and tilt feature importance](assets/img/california_feature_importance.png){ width="100%" }
+  <figcaption>Importance split into backbone (how much a feature gates the stage) and tilt (how much it pushes the signed direction), per stage.</figcaption>
+</figure>
+
+### Local, per-observation explanations
+
+<figure markdown="span">
+  ![Local explanation for a coastal point](assets/img/california_local_interp_coastal.png){ width="100%" }
+  <figcaption>A coastal home: an intercept-absorbed backbone plus a tilt waterfall explains the single prediction.</figcaption>
+</figure>
+
+<figure markdown="span">
+  ![Local explanation for a desert point](assets/img/california_local_interp_desert.png){ width="100%" }
+  <figcaption>An inland (desert) home, for contrast.</figcaption>
+</figure>
+
+!!! tip "Read the mathematics — it is short, and it is the point"
+    These plots only mean something once you know what a **backbone**, a **tilt**, and a
+    **stage** are. We **strongly recommend** reading the **[Mathematics](math/model.md)**
+    section before relying on the figures: start with [The model](math/model.md), then
+    [Partial dependence](math/partial-dependence.md). It is what makes TSL interpretable
+    rather than just another regressor.
 
 ## How the codebase is organized
 
@@ -39,7 +59,7 @@ The model is a three-level hierarchy, and the `src/` module tree mirrors it exac
 
 | Level | Type | What it is | Docs |
 |------|------|------------|------|
-| 1 | `GridTensor` | one fitted separable component (backbone/tilt + \(\lambda_\pm\)) | [GridTensor](code/grid-tensor.md) |
+| 1 | `GridTensor` | one fitted separable component (backbone/tilt + $\lambda_\pm$) | [GridTensor](code/grid-tensor.md) |
 | 2 | `StagePredictor` | one boosting stage: a bag of `GridTensor`s + OLS scaling | [StagePredictor](code/stage-predictor.md) |
 | 3 | `TSL` | the boosted model: a `Vec<StagePredictor>` summed | [TSL (forest)](code/forest.md) |
 
@@ -53,14 +73,8 @@ with a scikit-learn API ([Python API](code/python-api.md)), and
 - **New to TSL?** [Getting started](guides/getting-started.md) — install, fit, predict.
 - **Using the model?** The [Python API](code/python-api.md), the
   [Hyperparameters](guides/hyperparameters.md) reference, then [Examples](guides/examples.md).
+- **Understanding the model?** The [Mathematics](math/model.md) section — [Notation](math/index.md) →
+  [The model](math/model.md) → [Fitting](math/fitting.md) →
+  [Partial dependence](math/partial-dependence.md).
 - **Working on the code?** Start with [Architecture](code/architecture.md) and its two
   critical invariants, then the per-module pages.
-- **Want the math?** [Notation](math/index.md) → [The model](math/model.md) →
-  [Fitting](math/fitting.md) → [Partial dependence](math/partial-dependence.md) →
-  [Theory](math/theory.md).
-
-!!! note "Code-faithful documentation"
-    These docs describe **what the implementation actually does**. Where a clean
-    mathematical statement is realized by a slightly different but equivalent mechanism in
-    code, a neutral *Implementation note* points it out. The mathematics itself is drawn
-    from the TSL paper.

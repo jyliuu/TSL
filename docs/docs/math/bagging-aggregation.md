@@ -10,7 +10,7 @@ math; the code lives in [`StagePredictor`](../code/stage-predictor.md)
 An arithmetic mean of products is **not** a product, so averaging the stage predictors
 $\hat{m}_{\pm}^{(\ell,c)}$ would break the separable structure. Instead, the per-feature
 components $\hat{m}_{\pm,j}^{(\ell,c)}$ are averaged. But factor-wise averaging is fragile:
-separable representations are [non-identifiable](theory.md#identifiability-and-stability),
+separable representations are [non-identifiable](model.md#identifiability-and-stability),
 so independently fitted factors need not lie in a comparable gauge — two grids can fit the
 *same* stage yet sit at opposite ends of the $(\lambda_+,\lambda_-)$ spectrum. The
 align → normalize → reference → filter → average pipeline below resolves this.
@@ -93,7 +93,12 @@ determines how the combined grid is turned into stage predictions. See
 ## The bimodal-alignment example
 
 There is a worked case where bagged grids converge to two distinct backbone representations
-of one fitted stage (a consequence of [non-identifiability](theory.md#identifiability-and-stability)).
+of one fitted stage (a consequence of [non-identifiability](model.md#identifiability-and-stability)).
 Without the similarity filter, averaging across the two branches degrades the fit; the
 reference + trim step keeps a single canonical branch. The `synthetic2.py` example
 reproduces this diagnostic — see [Examples](../guides/examples.md).
+
+<figure markdown="span">
+  ![Bagged backbones splitting into two modes at epoch 0](../assets/img/backbone_bimodal_epoch0.png){ width="90%" }
+  <figcaption>Bagged grids at epoch 0 settling into two distinct backbone representations of the same stage — the bimodality the align-then-filter step is designed to collapse.</figcaption>
+</figure>
