@@ -60,6 +60,24 @@ This runs `bench_california_housing`, `bench_cps88_wages`, and
 and printing per-config wall time and train/test MSE. Adjust within the
 test bodies to add datasets.
 
+## Criterion benchmark + CI
+
+`benches/fit.rs` is a criterion benchmark of the core fit on California
+Housing, with two functions — `fit/exact` and `fit/binned255` — over a fixed
+seeded workload (see the consts at the top of the file).
+
+```sh
+cargo bench --bench fit                       # run locally
+cargo bench --bench fit -- --save-baseline a  # save a named baseline
+critcmp a b                                   # diff two baselines
+```
+
+`.github/workflows/bench.yml` runs this on every pull request: it measures the
+PR head and its merge base on the *same* runner and writes a `critcmp` delta to
+the run's job summary. It is comment-only (never gates the build) because
+GitHub-hosted runners are too noisy for reliable absolute regression gating —
+treat sub-10% moves as noise.
+
 ## Past findings
 
 - `docs/perf/findings.md` — the baseline profile that motivated histogram
