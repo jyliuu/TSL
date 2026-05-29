@@ -19,13 +19,11 @@ page.
 
 ---
 
-## `TSLRegressor`
+## <span class="api-tag api-tag-class">class</span> `TSLRegressor` { #tslregressor }
 
-<span class="api-tag api-tag-class">class</span> &nbsp; `tsl_py.TSLRegressor` — a scikit-learn–compatible regressor wrapping [`TSL`](#tsl).
-
-### `TSLRegressor` { #tslregressor-init }
-
-<p class="api-sig"><span class="api-tag api-tag-method">constructor</span></p>
+A scikit-learn–compatible regressor wrapping [`TSL`](#tsl). Constructed with flat
+hyperparameters; no fitting happens until [`fit`](#tslregressor-fit). See the
+[Hyperparameters](../guides/hyperparameters.md) reference for tuning guidance.
 
 ```python
 TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
@@ -35,9 +33,6 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
              tilt_rho=0.0, split_strategy="random", top_k=10, must_fill_all_k=True,
              similarity_threshold=0.0, bagged=False, seed=42, verbosity=1, visualdb=None)
 ```
-
-Stores hyperparameters; no fitting happens until [`fit`](#tslregressor-fit). See the
-[Hyperparameters](../guides/hyperparameters.md) reference for tuning guidance.
 
 **Parameters**
 
@@ -67,9 +62,7 @@ Stores hyperparameters; no fitting happens until [`fit`](#tslregressor-fit). See
 | `verbosity` | `int` | `1` | log verbosity |
 | `visualdb` | `str \| None` | `None` | evo-logging SQLite path |
 
-### `fit` { #tslregressor-fit }
-
-<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+### <span class="api-tag api-tag-method">method</span> `fit` { #tslregressor-fit }
 
 ```python
 TSLRegressor.fit(X, y) -> TSLRegressor
@@ -91,9 +84,7 @@ Fit the model. Delegates to [`TSL.fit`](#tsl-fit), storing the fitted core model
 |------|-------------|
 | `TSLRegressor` | `self`, fitted (scikit-learn convention) |
 
-### `predict` { #tslregressor-predict }
-
-<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+### <span class="api-tag api-tag-method">method</span> `predict` { #tslregressor-predict }
 
 ```python
 TSLRegressor.predict(X) -> np.ndarray
@@ -111,9 +102,7 @@ TSLRegressor.predict(X) -> np.ndarray
 |------|-------------|
 | `ndarray (n_samples,)` | predictions |
 
-### `score` { #tslregressor-score }
-
-<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+### <span class="api-tag api-tag-method">method</span> `score` { #tslregressor-score }
 
 ```python
 TSLRegressor.score(X, y) -> float
@@ -134,9 +123,7 @@ The coefficient of determination $R^2$ (via scikit-learn's `r2_score`).
 |------|-------------|
 | `float` | $R^2$ of `predict(X)` against `y` |
 
-### `save` { #tslregressor-save }
-
-<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+### <span class="api-tag api-tag-method">method</span> `save` { #tslregressor-save }
 
 ```python
 TSLRegressor.save(path) -> None
@@ -146,9 +133,7 @@ TSLRegressor.save(path) -> None
 |------|------|:--:|-------------|
 | `path` | `str` | _required_ | destination file (binary) |
 
-### `load` { #tslregressor-load }
-
-<p class="api-sig"><span class="api-tag api-tag-classmethod">classmethod</span></p>
+### <span class="api-tag api-tag-classmethod">classmethod</span> `load` { #tslregressor-load }
 
 ```python
 TSLRegressor.load(path) -> TSLRegressor
@@ -166,21 +151,18 @@ Load a model saved with [`save`](#tslregressor-save); also reads the legacy MPF 
 |------|-------------|
 | `TSLRegressor` | a fitted estimator |
 
-### `stage_predictors` { #tslregressor-stage-predictors }
-
-<p class="api-sig"><span class="api-tag api-tag-property">property</span></p>
+### <span class="api-tag api-tag-property">property</span> `stage_predictors` { #tslregressor-stage-predictors }
 
 The list of fitted [`StagePredictor`](#stagepredictor) objects. **Type:** `list[StagePredictor]`.
 
 ---
 
-## `TSL`
+## <span class="api-tag api-tag-class">class</span> `TSL` { #tsl }
 
-<span class="api-tag api-tag-class">class</span> &nbsp; `tsl_py.TSL` — the core boosted model. Use it directly for the interpretation methods below; otherwise prefer [`TSLRegressor`](#tslregressor).
+The core boosted model. Use it directly for the interpretation methods below; otherwise
+prefer [`TSLRegressor`](#tslregressor).
 
-### `fit` { #tsl-fit }
-
-<p class="api-sig"><span class="api-tag api-tag-classmethod">classmethod</span></p>
+### <span class="api-tag api-tag-classmethod">classmethod</span> `fit` { #tsl-fit }
 
 ```python
 TSL.fit(x, y, epochs, decay, n_trees, n_iter, split_try, colsample_bytree, alpha,
@@ -198,7 +180,7 @@ Fit a boosted TSL model.
 |------|------|:--:|-------------|
 | `x` | `ndarray (n_samples, n_features)` | _required_ | training features (C-contiguous `float64`) |
 | `y` | `ndarray (n_samples,)` | _required_ | training targets |
-| _hyperparameters_ | — | — | same names/types as the [`TSLRegressor` constructor](#tslregressor-init) |
+| _hyperparameters_ | — | — | same names/types as the [`TSLRegressor` constructor](#tslregressor) |
 
 **Returns**
 
@@ -206,9 +188,7 @@ Fit a boosted TSL model.
 |------|-------------|
 | `tuple[TSL, FitResult]` | the fitted model and its training diagnostics |
 
-### `predict` { #tsl-predict }
-
-<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+### <span class="api-tag api-tag-method">method</span> `predict` { #tsl-predict }
 
 ```python
 TSL.predict(x) -> np.ndarray
@@ -224,9 +204,7 @@ TSL.predict(x) -> np.ndarray
 |------|-------------|
 | `ndarray (n_samples,)` | sum of all stage predictions |
 
-### `save` { #tsl-save }
-
-<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+### <span class="api-tag api-tag-method">method</span> `save` { #tsl-save }
 
 ```python
 TSL.save(path) -> None
@@ -236,9 +214,7 @@ TSL.save(path) -> None
 |------|------|:--:|-------------|
 | `path` | `str` | _required_ | destination binary file |
 
-### `load` { #tsl-load }
-
-<p class="api-sig"><span class="api-tag api-tag-classmethod">classmethod</span></p>
+### <span class="api-tag api-tag-classmethod">classmethod</span> `load` { #tsl-load }
 
 ```python
 TSL.load(path) -> TSL
@@ -252,9 +228,7 @@ Reads the native binary format and the legacy MPF `.bin` format.
 
 **Returns** — `TSL`.
 
-### `compute_partial_dependence_function` { #tsl-pd }
-
-<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+### <span class="api-tag api-tag-method">method</span> `compute_partial_dependence_function` { #tsl-pd }
 
 ```python
 TSL.compute_partial_dependence_function(fixed_indices, fixed_values, data_x)
@@ -278,9 +252,7 @@ marginalizing over the **empirical joint** of the non-fixed features.
 |------|-------------|
 | `tuple[list, ndarray]` | per-stage $(C_+, C_-)$ constants, and branch curves $[f_+^{(0)}, f_-^{(0)}, f_+^{(1)}, \dots]$ |
 
-### `compute_first_order_partial_dependence_functions` { #tsl-pd1 }
-
-<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+### <span class="api-tag api-tag-method">method</span> `compute_first_order_partial_dependence_functions` { #tsl-pd1 }
 
 ```python
 TSL.compute_first_order_partial_dependence_functions(values_x, data_x) -> list
@@ -301,9 +273,7 @@ TSL.compute_first_order_partial_dependence_functions(values_x, data_x) -> list
 |------|-------------|
 | `list` | one `(constants_per_stage, pd_values)` entry per feature |
 
-### `compute_ice_curves` { #tsl-ice }
-
-<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+### <span class="api-tag api-tag-method">method</span> `compute_ice_curves` { #tsl-ice }
 
 ```python
 TSL.compute_ice_curves(observations, feature_index, x_range, data_x) -> np.ndarray
@@ -326,9 +296,7 @@ Individual Conditional Expectation curves: sweep one feature for each given obse
 |------|-------------|
 | `ndarray (n_obs, n_range, 2·n_stages)` | ICE curves, scaled by `scaling_plus`/`scaling_minus` |
 
-### `compute_per_stage_feature_importance` { #tsl-fi-stage }
-
-<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+### <span class="api-tag api-tag-method">method</span> `compute_per_stage_feature_importance` { #tsl-fi-stage }
 
 ```python
 TSL.compute_per_stage_feature_importance(data_x) -> tuple[np.ndarray, np.ndarray]
@@ -346,9 +314,7 @@ TSL.compute_per_stage_feature_importance(data_x) -> tuple[np.ndarray, np.ndarray
 |------|-------------|
 | `tuple[ndarray, ndarray]` | `(backbone, tilt)` importance, each `(n_stages, n_features)` — $\mathrm{Var}[\log b_j]$ and $\mathrm{Var}[d_j]$ |
 
-### `compute_aggregated_feature_importance` { #tsl-fi-agg }
-
-<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+### <span class="api-tag api-tag-method">method</span> `compute_aggregated_feature_importance` { #tsl-fi-agg }
 
 ```python
 TSL.compute_aggregated_feature_importance(data_x)
@@ -369,9 +335,7 @@ Energy-weighted roll-up of the per-stage importances.
 |------|-------------|
 | `tuple[ndarray, ndarray, ndarray]` | `(global_backbone, global_tilt, stage_weights)`, each 1D |
 
-### `compute_combined_feature_importance` { #tsl-fi-combined }
-
-<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+### <span class="api-tag api-tag-method">method</span> `compute_combined_feature_importance` { #tsl-fi-combined }
 
 ```python
 TSL.compute_combined_feature_importance(data_x, gamma=1.0)
@@ -393,21 +357,17 @@ A single combined importance $I_j = I_j^b + \gamma\, I_j^d$ per feature.
 |------|-------------|
 | `tuple[ndarray, ndarray, ndarray]` | `(combined, backbone, tilt)`, each 1D over features |
 
-### `stage_predictors` { #tsl-stage-predictors }
-
-<p class="api-sig"><span class="api-tag api-tag-property">property</span></p>
+### <span class="api-tag api-tag-property">property</span> `stage_predictors` { #tsl-stage-predictors }
 
 The stages of the model. **Type:** `list[StagePredictor]`.
 
 ---
 
-## `GridTensor`
+## <span class="api-tag api-tag-class">class</span> `GridTensor` { #gridtensor }
 
-<span class="api-tag api-tag-class">class</span> &nbsp; `tsl_py.GridTensor` — one fitted separable component (internals: [GridTensor](grid-tensor.md)).
+One fitted separable component (internals: [GridTensor](grid-tensor.md)).
 
-### `fit` { #gridtensor-fit }
-
-<p class="api-sig"><span class="api-tag api-tag-classmethod">classmethod</span></p>
+### <span class="api-tag api-tag-classmethod">classmethod</span> `fit` { #gridtensor-fit }
 
 ```python
 GridTensor.fit(x, y, n_iter, split_try, colsample_bytree,
@@ -430,9 +390,7 @@ Fit a single grid tensor (no boosting, no bagging).
 
 **Returns** — `tuple[GridTensor, FitResult]`.
 
-### `predict` { #gridtensor-predict }
-
-<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+### <span class="api-tag api-tag-method">method</span> `predict` { #gridtensor-predict }
 
 ```python
 GridTensor.predict(x) -> np.ndarray
@@ -444,9 +402,7 @@ GridTensor.predict(x) -> np.ndarray
 
 **Returns** — `ndarray (n_samples,)`, this component's prediction.
 
-### Attributes { #gridtensor-attributes }
-
-<p class="api-sig"><span class="api-tag api-tag-attr">attributes</span></p>
+### <span class="api-tag api-tag-attr">attributes</span> Attributes { #gridtensor-attributes }
 
 | Name | Type | Description |
 |------|------|-------------|
@@ -460,13 +416,11 @@ GridTensor.predict(x) -> np.ndarray
 
 ---
 
-## `StagePredictor`
+## <span class="api-tag api-tag-class">class</span> `StagePredictor` { #stagepredictor }
 
-<span class="api-tag api-tag-class">class</span> &nbsp; `tsl_py.StagePredictor` — one boosting stage ([details](stage-predictor.md)).
+One boosting stage ([details](stage-predictor.md)).
 
-### `predict` { #stagepredictor-predict }
-
-<p class="api-sig"><span class="api-tag api-tag-method">method</span></p>
+### <span class="api-tag api-tag-method">method</span> `predict` { #stagepredictor-predict }
 
 ```python
 StagePredictor.predict(x) -> np.ndarray
@@ -478,9 +432,7 @@ StagePredictor.predict(x) -> np.ndarray
 
 **Returns** — `ndarray (n_samples,)`, the stage's contribution **with OLS scaling applied**.
 
-### Attributes { #stagepredictor-attributes }
-
-<p class="api-sig"><span class="api-tag api-tag-attr">attributes</span></p>
+### <span class="api-tag api-tag-attr">attributes</span> Attributes { #stagepredictor-attributes }
 
 | Name | Type | Description |
 |------|------|-------------|
@@ -491,13 +443,11 @@ StagePredictor.predict(x) -> np.ndarray
 
 ---
 
-## `FitResult`
+## <span class="api-tag api-tag-class">class</span> `FitResult` { #fitresult }
 
-<span class="api-tag api-tag-class">class</span> &nbsp; `tsl_py.FitResult` — training diagnostics, returned alongside a fitted model.
+Training diagnostics, returned alongside a fitted model.
 
-### Attributes { #fitresult-attributes }
-
-<p class="api-sig"><span class="api-tag api-tag-attr">attributes</span></p>
+### <span class="api-tag api-tag-attr">attributes</span> Attributes { #fitresult-attributes }
 
 | Name | Type | Description |
 |------|------|-------------|

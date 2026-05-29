@@ -18,13 +18,24 @@
 .api-tag {
   display: inline-block;
   font-family: var(--md-code-font-family);
-  font-size: 0.6rem;
+  font-size: 0.6em;             /* scales with the heading it sits in */
   font-weight: 700;
   letter-spacing: 0.03em;
-  text-transform: uppercase;
-  padding: 0.06rem 0.45rem;
-  border-radius: 0.6rem;
+  text-transform: lowercase;
+  padding: 0.1em 0.5em;
+  margin-right: 0.45em;          /* gap before the symbol name */
+  border-radius: 0.6em;
   vertical-align: middle;
+  position: relative;
+  top: -0.08em;
+}
+/* Keep the kind word neutral in the right-hand table of contents. */
+.md-nav--secondary .api-tag {
+  background: transparent !important;
+  color: var(--md-default-fg-color--light) !important;
+  padding: 0;
+  margin-right: 0.35em;
+  font-size: 0.85em;
 }
 .api-tag-class       { background: rgba(99, 102, 241, 0.18); color: #6366f1; }
 .api-tag-method      { background: rgba(59, 130, 246, 0.18); color: #3b82f6; }
