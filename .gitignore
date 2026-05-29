@@ -25,6 +25,12 @@ venv/
 # Testing
 .pytest_cache/
 
+# MkDocs build output
+docs/site/
+
+# Local-only notes (never committed)
+*.local.md
+
 # macOS
 .DS_Store
 
