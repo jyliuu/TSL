@@ -61,6 +61,19 @@ extra_javascript:
 
 nav:
   - Home: index.md
+  - Guide:
+      - Getting started: guides/getting-started.md
+      - Python API: code/python-api.md
+      - Hyperparameters: guides/hyperparameters.md
+      - Examples: guides/examples.md
+      - Visualizing a fit: guides/visualizing.md
+  - Codebase:
+      - Architecture: code/architecture.md
+      - GridTensor (core): code/grid-tensor.md
+      - StagePredictor: code/stage-predictor.md
+      - TSL (forest): code/forest.md
+      - Logging: code/logging.md
+      - Dashboard (tslviz): code/dashboard.md
   - Mathematics:
       - Notation: math/index.md
       - The model: math/model.md
@@ -68,16 +81,3 @@ nav:
       - Bagging & aggregation: math/bagging-aggregation.md
       - Partial dependence: math/partial-dependence.md
       - Theory: math/theory.md
-  - Codebase:
-      - Architecture: code/architecture.md
-      - GridTensor (core): code/grid-tensor.md
-      - StagePredictor: code/stage-predictor.md
-      - TSL (forest): code/forest.md
-      - Logging: code/logging.md
-      - Python API: code/python-api.md
-      - Dashboard (tslviz): code/dashboard.md
-  - Guides:
-      - Getting started: guides/getting-started.md
-      - Hyperparameters: guides/hyperparameters.md
-      - Examples: guides/examples.md
-      - Visualizing a fit: guides/visualizing.md

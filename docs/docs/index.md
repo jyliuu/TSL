@@ -50,13 +50,14 @@ with a scikit-learn API ([Python API](code/python-api.md)), and
 
 ## Where to start
 
-- **New to TSL?** Read [The model](math/model.md), then [Getting started](guides/getting-started.md).
-- **Want the math?** [Notation](math/index.md) → [Model](math/model.md) →
-  [Fitting](math/fitting.md) → [Partial dependence](math/partial-dependence.md) →
-  [Theory](math/theory.md).
+- **New to TSL?** [Getting started](guides/getting-started.md) — install, fit, predict.
+- **Using the model?** The [Python API](code/python-api.md), the
+  [Hyperparameters](guides/hyperparameters.md) reference, then [Examples](guides/examples.md).
 - **Working on the code?** Start with [Architecture](code/architecture.md) and its two
   critical invariants, then the per-module pages.
-- **Tuning a fit?** See the [Hyperparameters](guides/hyperparameters.md) reference.
+- **Want the math?** [Notation](math/index.md) → [The model](math/model.md) →
+  [Fitting](math/fitting.md) → [Partial dependence](math/partial-dependence.md) →
+  [Theory](math/theory.md).
 
 !!! note "Code-faithful documentation"
     These docs describe **what the implementation actually does**. Where a clean
