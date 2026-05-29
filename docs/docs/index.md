@@ -53,6 +53,32 @@ Everything below is produced by TSL itself (via the `tsl_py.plot` helpers) — t
     [Partial dependence](math/partial-dependence.md). It is what makes TSL interpretable
     rather than just another regressor.
 
+## Examples { #examples }
+
+The figures above come from runnable scripts in
+[`tsl-py/examples/`](https://github.com/jyliuu/TSL/tree/main/tsl-py/examples), which
+reproduce the paper's plots via the `tsl_py.plot` helpers:
+
+```bash
+python tsl-py/examples/california.py
+python tsl-py/examples/bike_sharing.py
+python tsl-py/examples/synthetic.py
+python tsl-py/examples/synthetic2.py
+```
+
+| Script | What it shows |
+|--------|---------------|
+| `california.py` | spatial backbone, 1D PD faithfulness, feature importance, local explanations |
+| `bike_sharing.py` | 2D `hour × workingday` interaction PD |
+| `synthetic.py` | the masked interaction — signed PD ≈ 0 for every model, yet the backbone recovers the effect |
+| `synthetic2.py` | bagging diagnostics (backbone bimodality + similarity filtering) |
+| `sepals_synthetic.py` | small synthetic factor-value / SepALS comparison |
+
+Each script accepts `--data-root`, `--out`, `--refit`, and `--variant`; the pretrained
+models in `examples/models/` are used by default. See the
+[examples README](https://github.com/jyliuu/TSL/blob/main/tsl-py/examples/README.md) for
+the full per-script output list and flags.
+
 ## How the codebase is organized
 
 The model is a three-level hierarchy, and the `src/` module tree mirrors it exactly:
@@ -72,7 +98,7 @@ with a scikit-learn API ([Python API](code/python-api.md)), and
 
 - **New to TSL?** [Getting started](guides/getting-started.md) — install, fit, predict.
 - **Using the model?** The [Python API](code/python-api.md), the
-  [Hyperparameters](guides/hyperparameters.md) reference, then [Examples](guides/examples.md).
+  [Hyperparameters](guides/hyperparameters.md) reference, then [Examples](#examples).
 - **Understanding the model?** [Under the hood](math/model.md) — [Notation](math/index.md) →
   [The model](math/model.md) → [Fitting](math/fitting.md) →
   [Partial dependence](math/partial-dependence.md).

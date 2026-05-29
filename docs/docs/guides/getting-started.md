@@ -76,5 +76,5 @@ Linux — exercise that crate through the Python tests, not `cargo test`.
 
 - [The model](../math/model.md) — what TSL actually fits.
 - [Hyperparameters](hyperparameters.md) — every knob, what it does, and where it maps.
-- [Examples](examples.md) — reproduce the paper figures.
+- [Examples](../index.md#examples) — reproduce the paper figures.
 - [Visualizing a fit](visualizing.md) — replay how a model was built with `tslviz`.

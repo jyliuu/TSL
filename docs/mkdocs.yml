@@ -68,7 +68,6 @@ extra_javascript:
 nav:
   - Home: index.md
   - Getting started: guides/getting-started.md
-  - Examples: guides/examples.md
   - Guide:
       - Python API: code/python-api.md
       - Plotting API: code/plotting.md

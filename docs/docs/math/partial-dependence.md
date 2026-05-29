@@ -107,7 +107,7 @@ with the population identity.
 TSL's **signed-branch** PD escapes this trap: the backbone $b_j^{(\ell)}(x_j)$ recovers the
 quadratic effect of $x_1$ while the tilt stays small, so the magnitude is exposed even
 though the signed PD cancels. This is the practical payoff of the two-tensor form. The
-`synthetic.py` example reproduces the figure; see [Examples](../guides/examples.md).
+`synthetic.py` example reproduces the figure; see [Examples](../index.md#examples).
 
 <figure markdown="span">
   ![Signed 1D PD on x1 across models for the masked interaction](../assets/img/synthetic_pd_x1_all_models.png){ width="100%" }

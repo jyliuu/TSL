@@ -96,7 +96,7 @@ There is a worked case where bagged grids converge to two distinct backbone repr
 of one fitted stage (a consequence of [non-identifiability](model.md#identifiability-and-stability)).
 Without the similarity filter, averaging across the two branches degrades the fit; the
 reference + trim step keeps a single canonical branch. The `synthetic2.py` example
-reproduces this diagnostic — see [Examples](../guides/examples.md).
+reproduces this diagnostic — see [Examples](../index.md#examples).
 
 <figure markdown="span">
   ![Bagged backbones splitting into two modes at epoch 0](../assets/img/backbone_bimodal_epoch0.png){ width="90%" }
