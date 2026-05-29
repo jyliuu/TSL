@@ -7,6 +7,13 @@ window.MathJax = {
     displayMath: [["\\[", "\\]"], ["$$", "$$"]],
     processEscapes: true,
     processEnvironments: true,
+    // tex-mml-chtml does not ship these; define them so the docs' equations render.
+    // \coloneqq → :=  ;  \mathbbm{1} → blackboard-bold indicator (same intent as the paper).
+    macros: {
+      coloneqq: "\\mathrel{:=}",
+      eqqcolon: "\\mathrel{=:}",
+      mathbbm: ["{\\mathbb{#1}}", 1],
+    },
   },
   options: {
     ignoreHtmlClass: ".*|",
