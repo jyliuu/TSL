@@ -9,44 +9,91 @@
   --md-primary-bg-color--light: rgba(255, 255, 255, 0.7);
 }
 
-/* Give the logo a touch of breathing room in the header. */
-.md-header__button.md-logo img {
-  height: 1.6rem;
+/* White rounded badge behind the logo so it reads on the dark header. */
+.md-header__button.md-logo {
+  padding: 0.2rem;
+}
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 1.5rem;
+  width: 1.5rem;
+  background: #fff;
+  border-radius: 50%;
+  padding: 0.22rem;
+  box-sizing: content-box;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 
-/* ---- API reference styling (kind tags + signatures), à la mkdocstrings ---- */
+/* ---- API reference: kind pills ----
+   Rendered via ::before keyed on the heading id / TOC href prefix, so the tag
+   shows as a rounded pill in BOTH the page heading and the right-hand table of
+   contents (the toc strips inline HTML, so a <span> would not survive there). */
+
+/* shared pill chrome */
+:is(h2, h3)[id^="cls-"]::before,
+:is(h2, h3)[id^="meth-"]::before,
+:is(h2, h3)[id^="cmeth-"]::before,
+:is(h2, h3)[id^="prop-"]::before,
+:is(h2, h3)[id^="fn-"]::before,
+.md-nav__link[href^="#cls-"]::before,
+.md-nav__link[href^="#meth-"]::before,
+.md-nav__link[href^="#cmeth-"]::before,
+.md-nav__link[href^="#prop-"]::before,
+.md-nav__link[href^="#fn-"]::before {
+  display: inline-block;
+  font-family: var(--md-code-font-family);
+  font-weight: 700;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  border-radius: 0.7em;
+  vertical-align: middle;
+}
+
+/* size: scales with the heading; fixed-small in the toc */
+:is(h2, h3)[id^="cls-"]::before,
+:is(h2, h3)[id^="meth-"]::before,
+:is(h2, h3)[id^="cmeth-"]::before,
+:is(h2, h3)[id^="prop-"]::before,
+:is(h2, h3)[id^="fn-"]::before {
+  font-size: 0.56em;
+  padding: 0.1em 0.55em;
+  margin-right: 0.5em;
+  position: relative;
+  top: -0.12em;
+}
+.md-nav__link[href^="#cls-"]::before,
+.md-nav__link[href^="#meth-"]::before,
+.md-nav__link[href^="#cmeth-"]::before,
+.md-nav__link[href^="#prop-"]::before,
+.md-nav__link[href^="#fn-"]::before {
+  font-size: 0.58rem;
+  padding: 0.04rem 0.4rem;
+  margin-right: 0.4rem;
+}
+
+/* per-kind label + colors */
+:is(h2, h3)[id^="cls-"]::before,
+.md-nav__link[href^="#cls-"]::before   { content: "class";       background: rgba(99, 102, 241, 0.18); color: #6366f1; }
+:is(h2, h3)[id^="meth-"]::before,
+.md-nav__link[href^="#meth-"]::before  { content: "method";      background: rgba(59, 130, 246, 0.18); color: #3b82f6; }
+:is(h2, h3)[id^="cmeth-"]::before,
+.md-nav__link[href^="#cmeth-"]::before { content: "classmethod"; background: rgba(13, 148, 136, 0.18); color: #0d9488; }
+:is(h2, h3)[id^="prop-"]::before,
+.md-nav__link[href^="#prop-"]::before  { content: "property";    background: rgba(100, 116, 139, 0.18); color: #64748b; }
+:is(h2, h3)[id^="fn-"]::before,
+.md-nav__link[href^="#fn-"]::before    { content: "function";    background: rgba(34, 197, 94, 0.18);  color: #16a34a; }
+
+/* Inline kind chip (used outside headings, e.g. the dataclasses note). */
 .api-tag {
   display: inline-block;
   font-family: var(--md-code-font-family);
-  font-size: 0.6em;             /* scales with the heading it sits in */
+  font-size: 0.62em;
   font-weight: 700;
   letter-spacing: 0.03em;
   text-transform: lowercase;
   padding: 0.1em 0.5em;
-  margin-right: 0.45em;          /* gap before the symbol name */
+  margin-right: 0.4em;
   border-radius: 0.6em;
   vertical-align: middle;
-  position: relative;
-  top: -0.08em;
 }
-/* Keep the kind word neutral in the right-hand table of contents. */
-.md-nav--secondary .api-tag {
-  background: transparent !important;
-  color: var(--md-default-fg-color--light) !important;
-  padding: 0;
-  margin-right: 0.35em;
-  font-size: 0.85em;
-}
-.api-tag-class       { background: rgba(99, 102, 241, 0.18); color: #6366f1; }
-.api-tag-method      { background: rgba(59, 130, 246, 0.18); color: #3b82f6; }
-.api-tag-classmethod { background: rgba(13, 148, 136, 0.18); color: #0d9488; }
-.api-tag-property,
-.api-tag-attr        { background: rgba(100, 116, 139, 0.18); color: #64748b; }
-.api-tag-function    { background: rgba(34, 197, 94, 0.18);   color: #16a34a; }
-.api-tag-dataclass   { background: rgba(168, 85, 247, 0.18);  color: #9333ea; }
-
-/* The signature block right under an API heading. */
-.api-sig {
-  margin: 0.2rem 0 0.6rem;
-}
-
+.api-tag-dataclass { background: rgba(168, 85, 247, 0.18); color: #9333ea; }

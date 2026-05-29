@@ -67,13 +67,13 @@ extra_javascript:
 
 nav:
   - Home: index.md
+  - Getting started: guides/getting-started.md
+  - Examples: guides/examples.md
   - Guide:
-      - Getting started: guides/getting-started.md
       - Python API: code/python-api.md
-      - Plotting: code/plotting.md
+      - Plotting API: code/plotting.md
       - Hyperparameters: guides/hyperparameters.md
-      - Examples: guides/examples.md
-      - Visualizing a fit: guides/visualizing.md
+      - Visualization dashboard: guides/visualizing.md
   - Codebase:
       - Architecture: code/architecture.md
       - GridTensor (core): code/grid-tensor.md

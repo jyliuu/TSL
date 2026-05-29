@@ -31,7 +31,7 @@ ones.
 
 ## Partial dependence & ICE
 
-### <span class="api-tag api-tag-function">function</span> `plot_first_order_pd` { #plot-first-order-pd }
+### `plot_first_order_pd` { #fn-plot-first-order-pd }
 
 ```python
 plot_first_order_pd(model, X, features=None, feature_names=None, grid_points=200,
@@ -49,7 +49,7 @@ selected features (one row per stage, one column per feature).
 
 **Returns** — `PDDifferenceResult`.
 
-### <span class="api-tag api-tag-function">function</span> `pd_difference_plot` { #pd-difference-plot }
+### `pd_difference_plot` { #fn-pd-difference-plot }
 
 ```python
 pd_difference_plot(model, X, features=None, feature_names=None, grid_points=200,
@@ -68,7 +68,7 @@ The signed PD difference $\mathrm{PD}_+ - \mathrm{PD}_-$ with the $\sqrt{C_+ C_-
 
 **Returns** — `PDDifferenceResult`.
 
-### <span class="api-tag api-tag-function">function</span> `plot_2d_pd` { #plot-2d-pd }
+### `plot_2d_pd` { #fn-plot-2d-pd }
 
 ```python
 plot_2d_pd(model, X, feature_x, feature_y, feature_names=None, grid_points=50,
@@ -90,7 +90,7 @@ Two-feature partial dependence per stage.
   <figcaption><code>plot_2d_pd(..., kind="lines")</code> on bike-sharing.</figcaption>
 </figure>
 
-### <span class="api-tag api-tag-function">function</span> `plot_ice` { #plot-ice }
+### `plot_ice` { #fn-plot-ice }
 
 ```python
 plot_ice(model, X, feature, feature_names=None, n_ice=50, grid_points=100,
@@ -112,7 +112,7 @@ Individual Conditional Expectation curves for one feature.
 
 ## Backbone & tilt
 
-### <span class="api-tag api-tag-function">function</span> `plot_2d_backbone` { #plot-2d-backbone }
+### `plot_2d_backbone` { #fn-plot-2d-backbone }
 
 ```python
 plot_2d_backbone(model, X, feature_x, feature_y, feature_names=None, stages=None,
@@ -136,7 +136,7 @@ cartopy.
   <figcaption><code>plot_2d_backbone</code> on California latitude × longitude (cartopy basemap added by the example).</figcaption>
 </figure>
 
-### <span class="api-tag api-tag-function">function</span> `plot_tilt_1d` { #plot-tilt-1d }
+### `plot_tilt_1d` { #fn-plot-tilt-1d }
 
 ```python
 plot_tilt_1d(model, X, features=None, feature_names=None, grid_points=200,
@@ -146,7 +146,7 @@ plot_tilt_1d(model, X, features=None, feature_names=None, grid_points=200,
 The per-feature, per-stage tilt $d_j(x_j)$ as step curves (layout mirrors
 `plot_first_order_pd`), with a zero reference line. **Returns** `Tilt1DResult`.
 
-### <span class="api-tag api-tag-function">function</span> `plot_2d_tilt` { #plot-2d-tilt }
+### `plot_2d_tilt` { #fn-plot-2d-tilt }
 
 ```python
 plot_2d_tilt(model, X, feature_x, feature_y, feature_names=None, stages=None,
@@ -156,7 +156,7 @@ plot_2d_tilt(model, X, feature_x, feature_y, feature_names=None, stages=None,
 
 The 2D tilt product $d_x(x)\cdot d_y(y)$ per stage. **Returns** `Tilt2DResult`.
 
-### <span class="api-tag api-tag-function">function</span> `plot_tilt_diagnostics` { #plot-tilt-diagnostics }
+### `plot_tilt_diagnostics` { #fn-plot-tilt-diagnostics }
 
 ```python
 plot_tilt_diagnostics(model, X, features=None, feature_names=None, grid_points=200,
@@ -171,7 +171,7 @@ density-weighted tilt). **Returns** `TiltDiagnosticsResult`.
 
 ## Feature importance
 
-### <span class="api-tag api-tag-function">function</span> `plot_feature_importance` { #plot-feature-importance }
+### `plot_feature_importance` { #fn-plot-feature-importance }
 
 ```python
 plot_feature_importance(model, X, feature_names=None, gamma=1.0,
@@ -197,7 +197,7 @@ stage weights (bar).
 
 ## Local (per-observation) interpretation
 
-### <span class="api-tag api-tag-function">function</span> `compute_local_explanation` { #compute-local-explanation }
+### `compute_local_explanation` { #fn-compute-local-explanation }
 
 ```python
 compute_local_explanation(model, x) -> LocalExplanation
@@ -213,7 +213,7 @@ backbone/tilt values, and the intercept $(b_0, d_0)$ absorbing the OLS scaling.
 
 **Returns** — `LocalExplanation`.
 
-### <span class="api-tag api-tag-function">function</span> `plot_local_interpretation` { #plot-local-interpretation }
+### `plot_local_interpretation` { #fn-plot-local-interpretation }
 
 ```python
 plot_local_interpretation(explanations, points, titles, feature_names, save_path,
@@ -246,7 +246,7 @@ stages sorted by absolute net contribution.
 
 ## Component plots
 
-### <span class="api-tag api-tag-function">function</span> `plot_grid_tensor_components` { #plot-grid-tensor-components }
+### `plot_grid_tensor_components` { #fn-plot-grid-tensor-components }
 
 ```python
 plot_grid_tensor_components(grid_tensor, individual_plots=False, axis=None)
@@ -260,7 +260,7 @@ Plot a single `GridTensor`'s backbone/tilt component curves.
 | `individual_plots` | `bool` | `False` | one figure per axis vs. a combined grid |
 | `axis` | `int \| None` | `None` | restrict to a single feature axis |
 
-### <span class="api-tag api-tag-function">function</span> `plot_combined_grid_tensors` { #plot-combined-grid-tensors }
+### `plot_combined_grid_tensors` { #fn-plot-combined-grid-tensors }
 
 ```python
 plot_combined_grid_tensors(model, individual_plots=True, axis=None)
@@ -268,7 +268,7 @@ plot_combined_grid_tensors(model, individual_plots=True, axis=None)
 
 Overlay the combined grid-tensor components across a model's stages.
 
-### <span class="api-tag api-tag-function">function</span> `plot_epoch_components` { #plot-epoch-components }
+### `plot_epoch_components` { #fn-plot-epoch-components }
 
 ```python
 plot_epoch_components(model, epoch) -> None
