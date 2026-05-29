@@ -51,6 +51,12 @@ Changes under `tsl-py/examples/` are not library changes: use `docs(examples):` 
 scripts and README, and `chore(examples):` for regenerated `figures/` or pretrained
 `models/` binaries.
 
+Write commit messages, comments, and docstrings as if the current behavior was
+always intended — describe what the code does, not what it used to do or what was
+just fixed. Don't add a comment to justify a change or flag that something "now
+works"; that rationale already lives in git history and PRs. Comment only
+non-obvious intent or invariants, and leave self-evident code uncommented.
+
 ## Architecture
 
 The model is a three-level hierarchy, and the `src/` module tree mirrors it exactly.
