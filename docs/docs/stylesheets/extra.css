@@ -1,0 +1,15 @@
+/* Custom header color: dark slate (slate-900), so the blue logo stands out
+   instead of blending into a blue/indigo bar. Activated by `primary: custom`
+   in mkdocs.yml. Links/accents stay indigo. */
+:root {
+  --md-primary-fg-color: #0f172a;        /* header background — slate-900 */
+  --md-primary-fg-color--light: #1e293b; /* slate-800 */
+  --md-primary-fg-color--dark: #0b1120;
+  --md-primary-bg-color: #ffffff;        /* text/icons on the header */
+  --md-primary-bg-color--light: rgba(255, 255, 255, 0.7);
+}
+
+/* Give the logo a touch of breathing room in the header. */
+.md-header__button.md-logo img {
+  height: 1.6rem;
+}
