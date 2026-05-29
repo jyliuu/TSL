@@ -141,6 +141,12 @@ TSLRegressor.save(path) -> None
 |------|------|:--:|-------------|
 | `path` | `str` | _required_ | destination file (binary) |
 
+**Returns**
+
+| Type | Description |
+|------|-------------|
+| `None` | nothing; writes the model to `path` (binary). |
+
 ### `load` { #cmeth-tslregressor-load }
 
 ```python
@@ -224,6 +230,12 @@ TSL.save(path) -> None
 |------|------|:--:|-------------|
 | `path` | `str` | _required_ | destination binary file |
 
+**Returns**
+
+| Type | Description |
+|------|-------------|
+| `None` | nothing; serializes the model to `path`. |
+
 ### `load` { #cmeth-tsl-load }
 
 ```python
@@ -236,7 +248,11 @@ Reads the native binary format and the legacy MPF `.bin` format.
 |------|------|:--:|-------------|
 | `path` | `str` | _required_ | model file |
 
-**Returns** — `TSL`.
+**Returns**
+
+| Type | Description |
+|------|-------------|
+| `TSL` | a fitted model loaded from `path`. |
 
 ### `compute_partial_dependence_function` { #meth-tsl-pd }
 
@@ -406,7 +422,11 @@ Fit a single grid tensor (no boosting, no bagging).
 | `complexity_penalty` | `float` | `0.0` | penalty discouraging extra splits |
 | `seed` | `int` | `42` | RNG seed |
 
-**Returns** — `tuple[GridTensor, FitResult]`.
+**Returns**
+
+| Type | Description |
+|------|-------------|
+| `tuple[GridTensor, FitResult]` | the fitted component and its training diagnostics. |
 
 ### `predict` { #meth-gridtensor-predict }
 
@@ -418,7 +438,11 @@ GridTensor.predict(x) -> np.ndarray
 |------|------|:--:|-------------|
 | `x` | `ndarray (n_samples, n_features)` | _required_ | features |
 
-**Returns** — `ndarray (n_samples,)`, this component's prediction.
+**Returns**
+
+| Type | Description |
+|------|-------------|
+| `ndarray (n_samples,)` | this component's (unscaled) prediction. |
 
 ---
 
@@ -445,7 +469,11 @@ StagePredictor.predict(x) -> np.ndarray
 |------|------|:--:|-------------|
 | `x` | `ndarray (n_samples, n_features)` | _required_ | features |
 
-**Returns** — `ndarray (n_samples,)`, the stage's contribution **with OLS scaling applied**.
+**Returns**
+
+| Type | Description |
+|------|-------------|
+| `ndarray (n_samples,)` | the stage's contribution, with OLS scaling applied. |
 
 ---
 
