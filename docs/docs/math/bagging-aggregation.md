@@ -90,9 +90,10 @@ determines how the combined grid is turned into stage predictions. See
 [StagePredictor](../code/stage-predictor.md) for the exact call path and how
 `similarity_threshold` ($\xi$) and the aggregation mode are wired from the Python API.
 
-!!! note "The bimodal-alignment example"
-    The paper's appendix shows a worked case where bagged grids converge to two distinct
-    backbone representations of one fitted stage. Without the similarity filter, averaging
-    across the two branches degrades the fit; the reference + trim step keeps a single
-    canonical branch. The `synthetic2.py` example reproduces this diagnostic — see
-    [Examples](../guides/examples.md).
+## The bimodal-alignment example
+
+There is a worked case where bagged grids converge to two distinct backbone representations
+of one fitted stage (a consequence of [non-identifiability](theory.md#identifiability-and-stability)).
+Without the similarity filter, averaging across the two branches degrades the fit; the
+reference + trim step keeps a single canonical branch. The `synthetic2.py` example
+reproduces this diagnostic — see [Examples](../guides/examples.md).
