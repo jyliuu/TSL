@@ -36,7 +36,7 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
 
 **Parameters**
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `epochs` | `int` | `10` | number of boosting rounds (stages) |
 | `n_trees` | `int` | `10` | bagged grid tensors per stage |
@@ -62,6 +62,14 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
 | `verbosity` | `int` | `1` | log verbosity |
 | `visualdb` | `str \| None` | `None` | evo-logging SQLite path |
 
+**Attributes** (set after `fit`)
+
+| Name | Type | Description |
+|------|------|-------------|
+| `core_estimator_` | `TSL` | the fitted core model |
+| `fit_result_` | `FitResult` | training diagnostics |
+| `stage_predictors` | `list[StagePredictor]` | the fitted stages |
+
 ### `fit` { #meth-tslregressor-fit }
 
 ```python
@@ -73,7 +81,7 @@ Fit the model. Delegates to [`TSL.fit`](#cmeth-tsl-fit), storing the fitted core
 
 **Parameters**
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `X` | `ndarray (n_samples, n_features)` | _required_ | training features (array or DataFrame) |
 | `y` | `ndarray (n_samples,)` | _required_ | training targets |
@@ -92,7 +100,7 @@ TSLRegressor.predict(X) -> np.ndarray
 
 **Parameters**
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `X` | `ndarray (n_samples, n_features)` | _required_ | features to predict |
 
@@ -112,7 +120,7 @@ The coefficient of determination $R^2$ (via scikit-learn's `r2_score`).
 
 **Parameters**
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `X` | `ndarray (n_samples, n_features)` | _required_ | features |
 | `y` | `ndarray (n_samples,)` | _required_ | true targets |
@@ -129,7 +137,7 @@ The coefficient of determination $R^2$ (via scikit-learn's `r2_score`).
 TSLRegressor.save(path) -> None
 ```
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `path` | `str` | _required_ | destination file (binary) |
 
@@ -141,7 +149,7 @@ TSLRegressor.load(path) -> TSLRegressor
 
 Load a model saved with [`save`](#meth-tslregressor-save); also reads the legacy MPF `.bin` format.
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `path` | `str` | _required_ | model file |
 
@@ -151,16 +159,18 @@ Load a model saved with [`save`](#meth-tslregressor-save); also reads the legacy
 |------|-------------|
 | `TSLRegressor` | a fitted estimator |
 
-### `stage_predictors` { #prop-tslregressor-stage-predictors }
-
-The list of fitted [`StagePredictor`](#cls-stagepredictor) objects. **Type:** `list[StagePredictor]`.
-
 ---
 
 ## `TSL` { #cls-tsl }
 
 The core boosted model. Use it directly for the interpretation methods below; otherwise
 prefer [`TSLRegressor`](#cls-tslregressor).
+
+**Attributes**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `stage_predictors` | `list[StagePredictor]` | the stages of the model |
 
 ### `fit` { #cmeth-tsl-fit }
 
@@ -176,7 +186,7 @@ Fit a boosted TSL model.
 
 **Parameters**
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `x` | `ndarray (n_samples, n_features)` | _required_ | training features (C-contiguous `float64`) |
 | `y` | `ndarray (n_samples,)` | _required_ | training targets |
@@ -194,7 +204,7 @@ Fit a boosted TSL model.
 TSL.predict(x) -> np.ndarray
 ```
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `x` | `ndarray (n_samples, n_features)` | _required_ | features (C-contiguous `float64`) |
 
@@ -210,7 +220,7 @@ TSL.predict(x) -> np.ndarray
 TSL.save(path) -> None
 ```
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `path` | `str` | _required_ | destination binary file |
 
@@ -222,7 +232,7 @@ TSL.load(path) -> TSL
 
 Reads the native binary format and the legacy MPF `.bin` format.
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `path` | `str` | _required_ | model file |
 
@@ -240,7 +250,7 @@ marginalizing over the **empirical joint** of the non-fixed features.
 
 **Parameters**
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `fixed_indices` | `list[int]` | _required_ | feature column(s) held fixed |
 | `fixed_values` | `ndarray (n_points, len(fixed_indices))` | _required_ | values to evaluate at |
@@ -262,7 +272,7 @@ TSL.compute_first_order_partial_dependence_functions(values_x, data_x) -> list
 
 **Parameters**
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `values_x` | `ndarray (grid_points, n_features)` | _required_ | evaluation grid (column $j$ supplies $x_j$) |
 | `data_x` | `ndarray (n_samples, n_features)` | _required_ | background data |
@@ -283,7 +293,7 @@ Individual Conditional Expectation curves: sweep one feature for each given obse
 
 **Parameters**
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `observations` | `ndarray (n_obs, n_features)` | _required_ | rows to trace |
 | `feature_index` | `int` | _required_ | feature to vary |
@@ -304,7 +314,7 @@ TSL.compute_per_stage_feature_importance(data_x) -> tuple[np.ndarray, np.ndarray
 
 **Parameters**
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `data_x` | `ndarray (n_samples, n_features)` | _required_ | data to evaluate over |
 
@@ -325,7 +335,7 @@ Energy-weighted roll-up of the per-stage importances.
 
 **Parameters**
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `data_x` | `ndarray (n_samples, n_features)` | _required_ | data to evaluate over |
 
@@ -346,7 +356,7 @@ A single combined importance $I_j = I_j^b + \gamma\, I_j^d$ per feature.
 
 **Parameters**
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `data_x` | `ndarray (n_samples, n_features)` | _required_ | data to evaluate over |
 | `gamma` | `float` | `1.0` | weight on the tilt component |
@@ -357,15 +367,23 @@ A single combined importance $I_j = I_j^b + \gamma\, I_j^d$ per feature.
 |------|-------------|
 | `tuple[ndarray, ndarray, ndarray]` | `(combined, backbone, tilt)`, each 1D over features |
 
-### `stage_predictors` { #prop-tsl-stage-predictors }
-
-The stages of the model. **Type:** `list[StagePredictor]`.
-
 ---
 
 ## `GridTensor` { #cls-gridtensor }
 
 One fitted separable component (internals: [GridTensor](grid-tensor.md)).
+
+**Attributes**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `splits` | `list[list[float]]` | split thresholds per axis |
+| `intervals` | `list` | interval count/bounds per axis |
+| `backbone_values` | `list[list[float]]` | $b_j \ge 0$ per interval per axis |
+| `tilt_values` | `list[list[float]]` | $d_j \in \mathbb{R}$ per interval per axis |
+| `lambda_plus`, `lambda_minus` | `float` | non-negative branch scalars |
+| `mean_factor` / `grid_values` | `list` | per-interval $\prod_j b_j e^{d_j}$ |
+| `scaling` | `float` | legacy; ignored in two-tensor mode |
 
 ### `fit` { #cmeth-gridtensor-fit }
 
@@ -378,7 +396,7 @@ Fit a single grid tensor (no boosting, no bagging).
 
 **Parameters**
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `x` | `ndarray (n_samples, n_features)` | _required_ | training features |
 | `y` | `ndarray (n_samples,)` | _required_ | training targets |
@@ -396,23 +414,11 @@ Fit a single grid tensor (no boosting, no bagging).
 GridTensor.predict(x) -> np.ndarray
 ```
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `x` | `ndarray (n_samples, n_features)` | _required_ | features |
 
 **Returns** — `ndarray (n_samples,)`, this component's prediction.
-
-### Attributes { #gridtensor-attributes }
-
-| Name | Type | Description |
-|------|------|-------------|
-| `splits` | `list[list[float]]` | split thresholds per axis |
-| `intervals` | `list` | interval count/bounds per axis |
-| `backbone_values` | `list[list[float]]` | $b_j \ge 0$ per interval per axis |
-| `tilt_values` | `list[list[float]]` | $d_j \in \mathbb{R}$ per interval per axis |
-| `lambda_plus`, `lambda_minus` | `float` | non-negative branch scalars |
-| `mean_factor` / `grid_values` | `list` | per-interval $\prod_j b_j e^{d_j}$ |
-| `scaling` | `float` | legacy; ignored in two-tensor mode |
 
 ---
 
@@ -420,19 +426,7 @@ GridTensor.predict(x) -> np.ndarray
 
 One boosting stage ([details](stage-predictor.md)).
 
-### `predict` { #meth-stagepredictor-predict }
-
-```python
-StagePredictor.predict(x) -> np.ndarray
-```
-
-| Name | Type | Default | Description |
-|------|------|:--:|-------------|
-| `x` | `ndarray (n_samples, n_features)` | _required_ | features |
-
-**Returns** — `ndarray (n_samples,)`, the stage's contribution **with OLS scaling applied**.
-
-### Attributes { #stagepredictor-attributes }
+**Attributes**
 
 | Name | Type | Description |
 |------|------|-------------|
@@ -441,32 +435,28 @@ StagePredictor.predict(x) -> np.ndarray
 | `candidate_indices` | `list[int] \| None` | bags kept after similarity filtering |
 | `scaling_plus`, `scaling_minus` | `float \| None` | OLS coefficients for $f_+$ and $-f_-$ |
 
+### `predict` { #meth-stagepredictor-predict }
+
+```python
+StagePredictor.predict(x) -> np.ndarray
+```
+
+| Parameter | Type | Default | Description |
+|------|------|:--:|-------------|
+| `x` | `ndarray (n_samples, n_features)` | _required_ | features |
+
+**Returns** — `ndarray (n_samples,)`, the stage's contribution **with OLS scaling applied**.
+
 ---
 
 ## `FitResult` { #cls-fitresult }
 
 Training diagnostics, returned alongside a fitted model.
 
-### Attributes { #fitresult-attributes }
+**Attributes**
 
 | Name | Type | Description |
 |------|------|-------------|
 | `err` | `float` | final training loss |
 | `residuals` | `ndarray (n_samples,)` | training residuals |
 | `y_hat` | `ndarray (n_samples,)` | training predictions |
-
----
-
-## Build & install
-
-`tsl-py` is an `extension-module` cdylib built with maturin. Because maturin cannot
-auto-detect a Python 3.14, build against a 3.13 venv with `VIRTUAL_ENV` set:
-
-```sh
-# from tsl-py/
-VIRTUAL_ENV=/Users/jin/Documents/TSL/.venv \
-  /Users/jin/Documents/TSL/.venv/bin/maturin develop
-```
-
-Tests run through Python (`python -m pytest python/tests/`). See
-[Getting started](../guides/getting-started.md).

@@ -23,7 +23,7 @@ pub struct StagePredictor {
 `StagePredictor::predict` is where the OLS scaling is applied — exactly once:
 
 $$
-\text{stage prediction} = \texttt{scaling\_plus}\cdot f_+ \;+\; \texttt{scaling\_minus}\cdot(-f_-).
+\text{stage prediction} = \texttt{scaling_plus}\cdot f_+ \;+\; \texttt{scaling_minus}\cdot(-f_-).
 $$
 
 The free function `extract_two_tensor_predictions_unscaled(grid, x)` pulls $f_+$ and $f_-$

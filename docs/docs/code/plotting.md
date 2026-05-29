@@ -16,7 +16,7 @@ import tsl_py.plot as tplot
 Most plotting functions share these; per-function tables below list only the distinctive
 ones.
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `model` | `TSL` | _required_ | a fitted model (`TSLRegressor.core_estimator_`) |
 | `X` | `ndarray (n_samples, n_features)` | _required_ | background data to marginalize over |
@@ -42,7 +42,7 @@ plot_first_order_pd(model, X, features=None, feature_names=None, grid_points=200
 First-order partial dependence — the $f_+$ and $f_-$ branch curves — per stage for the
 selected features (one row per stage, one column per feature).
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `pd_scale` | `"raw" \| ...` | `"raw"` | scaling applied to the PD curves |
 | `show_data_density` | `bool` | `False` | overlay a data-density rug |
@@ -61,7 +61,7 @@ pd_difference_plot(model, X, features=None, feature_names=None, grid_points=200,
 The signed PD difference $\mathrm{PD}_+ - \mathrm{PD}_-$ with the $\sqrt{C_+ C_-}\,b_j$
 **backbone overlay** (dotted). The workhorse 1D interpretation plot.
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `show_backbone_overlay` | `bool` | `True` | draw the dotted backbone overlay |
 | `show_global` | `bool` | `False` | also draw the summed-over-stages curve |
@@ -77,7 +77,7 @@ plot_2d_pd(model, X, feature_x, feature_y, feature_names=None, grid_points=50,
 
 Two-feature partial dependence per stage.
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `kind` | `str` | `"surface"` | `"surface"` or `"lines"` |
 | `y_values` | `Sequence[float] \| None` | `None` | (for `"lines"`) values of `feature_y` to slice at |
@@ -99,7 +99,7 @@ plot_ice(model, X, feature, feature_names=None, n_ice=50, grid_points=100,
 
 Individual Conditional Expectation curves for one feature.
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `feature` | `int \| str` | _required_ | feature to vary |
 | `n_ice` | `int` | `50` | number of observations sampled |
@@ -124,7 +124,7 @@ The 2D backbone product $b_x\cdot b_y$ and the 2D PD per stage — the generic "
 backbone" plot. Returns the meshgrid and per-stage arrays so callers can overlay e.g.
 cartopy.
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `cmap_backbone`, `cmap_pd` | `Colormap \| None` | `None` | colormaps for each panel |
 | `return_data_only` | `bool` | `False` | skip drawing; return arrays only |
@@ -182,7 +182,7 @@ A six-panel summary: per-stage backbone and tilt importance (heatmaps), global b
 tilt importance (bars), the combined $I_j = I_j^b + \gamma\, I_j^d$ (bar), and energy-based
 stage weights (bar).
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `gamma` | `float` | `1.0` | weight on the tilt component in the combined score |
 
@@ -206,7 +206,7 @@ compute_local_explanation(model, x) -> LocalExplanation
 Per-stage decomposition of a single prediction: the $f_+/f_-$ contributions, per-feature
 backbone/tilt values, and the intercept $(b_0, d_0)$ absorbing the OLS scaling.
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `model` | `TSL` | _required_ | fitted model |
 | `x` | `ndarray (n_features,)` | _required_ | the single point to explain |
@@ -225,7 +225,7 @@ plot_local_interpretation(explanations, points, titles, feature_names, save_path
 The three-column "Backbone × Tilt" local-interpretation plot — one column per point, rows =
 stages sorted by absolute net contribution.
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `explanations` | `list[LocalExplanation]` | _required_ | from `compute_local_explanation` |
 | `points` | `list[ndarray]` | _required_ | the explained points |
@@ -254,7 +254,7 @@ plot_grid_tensor_components(grid_tensor, individual_plots=False, axis=None)
 
 Plot a single `GridTensor`'s backbone/tilt component curves.
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `grid_tensor` | `GridTensor` | _required_ | the component to plot |
 | `individual_plots` | `bool` | `False` | one figure per axis vs. a combined grid |
@@ -276,7 +276,7 @@ plot_epoch_components(model, epoch) -> None
 
 Plot the per-feature components for one stage/epoch.
 
-| Name | Type | Default | Description |
+| Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `epoch` | `int` | _required_ | the stage/epoch index |
 
