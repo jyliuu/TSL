@@ -2,7 +2,11 @@
 // Inline math is delimited by \( ... \) and display math by \[ ... \],
 // which arithmatex emits; we also accept $...$ / $$...$$ for convenience.
 window.MathJax = {
+  // Enable the boldsymbol extension (\boldsymbol{...}); it is bundled with the
+  // tex-mml-chtml component but not active by default in this generic setup.
+  loader: { load: ["[tex]/boldsymbol"] },
   tex: {
+    packages: { "[+]": ["boldsymbol"] },
     inlineMath: [["\\(", "\\)"], ["$", "$"]],
     displayMath: [["\\[", "\\]"], ["$$", "$$"]],
     processEscapes: true,
