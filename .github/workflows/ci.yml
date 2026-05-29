@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust-tests:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # ndarray-linalg is built with the `openblas-system` feature, so it
+      # links against a system OpenBLAS (which also provides LAPACK).
+      - name: Install OpenBLAS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev gfortran pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Scope to the core library crate: it owns every integration test under
+      # tests/. The tsl-py crate is a pyo3 `extension-module` cdylib whose test
+      # harness cannot link libpython on Linux; it is covered by the Python job.
+      - name: Run tests
+        run: cargo test -p tsl_rust --release
+
+  python-tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # tsl-py depends on tsl_rust, which needs system OpenBLAS to build.
+      - name: Install OpenBLAS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev gfortran pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: tsl-py/pyproject.toml
+
+      # Build the extension as a release wheel (numerical workload) and install
+      # it natively with the declared `test` extra (pytest). No venv needed —
+      # the job runs in a throwaway container, so the runner's Python is fine.
+      # A plain `pip install` can't build in release (maturin rejects --release
+      # in its PEP517 metadata step), so we build the wheel explicitly.
+      - name: Build release wheel
+        working-directory: tsl-py
+        run: |
+          python -m pip install --upgrade pip maturin
+          maturin build --release --interpreter python --out dist
+
+      - name: Install wheel and test deps
+        working-directory: tsl-py
+        run: pip install "$(ls dist/*.whl)[test]"
+
+      - name: Run tests
+        working-directory: tsl-py
+        run: pytest python/tests/
