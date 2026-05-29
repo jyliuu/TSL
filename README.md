@@ -1,11 +1,8 @@
-<h1 align="center">
-  <img src="tsl-split-evolution-dashboard/frontend/favicon.svg" width="96" alt="TSL logo"><br>
-  TSL — Tensor Separation Learning
-</h1>
+# TSL — Tensor Separation Learning <img src="tsl-split-evolution-dashboard/frontend/favicon.svg" align="right" width="120" alt="TSL logo" />
 
-<p align="center">
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-</p>
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+![Rust](https://img.shields.io/badge/rust-2021-orange.svg)
+![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue.svg)
 
 TSL is a glass-box regression model for learning rich interactions without sacrificing interpretability. It represents predictions as a sum of stages, where each stage is an difference of two separable products of univariate functions. This gives TSL expressive interaction structure while keeping the model directly inspectable through its learned feature-wise components.
 
