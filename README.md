@@ -1,4 +1,4 @@
-# TSL — Tensor Separation Learning <img src="tsl-split-evolution-dashboard/frontend/favicon.svg" align="right" width="120" alt="TSL logo" />
+# TSL — Tensor Separation Learning <img src="tsl-split-evolution-dashboard/frontend/favicon.svg" align="right" width="200" alt="TSL logo" />
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 ![Rust](https://img.shields.io/badge/rust-2021-orange.svg)
@@ -88,7 +88,7 @@ result = plot_feature_importance(model, X, feature_names=feature_names)
 result.fig.savefig("feature_importance.png")
 ```
 
-<img src="assets/readme/california_feature_importance.png" width="80%" alt="TSL feature importances">
+<img src="assets/readme/california_feature_importance.png" width="100%" alt="TSL feature importances">
 
 Per-stage importances aggregated across stages. Geography (Longitude, Latitude)
 dominates, with the second-stage inland correction loaded primarily onto longitude.
@@ -114,11 +114,11 @@ for name, i in [("coastal", 4556), ("desert", 2784)]:
 
 A **coastal** observation (LA-area, predicted ≈ \$293k):
 
-<img src="assets/readme/california_local_interp_coastal.png" width="70%" alt="Local explanation — coastal point">
+<img src="assets/readme/california_local_interp_coastal.png" width="100%" alt="Local explanation — coastal point">
 
 A **desert** observation (low-density inland, predicted ≈ \$149k):
 
-<img src="assets/readme/california_local_interp_desert.png" width="70%" alt="Local explanation — desert point">
+<img src="assets/readme/california_local_interp_desert.png" width="100%" alt="Local explanation — desert point">
 
 For the desert point, the first stage's spatial gate collapses and the coastal premium
 does not fire; the second stage is active here and supplies the negative correction. This
@@ -171,8 +171,7 @@ The figures below overlay TSL (Stage 1) against EBM, XGBoost, and
 [`california.py`](tsl-py/examples/california.py), which loads the pretrained comparison
 models.
 
-<img src="assets/readme/california_pd_latitude.png" width="48%" alt="1D PD on Latitude">
-<img src="assets/readme/california_pd_longitude.png" width="48%" alt="1D PD on Longitude">
+<img src="assets/readme/california_pd_latitude.png" width="46%" alt="1D PD on Latitude"> <img src="assets/readme/california_pd_longitude.png" width="46%" alt="1D PD on Longitude">
 
 TSL retains the sharp local structure near LA, SF, and the Bay Area that the other models
 smooth away.
