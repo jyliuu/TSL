@@ -66,13 +66,12 @@ you can save it directly or rebuild a custom visualization.
 First, fit a model:
 
 ```python
-import numpy as np
 from sklearn.datasets import fetch_california_housing
 from tsl_py import TSL
 
 data = fetch_california_housing()
-X = np.ascontiguousarray(data.data)  # TSL.fit expects C-contiguous float64 input
-y = np.ascontiguousarray(data.target)
+X = data.data
+y = data.target
 feature_names = list(data.feature_names)
 
 # TSL.fit returns (model, fit_result)

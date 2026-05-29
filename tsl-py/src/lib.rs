@@ -100,9 +100,7 @@ impl StagePredictorPy {
         x: PyReadonlyArray2<'py, f64>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let x = x.as_array();
-        // Ensure array is contiguous before passing to Rust
-        let x_contiguous = x.to_owned();
-        let y_hat = self.0.predict(x_contiguous.view());
+        let y_hat = self.0.predict(x);
         Ok(y_hat.to_pyarray(py))
     }
 }
@@ -138,9 +136,7 @@ impl TSLPy {
         x: PyReadonlyArray2<'py, f64>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let x = x.as_array();
-        // Ensure array is contiguous before passing to Rust
-        let x_contiguous = x.to_owned();
-        let y_hat = self.0.predict(x_contiguous.view());
+        let y_hat = self.0.predict(x);
         Ok(y_hat.to_pyarray(py))
     }
 
@@ -175,9 +171,9 @@ impl TSLPy {
         data_x: PyReadonlyArray2<'py, f64>,
     ) -> PyResult<Bound<'py, PyTuple>> {
         let fixed_values = fixed_values.as_array();
-        let fixed_values_contiguous = fixed_values.to_owned();
+        let fixed_values_contiguous = fixed_values.as_standard_layout();
         let data_x = data_x.as_array();
-        let data_x_contiguous = data_x.to_owned();
+        let data_x_contiguous = data_x.as_standard_layout();
 
         let n_observations = fixed_values_contiguous.nrows();
         let n_fixed = fixed_indices.len();
@@ -340,9 +336,9 @@ impl TSLPy {
         data_x: PyReadonlyArray2<'py, f64>,
     ) -> PyResult<Bound<'py, PyList>> {
         let values_x = values_x.as_array();
-        let values_x_contiguous = values_x.to_owned();
+        let values_x_contiguous = values_x.as_standard_layout();
         let data_x = data_x.as_array();
-        let data_x_contiguous = data_x.to_owned();
+        let data_x_contiguous = data_x.as_standard_layout();
 
         let n_observations = values_x_contiguous.nrows();
         let n_features = values_x_contiguous.ncols();
@@ -509,11 +505,11 @@ impl TSLPy {
         data_x: PyReadonlyArray2<'py, f64>,
     ) -> PyResult<Bound<'py, PyArray3<f64>>> {
         let observations = observations.as_array();
-        let observations_contiguous = observations.to_owned();
+        let observations_contiguous = observations.as_standard_layout();
         let x_range = x_range.as_array();
-        let x_range_contiguous = x_range.to_owned();
+        let x_range_contiguous = x_range.as_standard_layout();
         let data_x = data_x.as_array();
-        let data_x_contiguous = data_x.to_owned();
+        let data_x_contiguous = data_x.as_standard_layout();
 
         let n_obs = observations_contiguous.nrows();
         let n_features = observations_contiguous.ncols();
@@ -632,7 +628,7 @@ impl TSLPy {
         data_x: PyReadonlyArray2<'py, f64>,
     ) -> PyResult<(Bound<'py, PyArray2<f64>>, Bound<'py, PyArray2<f64>>)> {
         let data_x = data_x.as_array();
-        let data_x_contiguous = data_x.to_owned();
+        let data_x_contiguous = data_x.as_standard_layout();
 
         let (backbone_importance, tilt_importance) =
             self.compute_per_stage_feature_importance_internal(data_x_contiguous.view())?;
@@ -667,7 +663,7 @@ impl TSLPy {
         Bound<'py, PyArray1<f64>>,
     )> {
         let data_x = data_x.as_array();
-        let data_x_contiguous = data_x.to_owned();
+        let data_x_contiguous = data_x.as_standard_layout();
 
         // Step 1: Compute per-stage feature importance
         let (backbone_per_stage, tilt_per_stage) =
@@ -725,7 +721,7 @@ impl TSLPy {
 
         // Get aggregated importance by calling internal helpers directly
         let data_x = data_x.as_array();
-        let data_x_contiguous = data_x.to_owned();
+        let data_x_contiguous = data_x.as_standard_layout();
 
         // Compute per-stage importance and stage weights
         let (backbone_per_stage, tilt_per_stage) =
@@ -857,9 +853,8 @@ impl TSLPy {
     ) -> PyResult<(TSLPy, FitResultPy)> {
         let x = x.as_array();
         let y = y.as_array();
-        // Ensure arrays are contiguous before passing to Rust
-        let x_contiguous = x.to_owned();
-        let y_contiguous = y.to_owned();
+        let x_contiguous = x.as_standard_layout();
+        let y_contiguous = y.as_standard_layout();
 
         let split_strategy_params = match split_strategy {
             "random" => SplitStrategyParamsBuilder::new()
@@ -1122,9 +1117,7 @@ impl GridTensorPy {
         x: PyReadonlyArray2<'py, f64>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let x = x.as_array();
-        // Ensure array is contiguous before passing to Rust
-        let x_contiguous = x.to_owned();
-        let y_hat = self.0.predict(x_contiguous.view());
+        let y_hat = self.0.predict(x);
         Ok(y_hat.to_pyarray(py))
     }
 
@@ -1143,9 +1136,8 @@ impl GridTensorPy {
     ) -> PyResult<(GridTensorPy, FitResultPy)> {
         let x = x.as_array();
         let y = y.as_array();
-        // Ensure arrays are contiguous before passing to Rust
-        let x_contiguous = x.to_owned();
-        let y_contiguous = y.to_owned();
+        let x_contiguous = x.as_standard_layout();
+        let y_contiguous = y.as_standard_layout();
         let params = GridTensorParamsBuilder::new()
             .n_iter(n_iter)
             .split_strategy(

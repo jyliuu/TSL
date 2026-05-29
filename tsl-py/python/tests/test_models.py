@@ -77,55 +77,75 @@ def test_tsl_boosted_fit(training_data, test_data):
     assert mpf_test_loss < mean_test_loss, "TSL should beat the mean predictor"
 
 
-def test_tsl_predict_on_sampled_indices(training_data, test_data):
-    """Test that TSL.predict() works with non-contiguous arrays (random sampled indices)."""
+def _non_contiguous_column_slice(X):
+    """Return a non-contiguous view (row stride 2) holding exactly ``X``'s values."""
+    n, p = X.shape
+    wide = np.empty((n, 2 * p), dtype=np.float64)
+    wide[:, ::2] = X
+    wide[:, 1::2] = np.nan  # junk columns that get sliced away
+    sliced = wide[:, ::2]
+    assert not sliced.flags["C_CONTIGUOUS"]
+    return sliced
+
+
+def test_tsl_predict_is_layout_invariant(training_data, test_data):
+    """predict() must return identical results for C-contiguous, Fortran-ordered,
+    and column-sliced (non-contiguous) inputs holding the same values."""
     X, y = training_data
-    X_test, y_test = test_data
+    X_test, _ = test_data
+    X_test = np.ascontiguousarray(X_test)
 
-    # Train the TSL estimator
-    tsl, fr = TSL.fit(
-        X, y, epochs=3, n_trees=37, n_iter=30, split_try=16, colsample_bytree=1.0
+    tsl, _ = TSL.fit(
+        X, y, epochs=3, n_trees=37, n_iter=30, split_try=16, colsample_bytree=1.0,
+        verbosity=0,
     )
+    baseline = tsl.predict(X_test)
 
-    # Get predictions on full test set (baseline)
-    y_pred_full = tsl.predict(X_test)
-
-    # Randomly sample indices to create non-contiguous array
-    np.random.seed(42)
-    n_samples = X_test.shape[0]
-    sampled_indices = np.random.choice(n_samples, size=n_samples // 2, replace=False)
-    sampled_indices = np.sort(sampled_indices)  # Sort to maintain some order
-
-    # Predict on sampled indices (this creates a non-contiguous view)
-    X_test_sampled = X_test[sampled_indices]
-    y_test_sampled = y_test[sampled_indices]
-    y_pred_sampled = tsl.predict(X_test_sampled)
-
-    # Verify predictions match the corresponding indices from full prediction
-    y_pred_expected = y_pred_full[sampled_indices]
-
-    # Check that predictions are identical
+    # Fortran-ordered (column-major) copy of the same data.
+    X_f = np.asfortranarray(X_test)
+    assert not X_f.flags["C_CONTIGUOUS"] and X_f.flags["F_CONTIGUOUS"]
     np.testing.assert_array_almost_equal(
-        y_pred_sampled,
-        y_pred_expected,
-        decimal=10,
-        err_msg="Predictions on sampled indices should match full predictions",
+        tsl.predict(X_f), baseline, decimal=12,
+        err_msg="predict on Fortran-ordered input must match C-contiguous",
     )
 
-    # Also test with transposed array (another non-contiguous case)
-    # Transpose and then transpose back to get a non-contiguous view
-    X_test_T = X_test.T
-    X_test_T_back = X_test_T.T
-    y_pred_transposed = tsl.predict(X_test_T_back)
-
-    # Verify predictions are still correct
+    # Genuinely non-contiguous (column-sliced) view.
     np.testing.assert_array_almost_equal(
-        y_pred_transposed,
-        y_pred_full,
-        decimal=10,
-        err_msg="Predictions on transposed array should match full predictions",
+        tsl.predict(_non_contiguous_column_slice(X_test)), baseline, decimal=12,
+        err_msg="predict on column-sliced (non-contiguous) input must match",
     )
 
-    print(
-        "✅ Successfully tested predict on non-contiguous arrays (sampled indices and transposed)"
+    # Row subset (advanced indexing yields a C-contiguous copy) — sanity check.
+    idx = np.sort(
+        np.random.default_rng(0).choice(
+            X_test.shape[0], X_test.shape[0] // 2, replace=False
+        )
+    )
+    np.testing.assert_array_almost_equal(
+        tsl.predict(X_test[idx]), baseline[idx], decimal=12,
+        err_msg="predict on a row subset must match the corresponding full predictions",
+    )
+
+
+def test_tsl_fit_is_layout_invariant(training_data):
+    """fit() produces identical results regardless of input memory layout."""
+    X, y = training_data
+    X = np.ascontiguousarray(X)
+
+    def fit_then_predict(X_in):
+        model, _ = TSL.fit(
+            X_in, y, epochs=3, n_trees=8, n_iter=25, split_try=12,
+            colsample_bytree=1.0, seed=7, verbosity=0,
+        )
+        return model.predict(X)
+
+    baseline = fit_then_predict(X)
+
+    np.testing.assert_array_almost_equal(
+        fit_then_predict(np.asfortranarray(X)), baseline, decimal=10,
+        err_msg="fit on Fortran-ordered input must match C-contiguous",
+    )
+    np.testing.assert_array_almost_equal(
+        fit_then_predict(_non_contiguous_column_slice(X)), baseline, decimal=10,
+        err_msg="fit on column-sliced (non-contiguous) input must match",
     )
