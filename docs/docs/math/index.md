@@ -58,17 +58,13 @@ where the feature support $\mathcal{X}\subseteq\mathbb{R}^p$ may be **non-rectan
 | $n_{\text{grids}}$ | number of bagged grids per stage (`n_trees`) |
 | $\xi$ | similarity trim threshold; keep top $K=\lceil(1-\xi)n_{\text{grids}}\rceil$ |
 
-## Interpretation & theory
+## Interpretation
 
 | Symbol | Meaning |
 |--------|---------|
 | $\mathrm{PD}_j(x_j)$ | partial dependence $\mathbb{E}_{X_{(-j)}}[m(x_j, X_{(-j)})]$ |
 | $\mathrm{PD}_{\pm,j}^{(\ell)}(x_j)$ | signed-branch partial dependence of stage $\ell$ |
 | $C^{(\ell)}_{\pm,j}$ | per-stage/feature/branch PD constant $c^{(\ell)}_{\pm,j}\lambda_\pm^{(\ell)}$ |
-| $\mathcal{W}_{\text{mix}}^{(1,1)}$ | Sobolev space of dominant mixed smoothness |
-| $\mathcal{D}_p^+$ | dictionary of normalized non-negative rank-1 products |
-| $\mathcal{V}_1(\mathcal{D})$ | variation class of dictionary $\mathcal{D}$ |
-| $f_r$ | OGA approximation after $r$ greedy steps |
 
 !!! note "Branch sign convention"
     The "$+$" and "$-$" branches are **not** positive/negative values — both products are
