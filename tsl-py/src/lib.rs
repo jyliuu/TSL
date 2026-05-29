@@ -100,9 +100,7 @@ impl StagePredictorPy {
         x: PyReadonlyArray2<'py, f64>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let x = x.as_array();
-        // Ensure array is contiguous before passing to Rust
-        let x_contiguous = x.to_owned();
-        let y_hat = self.0.predict(x_contiguous.view());
+        let y_hat = self.0.predict(x);
         Ok(y_hat.to_pyarray(py))
     }
 }
@@ -138,9 +136,7 @@ impl TSLPy {
         x: PyReadonlyArray2<'py, f64>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let x = x.as_array();
-        // Ensure array is contiguous before passing to Rust
-        let x_contiguous = x.to_owned();
-        let y_hat = self.0.predict(x_contiguous.view());
+        let y_hat = self.0.predict(x);
         Ok(y_hat.to_pyarray(py))
     }
 
@@ -857,9 +853,8 @@ impl TSLPy {
     ) -> PyResult<(TSLPy, FitResultPy)> {
         let x = x.as_array();
         let y = y.as_array();
-        // Ensure arrays are contiguous before passing to Rust
-        let x_contiguous = x.to_owned();
-        let y_contiguous = y.to_owned();
+        let x_contiguous = x.as_standard_layout();
+        let y_contiguous = y.as_standard_layout();
 
         let split_strategy_params = match split_strategy {
             "random" => SplitStrategyParamsBuilder::new()
@@ -1122,9 +1117,7 @@ impl GridTensorPy {
         x: PyReadonlyArray2<'py, f64>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let x = x.as_array();
-        // Ensure array is contiguous before passing to Rust
-        let x_contiguous = x.to_owned();
-        let y_hat = self.0.predict(x_contiguous.view());
+        let y_hat = self.0.predict(x);
         Ok(y_hat.to_pyarray(py))
     }
 
@@ -1143,9 +1136,8 @@ impl GridTensorPy {
     ) -> PyResult<(GridTensorPy, FitResultPy)> {
         let x = x.as_array();
         let y = y.as_array();
-        // Ensure arrays are contiguous before passing to Rust
-        let x_contiguous = x.to_owned();
-        let y_contiguous = y.to_owned();
+        let x_contiguous = x.as_standard_layout();
+        let y_contiguous = y.as_standard_layout();
         let params = GridTensorParamsBuilder::new()
             .n_iter(n_iter)
             .split_strategy(
