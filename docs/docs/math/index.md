@@ -1,6 +1,6 @@
 # Notation
 
-This page collects the symbols used throughout the mathematics section. TSL solves a
+This page collects the symbols used throughout the *Under the hood* section. TSL solves a
 supervised regression problem: estimate the conditional mean
 $m(\mathbf{x}) = \mathbb{E}[Y \mid X = \mathbf{x}]$ from i.i.d. observations
 $\mathcal{D}_n = \{(y^{(i)}, \mathbf{x}^{(i)})\}_{i=1}^n \subseteq \mathbb{R}\times\mathcal{X}$,

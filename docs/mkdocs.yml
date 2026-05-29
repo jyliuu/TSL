@@ -78,7 +78,7 @@ nav:
       - TSL (forest): code/forest.md
       - Logging: code/logging.md
       - Dashboard (tslviz): code/dashboard.md
-  - Mathematics:
+  - Under the hood:
       - Notation: math/index.md
       - The model: math/model.md
       - Fitting: math/fitting.md

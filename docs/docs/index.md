@@ -46,9 +46,9 @@ Everything below is produced by TSL itself (via the `tsl_py.plot` helpers) — t
   <figcaption>An inland (desert) home, for contrast.</figcaption>
 </figure>
 
-!!! tip "Read the mathematics — it is short, and it is the point"
+!!! tip "Read this first — it is short, and it is the point"
     These plots only mean something once you know what a **backbone**, a **tilt**, and a
-    **stage** are. We **strongly recommend** reading the **[Mathematics](math/model.md)**
+    **stage** are. We **strongly recommend** reading the **[Under the hood](math/model.md)**
     section before relying on the figures: start with [The model](math/model.md), then
     [Partial dependence](math/partial-dependence.md). It is what makes TSL interpretable
     rather than just another regressor.
@@ -73,7 +73,7 @@ with a scikit-learn API ([Python API](code/python-api.md)), and
 - **New to TSL?** [Getting started](guides/getting-started.md) — install, fit, predict.
 - **Using the model?** The [Python API](code/python-api.md), the
   [Hyperparameters](guides/hyperparameters.md) reference, then [Examples](guides/examples.md).
-- **Understanding the model?** The [Mathematics](math/model.md) section — [Notation](math/index.md) →
+- **Understanding the model?** [Under the hood](math/model.md) — [Notation](math/index.md) →
   [The model](math/model.md) → [Fitting](math/fitting.md) →
   [Partial dependence](math/partial-dependence.md).
 - **Working on the code?** Start with [Architecture](code/architecture.md) and its two
