@@ -64,7 +64,7 @@ with stabilizing weights $w_i\ge 0$ and ridge strength $\alpha\ge 0$. The split 
 maximizes the total reduction $\Delta_{\text{split}} = \Delta_L + \Delta_R$, where
 $\Delta_S \coloneqq \mathcal{L}_S(1,1) - \mathcal{L}_S(u_+^S,u_-^S)$, is selected.
 
-### The closed-form 2×2 solver
+### The closed-form 2x2 solver
 
 It is convenient to work with the **delta** $\hat{u}_\pm = u_\pm - 1$ (so the baseline
 "no update" is $\hat{u}_\pm=0$). The objective becomes
