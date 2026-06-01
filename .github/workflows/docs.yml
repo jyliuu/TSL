@@ -1,9 +1,9 @@
 name: Docs
 
-# Builds the MkDocs documentation site in strict mode. `--strict` turns broken
-# internal links and bad nav entries into errors, so this job is the correctness
-# gate for the docs/ folder. It does not deploy; GitHub Pages deployment can be
-# added later (mkdocs gh-deploy).
+# Builds the MkDocs site in strict mode (`--strict` turns broken internal links
+# and bad nav entries into errors) and, on `main`, deploys it to GitHub Pages via
+# the official Pages actions. Pull requests run the build only — the deploy job is
+# gated to the `main` ref, so PRs stay a pure correctness gate with no publish.
 on:
   push:
     branches: [main]
@@ -16,7 +16,13 @@ on:
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
-# Cancel superseded runs on the same ref.
+# Token scopes required by actions/deploy-pages (OIDC + Pages write).
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Cancel superseded runs on the same ref; the latest docs always win.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -39,3 +45,23 @@ jobs:
 
       - name: Build (strict)
         run: mkdocs build --strict -f docs/mkdocs.yml
+
+      # site_dir defaults to docs/site (relative to docs/mkdocs.yml).
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    # Publish only from main (push or dispatch-from-main); PRs build but never deploy.
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

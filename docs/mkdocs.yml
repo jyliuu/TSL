@@ -4,6 +4,7 @@ site_description: >-
   regression model whose fitted form is a sum of ordered-difference rank-1
   separable stages.
 site_author: Jinyang Liu
+site_url: https://jyliuu.github.io/TSL/
 repo_url: https://github.com/jyliuu/TSL
 repo_name: jyliuu/TSL
 edit_uri: edit/main/docs/docs/
