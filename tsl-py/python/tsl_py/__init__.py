@@ -1,7 +1,14 @@
+from importlib.metadata import PackageNotFoundError, version as _version
+
 from tsl_py._tsl_py import TSL, GridTensor, StagePredictor, FitResult
 from tsl_py.sklearn import TSLRegressor
 
-__all__ = ["TSL", "GridTensor", "StagePredictor", "FitResult", "TSLRegressor"]
+try:
+    __version__ = _version("tensorsl")
+except PackageNotFoundError:
+    __version__ = "0.0.0+unknown"
+
+__all__ = ["TSL", "GridTensor", "StagePredictor", "FitResult", "TSLRegressor", "__version__"]
 
 
 def __getattr__(name):

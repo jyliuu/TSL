@@ -1,0 +1,95 @@
+name: Release
+
+# Build and publish the tensorsl distribution to PyPI. Triggered by a `vX.Y.Z` tag, which
+# scripts/release.sh creates after bumping the version and changelog. A
+# maintainer-pushed tag is the only trigger; `workflow_dispatch` builds the
+# artifacts for inspection but never publishes.
+#
+# Scope: Linux (x86_64) wheel + sdist for now. The wheel bundles the system
+# OpenBLAS via auditwheel. macOS/Windows and other arches are intentionally
+# left out — the platform matrix becomes trivial to widen once the linear-
+# algebra backend is finalized; until then this proves the tag -> PyPI path.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build wheel + sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # manylinux build runs in an AlmaLinux-based container; install OpenBLAS
+      # there so ndarray-linalg's openblas-system backend links, then auditwheel
+      # bundles it into the wheel.
+      - name: Build wheel (manylinux)
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist -m tsl-py/Cargo.toml
+          manylinux: auto
+          before-script-linux: |
+            if command -v dnf >/dev/null; then
+              dnf install -y openblas-devel
+            else
+              yum install -y openblas-devel
+            fi
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist -m tsl-py/Cargo.toml
+
+      # Guard against a forgotten bump: the built version must equal the tag.
+      - name: Check version matches tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          # sdist is <normalized-name>-<version>.tar.gz; strip the name prefix.
+          built="$(basename dist/*.tar.gz .tar.gz | sed -E 's/^[^-]+-//')"
+          echo "tag=$tag built=$built"
+          [ "$tag" = "$built" ] || { echo "::error::tag $tag != built $built"; exit 1; }
+
+      # Smoke-test the built wheel: install it and import the package.
+      - name: Smoke test wheel
+        run: |
+          python -m pip install --upgrade pip
+          pip install dist/*.whl
+          python -c "import tsl_py; from tsl_py import TSLRegressor; print('import OK')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    # Publish only for real tags, never for manual dispatch builds.
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # PyPI Trusted Publishing (OIDC) — no stored token
+      contents: write   # create the GitHub Release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*

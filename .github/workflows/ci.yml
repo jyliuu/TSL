@@ -12,8 +12,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Detect which part of the tree changed so the suites below run only when
+  # relevant. Python wraps Rust, so a Rust change runs both suites; a
+  # Python-only change runs just the Python suite.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      python: ${{ steps.filter.outputs.python }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'src/**'
+              - 'tests/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.github/workflows/ci.yml'
+            python:
+              - 'tsl-py/**'
+              - '!tsl-py/examples/**'
+              - '.github/workflows/ci.yml'
+
   rust-tests:
     name: Rust tests
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -37,6 +65,9 @@ jobs:
 
   python-tests:
     name: Python tests
+    needs: changes
+    # Python wraps Rust, so a Rust change must also exercise the Python suite.
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.python == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -75,3 +106,20 @@ jobs:
       - name: Run tests
         working-directory: tsl-py
         run: pytest python/tests/
+
+  version-alignment:
+    name: Version alignment
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.python == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # `cargo metadata` resolves the workspace version; it parses manifests
+      # only (no compile), so no OpenBLAS toolchain is needed here.
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Asserts the R package version tracks the canonical Cargo version. While
+      # the R package does not exist yet this is a clean no-op.
+      - name: Check version alignment
+        run: python3 scripts/sync-version.py --check

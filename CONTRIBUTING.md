@@ -43,3 +43,33 @@ type with a scope:
 
 See the [Conventional Commits summary](https://www.conventionalcommits.org/en/v1.0.0/#summary)
 for the full specification.
+
+## Releasing
+
+There is a single source-of-truth version: `[workspace.package].version` in the root
+`Cargo.toml`. Both Rust crates inherit it, `tsl-py` exposes it to Python through maturin's
+dynamic version (so `pyproject.toml` carries no version of its own), and the R connector
+package (`tslr`, in `tsl-r/`) is kept in step by `scripts/sync-version.py`. They cannot drift.
+
+The Python package is distributed on PyPI as **`tensorsl`** but imported as `tsl_py` — the
+install name and the import name differ on purpose.
+
+To cut a release, from a clean `main`:
+
+```sh
+scripts/release.sh X.Y.Z      # bumps the version, regenerates CHANGELOG.md, commits, tags
+git push origin main
+git push origin vX.Y.Z        # this tag is what triggers publishing
+```
+
+`scripts/release.sh` needs two tools once: `cargo install cargo-edit git-cliff`. The version
+bump is deliberate and manual; `git-cliff` writes the changelog from the Conventional Commits
+since the previous tag (`cliff.toml` controls grouping).
+
+Pushing the `vX.Y.Z` tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml),
+which builds the wheel and sdist, checks the built version matches the tag, and publishes to
+PyPI via Trusted Publishing (OIDC — no stored token), then drafts a GitHub Release.
+
+One-time project setup (already done for the canonical repo): register a PyPI Trusted
+Publisher for project `tensorsl` pointing at this repo's `release.yml` and the `pypi`
+environment, and create that `pypi` environment in the GitHub repo settings.

@@ -1,11 +1,11 @@
 [package]
 name = "tsl-py"
-version = "0.1.0"
-edition = "2021"
-authors = ["Jinyang Liu <jl@math.ku.dk>"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
 description = "Python bindings for the TSL (Tensor Separation Learning) Rust library."
-license = "MIT"
-repository = "https://github.com/jyliuu/TSL"
+license.workspace = true
+repository.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
@@ -14,7 +14,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 numpy = "0.27"
-pyo3 = { version = "0.27.1", features = ["extension-module"] }
+pyo3 = { version = "0.27.1", features = ["extension-module", "abi3-py39"] }
 tsl_rust = { path = "../", default-features = false, features = ["use-rayon", "evo-logging"] }
 rand = "0.8.5"
 bincode = "1.3"
