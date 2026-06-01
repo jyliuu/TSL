@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "tsl-py"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bincode",
  "numpy",
@@ -985,7 +985,7 @@ dependencies = [
 
 [[package]]
 name = "tsl_rust"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bincode",
  "bytemuck",
