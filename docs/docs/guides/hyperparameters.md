@@ -15,7 +15,7 @@ constructor defaults.
 | `decay` | `1.0` | multiply `n_iter` by this after epoch 1 (`<1` makes later stages coarser; `1.0` = off) |
 | `seed` | `42` | RNG seed — fits are deterministic given the seed |
 | `verbosity` | `1` | log verbosity |
-| `visualdb` | `None` | path to an evo-logging SQLite DB; see [Visualizing](visualizing.md) |
+| `visualdb` | `None` | path to an evo-logging SQLite DB; see [Visualization dashboard](visualizing.md) |
 
 ## Bag & aggregation (stage level)
 

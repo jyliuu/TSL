@@ -3,7 +3,7 @@
 `src/logging.rs` and `src/logging/` implement **evo-logging**: when a fit has a
 `visualdb_path` set (and the `evo-logging` feature is on — it is by default), every
 split / resplit / merge and per-stage snapshot is streamed to a SQLite database. The
-[`tslviz` dashboard](dashboard.md) later reads that DB read-only to replay how each stage
+[Visualization dashboard](../guides/visualizing.md) later reads that DB read-only to replay how each stage
 was built.
 
 When the feature is **off**, all the logging entry points compile to no-ops (the `pub fn`
@@ -52,7 +52,6 @@ Pass a database path at fit time — from Python:
 TSLRegressor(..., visualdb="run.sqlite").fit(X, y)
 ```
 
-then explore it with `tslviz --db run.sqlite`. The end-to-end workflow is described in
-[Visualizing a fit](../guides/visualizing.md), and the DB schema the dashboard reads is
-documented on the [Dashboard](dashboard.md) page. The logging output is exercised in
-`tests/evo_logging.rs`.
+then explore it with `tslviz --db run.sqlite`. The end-to-end workflow and the DB schema
+the dashboard reads are documented on the [Visualization dashboard](../guides/visualizing.md)
+page. The logging output is exercised in `tests/evo_logging.rs`.

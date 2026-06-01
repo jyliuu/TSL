@@ -1,4 +1,4 @@
-# TSL (forest)
+# TSL
 
 `src/forest.rs` and `src/forest/` implement the boosted model — a `Vec<StagePredictor>` —
 and the stagewise fitting loop.

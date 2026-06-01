@@ -85,16 +85,18 @@ t_2 &= -\sum_{i\in S} w_i\,r_i\,\tilde{m}_{-}^{(i)}. & &
 \end{aligned}
 $$
 
-!!! note "Implementation note — tilt coupling ($\tau,\rho$)"
+!!! note "Implementation note — tilt coupling (τ, ρ)"
     The solver `solve_two_tensor` (`src/grid_tensor/two_tensor_solver.rs`) optimizes a
     slightly more general objective than the ridge above, adding two regularizers that
     couple the two branches:
     $\;+\,\tau(\hat{u}_+ - \hat{u}_-)^2 + \rho\,|\hat{u}_+ - \hat{u}_-|$. The system matrix is
     then
+
     $$
     A = \begin{pmatrix} S_{11}+\alpha+\tau & S_{12}-\tau \\ S_{12}-\tau & S_{22}+\alpha+\tau \end{pmatrix},
     \qquad t = \begin{pmatrix} t_1 \\ t_2 \end{pmatrix}.
     $$
+
     Setting $\tau=\rho=0$ recovers the ridge form above. With $\rho=0$ the solution is the
     explicit inverse $\hat{u}=A^{-1}t$; with $\rho>0$ an iterative soft-thresholding step
     handles the $\ell_1$ term. Defaults keep $\tau$ small and $\rho=0$

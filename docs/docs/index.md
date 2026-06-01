@@ -87,20 +87,24 @@ The model is a three-level hierarchy, and the `src/` module tree mirrors it exac
 |------|------|------------|------|
 | 1 | `GridTensor` | one fitted separable component (backbone/tilt + $\lambda_\pm$) | [GridTensor](code/grid-tensor.md) |
 | 2 | `StagePredictor` | one boosting stage: a bag of `GridTensor`s + OLS scaling | [StagePredictor](code/stage-predictor.md) |
-| 3 | `TSL` | the boosted model: a `Vec<StagePredictor>` summed | [TSL (forest)](code/forest.md) |
+| 3 | `TSL` | the boosted model: a `Vec<StagePredictor>` summed | [TSL](code/forest.md) |
 
 The core is the Rust crate `tsl_rust` (library name `tsl`). `tsl-py/` wraps it for Python
 with a scikit-learn API ([Python API](code/python-api.md)), and
 `tsl-split-evolution-dashboard/` (`tslviz`) visualizes how a fit was built
-([Dashboard](code/dashboard.md)).
+([Visualization dashboard](guides/visualizing.md)).
 
 ## Where to start
+
+Before anything else, read the **[Under the hood](math/index.md)** material — start with
+**[Notation](math/index.md)** and **[The model](math/model.md)** to understand what a
+backbone, a tilt, and a stage are. That understanding is what makes TSL interpretable
+rather than just another regressor, and it is worth five minutes before you fit your first
+model. From there: [Fitting](math/fitting.md) and
+[Partial dependence](math/partial-dependence.md) round out the theory.
 
 - **New to TSL?** [Getting started](guides/getting-started.md) — install, fit, predict.
 - **Using the model?** The [Python API](code/python-api.md), the
   [Hyperparameters](guides/hyperparameters.md) reference, then [Examples](#examples).
-- **Understanding the model?** [Under the hood](math/model.md) — [Notation](math/index.md) →
-  [The model](math/model.md) → [Fitting](math/fitting.md) →
-  [Partial dependence](math/partial-dependence.md).
 - **Working on the code?** Start with [Architecture](code/architecture.md) and its two
   critical invariants, then the per-module pages.

@@ -9,6 +9,20 @@
   --md-primary-bg-color--light: rgba(255, 255, 255, 0.7);
 }
 
+/* In-content links: light blue so hyperlinks are clearly distinguishable
+   (the slate-900 primary override would otherwise make them render as body text).
+   Material sets --md-typeset-a-color on <body> via the color-scheme selectors, so the
+   override has to live there too — a :root rule is shadowed by the nearer <body> value. */
+[data-md-color-scheme="default"] {
+  --md-typeset-a-color: #2f81f7;
+}
+[data-md-color-scheme="slate"] {
+  --md-typeset-a-color: #58a6ff;
+}
+.md-typeset a:hover {
+  text-decoration: underline;
+}
+
 /* White rounded badge behind the logo so it reads on the dark header. */
 .md-header__button.md-logo {
   padding: 0.2rem;

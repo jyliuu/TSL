@@ -170,7 +170,9 @@ Load a model saved with [`save`](#meth-tslregressor-save); also reads the legacy
 ## `TSL` { #cls-tsl }
 
 The core boosted model. Use it directly for the interpretation methods below; otherwise
-prefer [`TSLRegressor`](#cls-tslregressor).
+prefer [`TSLRegressor`](#cls-tslregressor). Its `fit` classmethod takes the same flat
+hyperparameters as the [`TSLRegressor` constructor](#cls-tslregressor); see the
+[Hyperparameters](../guides/hyperparameters.md) reference for tuning guidance.
 
 **Attributes**
 

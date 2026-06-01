@@ -1,4 +1,4 @@
-# GridTensor (core)
+# GridTensor
 
 `src/grid_tensor.rs` and the `src/grid_tensor/` module tree implement one fitted separable
 component — the rank-1 product in [two-tensor form](../math/model.md#backbone-and-exponential-tilt).

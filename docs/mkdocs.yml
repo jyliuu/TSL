@@ -72,14 +72,13 @@ nav:
       - Python API: code/python-api.md
       - Plotting API: code/plotting.md
       - Hyperparameters: guides/hyperparameters.md
-      - Visualization dashboard: guides/visualizing.md
-  - Codebase:
+      - Visualization dashboard (WIP): guides/visualizing.md
+  - Rust backend:
       - Architecture: code/architecture.md
-      - GridTensor (core): code/grid-tensor.md
+      - GridTensor: code/grid-tensor.md
       - StagePredictor: code/stage-predictor.md
-      - TSL (forest): code/forest.md
+      - TSL: code/forest.md
       - Logging: code/logging.md
-      - Dashboard (tslviz): code/dashboard.md
   - Under the hood:
       - Notation: math/index.md
       - The model: math/model.md
