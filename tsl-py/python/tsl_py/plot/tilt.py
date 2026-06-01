@@ -24,13 +24,30 @@ from typing import Iterable, List, NamedTuple, Optional, Sequence, Tuple, Union
 import numpy as np
 
 from ._common import (
-    PALETTE,
     _as_array_and_names,
     _require_matplotlib,
     _resolve_feature,
     _resolve_features,
     _stage_backbone_tilt,
-    tsl_diverging_cmap,
+)
+from ._theme import (
+    TOKENS,
+    airy,
+    axis_label,
+    card_colorbar,
+    card_inset,
+    figure_title,
+    flat_background,
+    flat_diverging_cmap,
+    flat_surface_axes,
+    grid_card_layout,
+    grid_figsize,
+    header,
+    mix,
+    panel_note,
+    setup_fonts,
+    signed_fill,
+    zero_ref,
 )
 
 Feature = Union[int, str]
@@ -175,11 +192,11 @@ def plot_tilt_1d(
     figsize : (float, float), optional
         Defaults to ``(4 * n_features, 4 * n_stages)``.
     color : str, optional
-        Line/step colour for the tilt curve. Defaults to a vibrant violet
-        accent; positive/negative fills always use the package's emerald/pink
-        sign palette.
+        Line/step colour for the tilt curve. Defaults to the indigo accent;
+        the signed fill carries sign via the orange/blue sign tokens.
     """
     plt = _require_matplotlib()
+    disp, mono = setup_fonts()
     X_arr, names = _as_array_and_names(X, feature_names)
     feature_indices = _resolve_features(features, names)
     selected_names = [names[i] for i in feature_indices]
@@ -194,44 +211,35 @@ def plot_tilt_1d(
         if not 0 <= s < n_stages_total:
             raise ValueError(f"stage index {s} out of range [0, {n_stages_total})")
 
-    line_color = color if color is not None else PALETTE["tilt"]
-    pos_fill = PALETTE["pos"]
-    neg_fill = PALETTE["neg"]
+    line_color = color if color is not None else TOKENS["accent"]
 
     n_f = len(feature_indices)
     n_s = len(stage_idxs)
     if figsize is None:
-        figsize = (4 * n_f, 4 * n_s)
-    fig, axes = plt.subplots(n_s, n_f, figsize=figsize, squeeze=False)
+        figsize = grid_figsize(n_s, n_f, cell_w_in=4.1, cell_h_in=3.7)
+    fig = plt.figure(figsize=figsize)
+    fw, fh = fig.get_size_inches()
+    cards = grid_card_layout(fw, fh, n_s, n_f)
+    bgax = flat_background(fig, cards)
+    figure_title(fig, "TSL / diagnostics", "Per-feature tilt",
+                 badge="plot_tilt_1d()", badge_color=TOKENS["accent"])
+    axes = np.empty((n_s, n_f), dtype=object)
 
     for row, s in enumerate(stage_idxs):
         for col, _ in enumerate(feature_indices):
-            ax = axes[row, col]
+            ax = card_inset(fig, cards, (row, col))
+            axes[row, col] = ax
             x_vals = x_grids[col]
             d_vals = tilt[col, :, s]
-            ax.fill_between(
-                x_vals, 0.0, d_vals, step="post",
-                where=(d_vals >= 0), color=pos_fill, alpha=0.30,
-            )
-            ax.fill_between(
-                x_vals, 0.0, d_vals, step="post",
-                where=(d_vals < 0), color=neg_fill, alpha=0.30,
-            )
+            signed_fill(ax, x_vals, 0.0, d_vals, step=True)
+            zero_ref(ax)
             ax.step(x_vals, d_vals, where="post", lw=2.0, color=line_color,
-                    label=r"$d_j(x_j)$")
-            ax.axhline(0, color=PALETTE["neutral_dark"], ls="--",
-                       lw=0.6, alpha=0.6)
-            ax.set_xlabel(selected_names[col], fontsize=11)
-            if col == 0:
-                ax.set_ylabel(f"Tilt (Stage {s + 1})", fontsize=11)
-            ax.set_title(
-                f"{selected_names[col]} — Stage {s + 1}", fontsize=10,
-                color=PALETTE["neutral_dark"], fontweight="semibold",
-            )
-            ax.grid(True, alpha=0.25)
-            ax.legend(loc="best", fontsize=8)
-
-    fig.tight_layout()
+                    zorder=3)
+            airy(ax, mono)
+            axis_label(ax, mono, xlabel=selected_names[col],
+                       ylabel="Tilt $d_j$" if col == 0 else None)
+            header(fig, bgax, cards, (row, col), f"Stage {s + 1}",
+                   selected_names[col], "", disp, mono)
     return Tilt1DResult(
         fig=fig,
         axes=axes,
@@ -269,7 +277,7 @@ def plot_2d_tilt(
         Mesh resolution per axis.
     cmap : Colormap or str, optional
         Matplotlib colormap for the diverging contour. Defaults to the
-        package's pink↔white↔emerald diverging cmap.
+        blue↔pale↔orange diverging cmap, anchored at zero.
     return_data_only : bool
         If True, skip figure creation and return only the computed arrays
         (``fig=None``, ``axes=None``).
@@ -305,13 +313,20 @@ def plot_2d_tilt(
         )
 
     plt = _require_matplotlib()
+    disp, mono = setup_fonts()
     n_p = len(stage_idxs)
     if figsize is None:
-        figsize = (5 * n_p, 4.5)
-    fig, axes = plt.subplots(1, n_p, figsize=figsize, squeeze=False)
-    axes = axes[0]
+        figsize = grid_figsize(1, n_p, cell_w_in=5.2, cell_h_in=4.6)
+    fig = plt.figure(figsize=figsize)
+    fw, fh = fig.get_size_inches()
+    cards = grid_card_layout(fw, fh, 1, n_p)
+    bgax = flat_background(fig, cards)
+    figure_title(fig, "TSL / diagnostics", "2D tilt product",
+                 badge="plot_2d_tilt()", badge_color=TOKENS["accent"])
+    pair = f"$d_{{{names[fx]}}}\\times d_{{{names[fy]}}}$"
+    axes = np.empty(n_p, dtype=object)
 
-    cmap_obj = cmap if cmap is not None else tsl_diverging_cmap()
+    cmap_obj = cmap if cmap is not None else flat_diverging_cmap()
 
     for col, s in enumerate(stage_idxs):
         Z = tilt_per_stage[s]
@@ -320,18 +335,12 @@ def plot_2d_tilt(
             norm = mcolors.TwoSlopeNorm(vmin=-1.0, vcenter=0.0, vmax=1.0)
         else:
             norm = mcolors.TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
-        ax = axes[col]
-        cs = ax.contourf(Xg, Yg, Z, levels=20, cmap=cmap_obj, norm=norm, alpha=0.9)
-        fig.colorbar(cs, ax=ax, shrink=0.7, pad=0.04, label="2D Tilt")
-        ax.set_xlabel(names[fx])
-        ax.set_ylabel(names[fy])
-        ax.set_title(
-            f"Stage {s + 1}: 2D tilt "
-            f"$d_{{{names[fx]}}}\\times d_{{{names[fy]}}}$",
-            color=PALETTE["neutral_dark"], fontweight="semibold",
-        )
-
-    fig.tight_layout()
+        ax = card_inset(fig, cards, (0, col), pad_r_in=1.05)
+        axes[col] = ax
+        cs = ax.contourf(Xg, Yg, Z, levels=20, cmap=cmap_obj, norm=norm)
+        flat_surface_axes(ax, mono, xlabel=names[fx], ylabel=names[fy])
+        card_colorbar(fig, cards, (0, col), cs, mono, label="2D tilt")
+        header(fig, bgax, cards, (0, col), f"Stage {s + 1}", pair, "", disp, mono)
     return Tilt2DResult(
         fig=fig, axes=axes, feature_x=fx, feature_y=fy,
         x_vals=x_vals, y_vals=y_vals, X=Xg, Y=Yg,
@@ -387,16 +396,17 @@ def plot_tilt_diagnostics(
         Defaults to ``(3.5 * 4, 2.8 * n_features * n_stages)``.
     pure_color : str, optional
         Line/fill colour for the two ``tanh``-only panels. Defaults to the
-        package's sky-blue accent.
+        blue sign token.
     weighted_color : str, optional
         Line/fill colour for the two ``B_j``-weighted panels. Defaults to the
-        package's emerald accent.
+        indigo accent.
     """
     plt = _require_matplotlib()
+    disp, mono = setup_fonts()
     if pure_color is None:
-        pure_color = PALETTE["backbone"]
+        pure_color = TOKENS["neg"]
     if weighted_color is None:
-        weighted_color = PALETTE["pos"]
+        weighted_color = TOKENS["accent"]
     X_arr, names = _as_array_and_names(X, feature_names)
     feature_indices = _resolve_features(features, names)
     selected_names = [names[i] for i in feature_indices]
@@ -433,9 +443,15 @@ def plot_tilt_diagnostics(
     n_rows = n_f * n_s
     n_cols = 4
     if figsize is None:
-        figsize = (3.5 * n_cols, 2.8 * n_rows)
+        figsize = grid_figsize(n_rows, n_cols, cell_w_in=3.6, cell_h_in=3.3)
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
+    fig = plt.figure(figsize=figsize)
+    fw, fh = fig.get_size_inches()
+    cards = grid_card_layout(fw, fh, n_rows, n_cols)
+    bgax = flat_background(fig, cards)
+    figure_title(fig, "TSL / diagnostics", "Tilt diagnostics",
+                 badge="plot_tilt_diagnostics()", badge_color=TOKENS["accent"])
+    axes = np.empty((n_rows, n_cols), dtype=object)
 
     curve_titles = (
         r"$\tanh(d_j)$",
@@ -459,30 +475,22 @@ def plot_tilt_diagnostics(
             d_mean = float(d_j.mean())
 
             for cc, curve in enumerate(curves):
-                ax = axes[row, cc]
+                ax = card_inset(fig, cards, (row, cc))
+                axes[row, cc] = ax
                 color = pure_color if cc in (0, 2) else weighted_color
-                ax.plot(x_vals, curve, lw=1.6, color=color)
-                ax.fill_between(x_vals, 0.0, curve, color=color, alpha=0.22)
-                ax.axhline(0, color=PALETTE["neutral_dark"], ls="--",
-                           lw=0.6, alpha=0.55)
+                ax.fill_between(x_vals, 0.0, curve, color=mix(color, 0.82),
+                                zorder=1)
+                zero_ref(ax)
+                ax.plot(x_vals, curve, lw=1.8, color=color, zorder=3)
                 if cc in (0, 2):
                     ax.set_ylim(-1.05, 1.05)
-                ax.grid(True, alpha=0.25)
-                if row == 0:
-                    ax.set_title(curve_titles[cc], fontsize=11,
-                                 color=PALETTE["neutral_dark"],
-                                 fontweight="semibold")
-                if si == n_s - 1:
-                    ax.set_xlabel(selected_names[fi], fontsize=10)
-                if cc == 0:
-                    ax.set_ylabel(
-                        f"{selected_names[fi]}\nStage {s + 1}"
-                        f"\n$\\overline{{d_j}}={d_mean:+.3g}$",
-                        fontsize=9,
-                    )
+                airy(ax, mono)
+                axis_label(ax, mono, xlabel=selected_names[fi])
+                header(fig, bgax, cards, (row, cc),
+                       f"{selected_names[fi]} · Stage {s + 1}",
+                       curve_titles[cc], "", disp, mono)
+                panel_note(ax, rf"$\overline{{d_j}}={d_mean:+.3g}$", mono)
                 curves_all[fi, :, si, cc] = curve
-
-    fig.tight_layout()
     stage_slice = np.asarray(stage_idxs, dtype=int)
     return TiltDiagnosticsResult(
         fig=fig,
