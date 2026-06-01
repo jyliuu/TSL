@@ -48,8 +48,7 @@ examples = [
   "interpret",
   "matplotlib>=3.8,<4",
   "pandas>=2,<3",
-  "sepals @ git+https://github.com/jyliuu/sepals",
 ]
 dev = [
-  "tsl-py[test,examples]",
+  "tensorsl[test,examples]",
 ]
