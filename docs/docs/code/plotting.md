@@ -31,6 +31,8 @@ ones.
 
 ## Partial dependence & ICE
 
+The model-native PD math these plots draw on is derived in [Partial dependence](../math/partial-dependence.md).
+
 ### `plot_first_order_pd` { #fn-plot-first-order-pd }
 
 ```python
@@ -51,7 +53,7 @@ selected features (one row per stage, one column per feature).
 
 | Type | Description |
 |------|-------------|
-| `PDDifferenceResult` | figure plus the per-stage f₊/f₋ branch curves and constants for the selected features. |
+| `PDDifferenceResult` | figure plus the per-stage $f_+$ and $f_-$ branch curves and constants for the selected features. |
 
 ### `pd_difference_plot` { #fn-pd-difference-plot }
 
@@ -128,6 +130,8 @@ Individual Conditional Expectation curves for one feature.
 ---
 
 ## Backbone & tilt
+
+The per-feature backbone $b_j(x_j)$ and tilt $d_j(x_j)$ are defined in [The model → backbone and exponential tilt](../math/model.md#backbone-and-exponential-tilt).
 
 ### `plot_2d_backbone` { #fn-plot-2d-backbone }
 
@@ -385,24 +389,24 @@ Returned by `plot_first_order_pd` and `pd_difference_plot`.
 | `feature_indices` | `list[int]` | plotted feature columns |
 | `feature_names` | `list[str]` | their labels |
 | `x_grids` | `list[ndarray (n_grid,)]` | evaluation grid per feature |
-| `f_plus` | `ndarray (n_features, n_grid, n_stages)` | scaled f₊ branch curves |
-| `f_minus` | `ndarray (n_features, n_grid, n_stages)` | scaled f₋ curves; carries the model's negative sign, so the positive PD₋ = −`f_minus` |
-| `constants` | `ndarray (n_features, n_stages, 2)` | (c₊, c₋) per (feature, stage); c₋ stored with model sign, so C₋ = −c₋ |
+| `f_plus` | `ndarray (n_features, n_grid, n_stages)` | scaled $f_+$ branch curves |
+| `f_minus` | `ndarray (n_features, n_grid, n_stages)` | scaled $f_-$ curves; carries the model's negative sign, so the positive $\mathrm{PD}_- = -f_-$ |
+| `constants` | `ndarray (n_features, n_stages, 2)` | $(c_+, c_-)$ per (feature, stage); $c_-$ stored with model sign, so $C_- = -c_-$ |
 | `pd_scale` | `str` | `"raw"` or `"component"` |
 | `normalized` | `NormalizedDiagnostics | None` | populated only when `pd_scale="component"` |
 
 ### `NormalizedDiagnostics` { #dc-normalizeddiagnostics }
 
-Component-space (m-space) diagnostics carried on a `PDDifferenceResult`; present only when `pd_scale="component"`. Every array has shape `(n_features, n_grid, n_stages)`.
+Component-space ($m$-space) diagnostics carried on a `PDDifferenceResult`; present only when `pd_scale="component"`. Every array has shape `(n_features, n_grid, n_stages)`. See [Backbone–tilt reconstruction from PD](../math/partial-dependence.md#backbonetilt-reconstruction-from-pd) for the $m_\pm \to (b, d)$ map.
 
 | Field | Type | Description |
 |------|------|-------------|
-| `m_plus` | `ndarray` | PD₊ / C₊ (positive component factor) |
-| `m_minus` | `ndarray` | PD₋ / C₋ |
-| `backbone` | `ndarray` | √(m₊·m₋), the intrinsic per-feature backbone |
-| `tilt` | `ndarray` | ½·log(m₊/m₋), the intrinsic per-feature tilt |
-| `tilt_centered` | `ndarray` | `tilt` minus its mean over the x-grid |
-| `tilt_score` | `ndarray` | tanh(`tilt_centered`) |
+| `m_plus` | `ndarray` | $\mathrm{PD}_+ / C_+$ (positive component factor) |
+| `m_minus` | `ndarray` | $\mathrm{PD}_- / C_-$ |
+| `backbone` | `ndarray` | $\sqrt{m_+ m_-}$, the intrinsic per-feature backbone |
+| `tilt` | `ndarray` | $\tfrac12\log(m_+/m_-)$, the intrinsic per-feature tilt |
+| `tilt_centered` | `ndarray` | `tilt` minus its mean over the $x$-grid |
+| `tilt_score` | `ndarray` | $\tanh$ of `tilt_centered` |
 
 ### `PD2DResult` { #dc-pd2dresult }
 
@@ -455,8 +459,8 @@ Returned by `plot_2d_backbone`.
 | `feature_x`, `feature_y` | `int` | the two plotted feature columns |
 | `x_vals`, `y_vals` | `ndarray (grid_points,)` | coordinate axes |
 | `X`, `Y` | `ndarray (grid_points, grid_points)` | meshgrid |
-| `backbone_per_stage` | `ndarray (n_stages, grid_points, grid_points)` | per-stage product bₓ(x)·b_y(y) |
-| `pd_per_stage` | `ndarray (n_stages, grid_points, grid_points)` | per-stage 2D PD (f₊ + f₋) |
+| `backbone_per_stage` | `ndarray (n_stages, grid_points, grid_points)` | per-stage product $b_x(x)\,b_y(y)$ |
+| `pd_per_stage` | `ndarray (n_stages, grid_points, grid_points)` | per-stage 2D PD ($f_+ + f_-$) |
 | `stages` | `list[int]` | stage indices included |
 
 ### `Tilt1DResult` { #dc-tilt1dresult }
@@ -470,7 +474,7 @@ Returned by `plot_tilt_1d`.
 | `feature_indices` | `list[int]` | plotted feature columns |
 | `feature_names` | `list[str]` | their labels |
 | `x_grids` | `list[ndarray (grid_points,)]` | evaluation grid per feature |
-| `tilt` | `ndarray (n_features, grid_points, n_stages)` | evaluated tilt dⱼ(xⱼ) per stage |
+| `tilt` | `ndarray (n_features, grid_points, n_stages)` | evaluated tilt $d_j(x_j)$ per stage |
 
 ### `Tilt2DResult` { #dc-tilt2dresult }
 
@@ -483,7 +487,7 @@ Returned by `plot_2d_tilt`.
 | `feature_x`, `feature_y` | `int` | the two plotted feature columns |
 | `x_vals`, `y_vals` | `ndarray` | the two coordinate axes |
 | `X`, `Y` | `ndarray (grid_points, grid_points)` | meshgrid |
-| `tilt_per_stage` | `ndarray (n_stages, grid_points, grid_points)` | per-stage product dₓ(x)·d_y(y) |
+| `tilt_per_stage` | `ndarray (n_stages, grid_points, grid_points)` | per-stage product $d_x(x)\,d_y(y)$ |
 | `stages` | `list[int]` | stage indices included |
 
 ### `TiltDiagnosticsResult` { #dc-tiltdiagnosticsresult }
@@ -493,36 +497,36 @@ Returned by `plot_tilt_diagnostics`.
 | Field | Type | Description |
 |------|------|-------------|
 | `fig` | `Figure` | the drawn figure |
-| `axes` | `ndarray of Axes (n_features·n_stages, 4)` | row `f·n_stages+s` holds the four curves for (feature f, stage s) |
+| `axes` | `ndarray of Axes (n_features * n_stages, 4)` | row $f\cdot n_\text{stages}+s$ holds the four curves for (feature $f$, stage $s$) |
 | `feature_indices` | `list[int]` | plotted feature columns |
 | `feature_names` | `list[str]` | their labels |
 | `stages` | `list[int]` | stage indices included |
 | `x_grids` | `list[ndarray (grid_points,)]` | evaluation grid per feature |
-| `B` | `ndarray (n_features, grid_points, n_stages)` | intrinsic backbone √(m₊·m₋) |
-| `d` | `ndarray (n_features, grid_points, n_stages)` | intrinsic tilt ½·log(m₊/m₋) |
+| `B` | `ndarray (n_features, grid_points, n_stages)` | intrinsic backbone $\sqrt{m_+ m_-}$ |
+| `d` | `ndarray (n_features, grid_points, n_stages)` | intrinsic tilt $\tfrac12\log(m_+/m_-)$ |
 | `d_centered` | `ndarray (same shape as d)` | `d` minus its mean over the grid |
-| `curves` | `ndarray (n_features, grid_points, n_stages, 4)` | the four plotted curves stacked last: [tanh(d), B·tanh(d), tanh(d_centered), B·tanh(d_centered)] |
+| `curves` | `ndarray (n_features, grid_points, n_stages, 4)` | the four plotted curves stacked last: $[\tanh d,\ B\tanh d,\ \tanh d_c,\ B\tanh d_c]$, where $d_c$ is `d_centered` |
 
 ### `LocalExplanation` { #dc-localexplanation }
 
-Returned by `compute_local_explanation`; the per-stage decomposition of a single prediction (intercept treated as axis j=0).
+Returned by `compute_local_explanation`; the per-stage decomposition of a single prediction (intercept treated as axis $j=0$). Each stage satisfies the [$\sinh$ form](../math/model.md#the-sinh-form), $m^{(\ell)}(\mathbf{x}) = 2\,b^{(\ell)}(\mathbf{x})\,\sinh d^{(\ell)}(\mathbf{x})$.
 
 | Field | Type | Description |
 |------|------|-------------|
 | `stage_contributions` | `ndarray (n_stages,)` | net signed contribution per stage |
-| `f_plus_contributions` | `ndarray (n_stages,)` | scaling_plus · f₊ |
-| `f_minus_contributions` | `ndarray (n_stages,)` | −scaling_minus · f₋ |
-| `backbone_magnitudes` | `ndarray (n_stages,)` | ∏ⱼ bⱼ(xⱼ) over j=1..p |
-| `tilt_sums` | `ndarray (n_stages,)` | Σⱼ dⱼ(xⱼ) over j=1..p |
-| `feature_backbone` | `ndarray (n_stages, n_features)` | per-stage, per-feature backbone bⱼ(xⱼ) |
-| `feature_tilt` | `ndarray (n_stages, n_features)` | per-stage, per-feature tilt dⱼ(xⱼ) |
-| `intercept_backbone` | `ndarray (n_stages,)` | b₀ = √(eff_λ₊·eff_λ₋) |
-| `intercept_tilt` | `ndarray (n_stages,)` | d₀ = ½·log(eff_λ₊/eff_λ₋) |
+| `f_plus_contributions` | `ndarray (n_stages,)` | `scaling_plus` $\cdot f_+$ |
+| `f_minus_contributions` | `ndarray (n_stages,)` | $-$ `scaling_minus` $\cdot f_-$ |
+| `backbone_magnitudes` | `ndarray (n_stages,)` | $\prod_{j=1}^{p} b_j(x_j)$ |
+| `tilt_sums` | `ndarray (n_stages,)` | $\sum_{j=1}^{p} d_j(x_j)$ |
+| `feature_backbone` | `ndarray (n_stages, n_features)` | per-stage, per-feature backbone $b_j(x_j)$ |
+| `feature_tilt` | `ndarray (n_stages, n_features)` | per-stage, per-feature tilt $d_j(x_j)$ |
+| `intercept_backbone` | `ndarray (n_stages,)` | $b_0 = \sqrt{\lambda_+^{\mathrm{eff}}\,\lambda_-^{\mathrm{eff}}}$ (the OLS-scaled branch scalars) |
+| `intercept_tilt` | `ndarray (n_stages,)` | $d_0 = \tfrac12\log(\lambda_+^{\mathrm{eff}}/\lambda_-^{\mathrm{eff}})$ |
 | `total_prediction` | `float` | the model's prediction at the point |
 
 ### `FeatureImportanceResult` { #dc-featureimportanceresult }
 
-Returned by `plot_feature_importance`.
+Returned by `plot_feature_importance`. Backbone importance is $\mathrm{Var}[\log b_j]$ and tilt importance $\mathrm{Var}[d_j]$ per stage; see [Derived diagnostics](../math/partial-dependence.md#derived-diagnostics).
 
 | Field | Type | Description |
 |------|------|-------------|
@@ -533,7 +537,7 @@ Returned by `plot_feature_importance`.
 | `tilt_per_stage` | `ndarray (n_stages, n_features)` | per-stage tilt importance |
 | `global_backbone` | `ndarray (n_features,)` | global backbone importance |
 | `global_tilt` | `ndarray (n_features,)` | global tilt importance |
-| `combined` | `ndarray (n_features,)` | Iⱼ = Iⱼᵇ + γ·Iⱼᵈ |
-| `combined_backbone` | `ndarray (n_features,)` | backbone term Iⱼᵇ of the combined score |
-| `combined_tilt` | `ndarray (n_features,)` | tilt term Iⱼᵈ of the combined score |
+| `combined` | `ndarray (n_features,)` | $I_j = I_j^b + \gamma\,I_j^d$ |
+| `combined_backbone` | `ndarray (n_features,)` | backbone term $I_j^b$ of the combined score |
+| `combined_tilt` | `ndarray (n_features,)` | tilt term $I_j^d$ of the combined score |
 | `stage_weights` | `ndarray (n_stages,)` | energy-based per-stage weights |

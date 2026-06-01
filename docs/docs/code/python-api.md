@@ -320,7 +320,7 @@ Individual Conditional Expectation curves: sweep one feature for each given obse
 
 | Type | Description |
 |------|-------------|
-| `ndarray (n_obs, n_range, 2·n_stages)` | ICE curves, scaled by `scaling_plus`/`scaling_minus` |
+| `ndarray (n_obs, n_range, 2 * n_stages)` | ICE curves, scaled by `scaling_plus`/`scaling_minus` |
 
 ### `compute_per_stage_feature_importance` { #meth-tsl-fi-stage }
 
