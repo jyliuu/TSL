@@ -16,23 +16,14 @@ jobs:
   bench:
     name: Criterion (PR vs base)
     runs-on: ubuntu-latest
-    # Pin threading so timings are reproducible. The BLAS matrices here are
-    # tiny, so single-threaded BLAS is both faster and steadier; rayon does the
-    # real parallel work at a fixed width on both PR and base.
+    # Pin rayon width so timings are reproducible: it does the real parallel
+    # work at a fixed width on both PR and base.
     env:
-      OPENBLAS_NUM_THREADS: "1"
       RAYON_NUM_THREADS: "2"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # need the merge-base commit, not just HEAD
-
-      # ndarray-linalg links against a system OpenBLAS (which also provides
-      # LAPACK) via the `openblas-system` feature.
-      - name: Install OpenBLAS
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev gfortran pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
 

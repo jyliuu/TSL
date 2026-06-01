@@ -17,9 +17,9 @@ pip install "tsl-py[plots] @ git+https://github.com/jyliuu/TSL.git#subdirectory=
 pip install "tsl-py[examples] @ git+https://github.com/jyliuu/TSL.git#subdirectory=tsl-py"  # EBM, XGBoost, SepALS for comparisons
 ```
 
-The build links a **system OpenBLAS** (via `ndarray-linalg`'s `openblas-system` feature).
-On Debian/Ubuntu: `sudo apt-get install -y libopenblas-dev gfortran pkg-config`. On macOS
-the dependency is typically picked up from Homebrew (`brew install openblas`).
+The build compiles the Rust extension at install time, so it needs a Rust toolchain
+(install via [rustup](https://rustup.rs)). The core is pure Rust — no system math
+libraries are required.
 
 ## First fit
 
@@ -51,7 +51,7 @@ flat hyperparameters; it expects **float64** arrays. See the
 
 This is a Cargo workspace (root crate `tsl_rust` + member `tsl-py`).
 
-**Rust core** — always pass `--release` (the tests run numerical/OpenBLAS workloads; debug
+**Rust core** — always pass `--release` (the tests run numerical workloads; debug
 is far too slow):
 
 ```sh

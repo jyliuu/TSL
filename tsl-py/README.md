@@ -14,8 +14,8 @@ slots into typical ML pipelines, backed by a Rust core.
 pip install tensorsl
 ```
 
-The package builds from source on install for now, so you need a Rust toolchain and a BLAS
-library (e.g. OpenBLAS) available. Prebuilt wheels are planned.
+The package builds from source on install for now, so you need a Rust toolchain available.
+The core is pure Rust, so no system math libraries are required. Prebuilt wheels are planned.
 
 ## Usage
 

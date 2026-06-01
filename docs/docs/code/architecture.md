@@ -94,6 +94,5 @@ builders; see [Python API](python-api.md) and the
 ## Feature flags
 
 Default features are `use-rayon` (parallel bag fitting) and `evo-logging` (SQLite split
-logging — see [Logging](logging.md)). Building requires a **system OpenBLAS**
-(`ndarray-linalg` uses the `openblas-system` feature). See
-[Getting started](../guides/getting-started.md).
+logging — see [Logging](logging.md)). The core is pure Rust and needs no system libraries
+to build. See [Getting started](../guides/getting-started.md).

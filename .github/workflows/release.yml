@@ -5,11 +5,10 @@ name: Release
 # A maintainer-pushed tag is the only trigger; `workflow_dispatch` builds the
 # sdist for inspection but never publishes.
 #
-# This ships an sdist only: `pip install tensorsl` builds from source (it needs a
-# Rust toolchain and a BLAS library). Prebuilt wheels are deferred until the
-# linear-algebra backend is finalized — bundling the current OpenBLAS chain into
-# portable wheels is not worth it while that dependency is on its way out. The
-# sdist proves the tag -> PyPI path end to end.
+# This ships an sdist only: `pip install tensorsl` builds from source, which
+# needs just a Rust toolchain — the core is pure Rust with no system-library
+# dependencies. Prebuilt wheels are deferred until a multi-platform build matrix
+# is worth the upkeep. The sdist proves the tag -> PyPI path end to end.
 on:
   push:
     tags: ["v*"]
@@ -50,8 +49,6 @@ jobs:
       # Build the package from the sdist to prove it installs and imports.
       - name: Smoke test sdist
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev gfortran pkg-config libssl-dev
           pip install dist/*.tar.gz
           python -c "import tsl_py; from tsl_py import TSLRegressor; print('import OK')"
 
