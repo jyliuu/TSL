@@ -192,6 +192,88 @@ def header(fig, bgax, cards, key, kicker, title, fn, disp, mono):
               color=T["divider"], lw=0.9, zorder=2)
 
 
+# ------------------------------------------------- generic card-grid layout ---
+# The card dashboards (feature importance, and every detail plot) lay panels
+# out on a row×col grid of equal-or-ratioed cards. Margins and inter-card gaps
+# are fixed inches so a larger figure grows the cards, never the spacing.
+def grid_card_layout(fw, fh, n_rows, n_cols, *, margin_x_in=0.62,
+                     margin_top_in=1.15, margin_bot_in=0.55, gap_in=0.45,
+                     width_ratios=None, height_ratios=None):
+    """Cards on an ``n_rows × n_cols`` grid, keyed by ``(row, col)``.
+
+    Row 0 is the **top** row. ``width_ratios`` / ``height_ratios`` (defaulting
+    to equal) split the available span; everything else is a fixed number of
+    inches, returned as figure-fraction ``(x0, y0, w, h)`` rectangles.
+    """
+    wr = list(width_ratios) if width_ratios is not None else [1.0] * n_cols
+    hr = list(height_ratios) if height_ratios is not None else [1.0] * n_rows
+    avail_w = fw - 2 * margin_x_in - (n_cols - 1) * gap_in
+    avail_h = fh - margin_top_in - margin_bot_in - (n_rows - 1) * gap_in
+    col_w = [avail_w * r / sum(wr) for r in wr]
+    row_h = [avail_h * r / sum(hr) for r in hr]
+
+    x_lefts, x_in = [], margin_x_in
+    for c in range(n_cols):
+        x_lefts.append(x_in)
+        x_in += col_w[c] + gap_in
+    y_bottoms, y_in = [0.0] * n_rows, margin_bot_in
+    for r in range(n_rows - 1, -1, -1):          # bottom row sits at the margin
+        y_bottoms[r] = y_in
+        y_in += row_h[r] + gap_in
+
+    cards = {}
+    for r in range(n_rows):
+        for c in range(n_cols):
+            cards[(r, c)] = (x_lefts[c] / fw, y_bottoms[r] / fh,
+                             col_w[c] / fw, row_h[r] / fh)
+    return cards
+
+
+def grid_figsize(n_rows, n_cols, *, cell_w_in, cell_h_in, margin_x_in=0.62,
+                 margin_top_in=1.15, margin_bot_in=0.55, gap_in=0.45,
+                 max_w=34.0, max_h=42.0):
+    """Figure size that gives each card a ``cell_w_in × cell_h_in`` target,
+    with the same fixed margins/gaps :func:`grid_card_layout` assumes."""
+    w = 2 * margin_x_in + n_cols * cell_w_in + (n_cols - 1) * gap_in
+    h = margin_top_in + margin_bot_in + n_rows * cell_h_in + (n_rows - 1) * gap_in
+    return (min(w, max_w), min(h, max_h))
+
+
+def card_inset(fig, cards, key, *, pad_l_in=0.78, pad_r_in=0.30,
+               pad_t_in=1.00, pad_b_in=0.64):
+    """Inset plotting axes within a card, with **all four pads in inches** so
+    the header band, axis-label margin, and tick gutter keep a constant
+    physical size as the figure grows. The fixed top pad clears the card
+    header drawn by :func:`header`."""
+    fw, fh = fig.get_size_inches()
+    x0, y0, w, h = cards[key]
+    ax = fig.add_axes([x0 + pad_l_in / fw, y0 + pad_b_in / fh,
+                       w - (pad_l_in + pad_r_in) / fw,
+                       h - (pad_t_in + pad_b_in) / fh], zorder=3)
+    ax.set_facecolor("none")
+    return ax
+
+
+def card_colorbar(fig, cards, key, mappable, mono, label=None,
+                  cb_w_in=0.15, cb_right_in=0.92, pad_t_in=1.00, pad_b_in=0.64):
+    """Slim colorbar in a card's right gutter via a dedicated ``cax`` — so it
+    never steals space from (or repositions) the surface axes. Pair with a
+    surface :func:`card_inset` whose ``pad_r_in`` clears ``cb_right_in``."""
+    fw, fh = fig.get_size_inches()
+    x0, y0, w, h = cards[key]
+    cax = fig.add_axes([x0 + w - cb_right_in / fw, y0 + pad_b_in / fh,
+                        cb_w_in / fw, h - (pad_t_in + pad_b_in) / fh], zorder=3)
+    cb = fig.colorbar(mappable, cax=cax)
+    cb.outline.set_edgecolor(TOKENS["border"])
+    cb.outline.set_linewidth(0.9)
+    cb.ax.tick_params(length=0, labelsize=7.5, colors=TOKENS["muted"])
+    for lab in cb.ax.get_yticklabels():
+        lab.set_family(mono)
+    if label:
+        cb.set_label(label, family=mono, fontsize=8, color=TOKENS["muted"])
+    return cb
+
+
 def figure_title(fig, kicker, title, badge=None, badge_color=None, x=0.035):
     """Figure title block, pinned a fixed distance below the top edge so it
     stays tight on tall canvases."""
@@ -207,7 +289,7 @@ def figure_title(fig, kicker, title, badge=None, badge_color=None, x=0.035):
                  color=badge_color or T["muted"], ha="right")
 
 
-def airy(ax, mono, grid=True):
+def airy(ax, mono, grid=True, grid_axis="y"):
     T = TOKENS
     for s in ("top", "right"):
         ax.spines[s].set_visible(False)
@@ -218,7 +300,7 @@ def airy(ax, mono, grid=True):
     for lab in ax.get_xticklabels() + ax.get_yticklabels():
         lab.set_family(mono)
     if grid:
-        ax.grid(axis="y", color=T["grid"], lw=0.9)
+        ax.grid(axis=grid_axis, color=T["grid"], lw=0.9)
     ax.set_axisbelow(True)
 
 
@@ -417,3 +499,111 @@ def tile_grid(ax, M, cmap, row_labels, col_labels, disp, mono, card=None,
                 ax.text(c + 0.5, r + 0.5, value_fmt.format(M[r, c]),
                         ha="center", va="center", fontsize=7.5,
                         family=mono, color=_text_on(rgba), zorder=4)
+
+
+# ----------------------------------------------- multi-panel grid layouts ---
+# The detail plots (PD / tilt / surfaces / components) lay panels out with
+# ``subplots`` instead of cards. They share the flat ground, figure title, and
+# panel styling below so they read as the same family as the card dashboards.
+def flat_canvas(fig, dot_grid=True):
+    """White ground (optionally a faint dot-grid) behind a grid of panels.
+
+    The companion to :func:`flat_background` for subplot grids: panels keep
+    their white facecolor, so they read as clean rectangles over the dotted
+    ground. Returns the background axes.
+    """
+    _require_matplotlib()
+    T = TOKENS
+    fig.patch.set_facecolor(T["bg"])
+    bgax = fig.add_axes([0, 0, 1, 1], zorder=0)
+    bgax.set_xlim(0, 1)
+    bgax.set_ylim(0, 1)
+    bgax.axis("off")
+    if dot_grid:
+        fw, fh = fig.get_size_inches()
+        sx = 0.018
+        sy = sx * fw / fh
+        gx, gy = np.meshgrid(np.arange(0.01, 1.0, sx), np.arange(0.01, 1.0, sy))
+        bgax.scatter(gx, gy, s=0.7, c=T["dot"], marker=".", linewidths=0, zorder=0)
+    return bgax
+
+
+def reserve_title_band(fig, band_in=1.15):
+    """Top figure-fraction to keep clear for :func:`figure_title`, given a
+    fixed ``band_in`` inches. Pass as the ``top`` of a ``tight_layout`` rect so
+    the title band stays a constant physical size as the figure grows."""
+    return 1.0 - band_in / fig.get_size_inches()[1]
+
+
+def panel_title(ax, title, disp, fontsize=10.5, pad=6):
+    """Left-aligned display-font panel title in ink."""
+    ax.set_title(title, family=disp, fontsize=fontsize, color=TOKENS["ink"],
+                 weight="semibold", loc="left", pad=pad)
+
+
+def panel_note(ax, text, mono, x=0.98, y=0.96, ha="right", va="top",
+               color=None, fontsize=7.5):
+    """Small mono annotation pinned in axes-fraction coords (e.g. constants)."""
+    ax.text(x, y, text, transform=ax.transAxes, ha=ha, va=va, family=mono,
+            fontsize=fontsize, color=color or TOKENS["muted"], zorder=5)
+
+
+def axis_label(ax, mono, xlabel=None, ylabel=None, fontsize=8.5):
+    """Set mono, muted axis labels in the flat style."""
+    T = TOKENS
+    if xlabel is not None:
+        ax.set_xlabel(xlabel, family=mono, fontsize=fontsize, color=T["muted"])
+    if ylabel is not None:
+        ax.set_ylabel(ylabel, family=mono, fontsize=fontsize, color=T["muted"])
+
+
+def zero_ref(ax, axis="y", lw=0.8):
+    """Faint dashed reference line at zero on the given axis."""
+    T = TOKENS
+    if axis == "y":
+        ax.axhline(0, color=T["faint"], ls=(0, (3, 3)), lw=lw, zorder=1)
+    else:
+        ax.axvline(0, color=T["faint"], ls=(0, (3, 3)), lw=lw, zorder=1)
+
+
+def signed_fill(ax, x, lo, hi, step=False, pos=None, neg=None, w=0.82, zorder=1):
+    """Solid pale fill between ``lo`` and ``hi``: the positive token where
+    ``hi ≥ lo``, the negative token elsewhere. Pale = blended toward white by
+    ``w``, so the band stays fully opaque."""
+    pos_c = mix(pos or TOKENS["pos"], w)
+    neg_c = mix(neg or TOKENS["neg"], w)
+    lo = np.asarray(lo, dtype=float)
+    hi = np.asarray(hi, dtype=float)
+    diff = hi - lo
+    kw = dict(step="post") if step else {}
+    ax.fill_between(x, lo, hi, where=(diff >= 0), color=pos_c, zorder=zorder, **kw)
+    ax.fill_between(x, lo, hi, where=(diff < 0), color=neg_c, zorder=zorder, **kw)
+
+
+# ------------------------------------------------------ surfaces + colorbar --
+def flat_surface_axes(ax, mono, xlabel=None, ylabel=None):
+    """Frame a contour/imshow panel: hairline border box, mono ticks, muted
+    axis labels. A surface reads as a framed tile, so all four spines show."""
+    T = TOKENS
+    for s in ax.spines.values():
+        s.set_visible(True)
+        s.set_color(T["border"])
+        s.set_linewidth(0.9)
+    ax.tick_params(length=0, colors=T["muted"], labelsize=8)
+    for lab in ax.get_xticklabels() + ax.get_yticklabels():
+        lab.set_family(mono)
+    axis_label(ax, mono, xlabel, ylabel)
+
+
+def flat_colorbar(fig, ax, mappable, mono, label=None):
+    """Slim colorbar with a hairline border and mono ticks, beside ``ax``."""
+    T = TOKENS
+    cb = fig.colorbar(mappable, ax=ax, shrink=0.82, pad=0.03, aspect=26)
+    cb.outline.set_edgecolor(T["border"])
+    cb.outline.set_linewidth(0.9)
+    cb.ax.tick_params(length=0, labelsize=7.5, colors=T["muted"])
+    for lab in cb.ax.get_yticklabels():
+        lab.set_family(mono)
+    if label:
+        cb.set_label(label, family=mono, fontsize=8, color=T["muted"])
+    return cb
