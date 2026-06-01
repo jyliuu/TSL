@@ -33,8 +33,8 @@
       plus a joblib-pickled `sepals.SeparatedALSRegressor` (file
       `sepals_model.joblib`).  The SepALS line is drawn only when the
       `sepals` package is importable; install it with
-      `pip install tsl-py[examples]` (which installs sepals from GitHub)
-      or `pip install -e /path/to/sepals` from a local checkout.
+      `pip install -r tsl-py/examples/requirements.txt` (which installs sepals
+      from GitHub) or `pip install -e /path/to/sepals` from a local checkout.
 """
 
 from __future__ import annotations
