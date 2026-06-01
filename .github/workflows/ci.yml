@@ -75,3 +75,18 @@ jobs:
       - name: Run tests
         working-directory: tsl-py
         run: pytest python/tests/
+
+  version-alignment:
+    name: Version alignment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # `cargo metadata` resolves the workspace version; it parses manifests
+      # only (no compile), so no OpenBLAS toolchain is needed here.
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Asserts the R package version tracks the canonical Cargo version. While
+      # the R package does not exist yet this is a clean no-op.
+      - name: Check version alignment
+        run: python3 scripts/sync-version.py --check
