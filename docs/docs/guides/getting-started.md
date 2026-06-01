@@ -43,8 +43,8 @@ print(f"Test R^2: {model.score(X_test, y_test):.4f}")
 ```
 
 The lower-level `TSL.fit(...)` classmethod returns `(model, fit_result)` and takes the same
-flat hyperparameters; it expects **C-contiguous float64** arrays
-(`np.ascontiguousarray(...)`). See the [Python API](../code/python-api.md) and the
+flat hyperparameters; it expects **float64** arrays. See the
+[Python API](../code/python-api.md) and the
 [Hyperparameters](hyperparameters.md) reference.
 
 ## Building from a clone (development)

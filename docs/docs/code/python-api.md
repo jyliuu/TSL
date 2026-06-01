@@ -14,8 +14,7 @@ Diagnostics/plotting live in `tsl_py.plot`, documented on the [Plotting referenc
 page.
 
 !!! note "Array contract"
-    PyO3 methods expect **C-contiguous `float64`** arrays (wrap with
-    `np.ascontiguousarray(...)`). `TSLRegressor` handles this for you.
+    PyO3 methods expect **`float64`** arrays. `TSLRegressor` coerces the dtype for you.
 
 ---
 
@@ -196,7 +195,7 @@ Fit a boosted TSL model.
 
 | Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
-| `x` | `ndarray (n_samples, n_features)` | _required_ | training features (C-contiguous `float64`) |
+| `x` | `ndarray (n_samples, n_features)` | _required_ | training features (`float64`) |
 | `y` | `ndarray (n_samples,)` | _required_ | training targets |
 | _hyperparameters_ | — | — | same names/types as the [`TSLRegressor` constructor](#cls-tslregressor) |
 
@@ -214,7 +213,7 @@ TSL.predict(x) -> np.ndarray
 
 | Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
-| `x` | `ndarray (n_samples, n_features)` | _required_ | features (C-contiguous `float64`) |
+| `x` | `ndarray (n_samples, n_features)` | _required_ | features (`float64`) |
 
 **Returns**
 
