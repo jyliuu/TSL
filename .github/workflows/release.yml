@@ -1,14 +1,15 @@
 name: Release
 
-# Build and publish the tensorsl distribution to PyPI. Triggered by a `vX.Y.Z` tag, which
-# scripts/release.sh creates after bumping the version and changelog. A
-# maintainer-pushed tag is the only trigger; `workflow_dispatch` builds the
-# artifacts for inspection but never publishes.
+# Build and publish the tensorsl distribution to PyPI. Triggered by a `vX.Y.Z`
+# tag, which scripts/release.sh creates after bumping the version and changelog.
+# A maintainer-pushed tag is the only trigger; `workflow_dispatch` builds the
+# sdist for inspection but never publishes.
 #
-# Scope: Linux (x86_64) wheel + sdist for now. The wheel bundles the system
-# OpenBLAS via auditwheel. macOS/Windows and other arches are intentionally
-# left out — the platform matrix becomes trivial to widen once the linear-
-# algebra backend is finalized; until then this proves the tag -> PyPI path.
+# This ships an sdist only: `pip install tensorsl` builds from source (it needs a
+# Rust toolchain and a BLAS library). Prebuilt wheels are deferred until the
+# linear-algebra backend is finalized — bundling the current OpenBLAS chain into
+# portable wheels is not worth it while that dependency is on its way out. The
+# sdist proves the tag -> PyPI path end to end.
 on:
   push:
     tags: ["v*"]
@@ -20,32 +21,21 @@ concurrency:
 
 jobs:
   build:
-    name: Build wheel + sdist
+    name: Build sdist
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      # manylinux build runs in an AlmaLinux-based container; install OpenBLAS
-      # there so ndarray-linalg's openblas-system backend links, then auditwheel
-      # bundles it into the wheel.
-      - name: Build wheel (manylinux)
-        uses: PyO3/maturin-action@v1
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v6
         with:
-          command: build
-          args: --release --out dist -m tsl-py/Cargo.toml
-          manylinux: auto
-          before-script-linux: |
-            if command -v dnf >/dev/null; then
-              dnf install -y openblas-devel
-            else
-              yum install -y openblas-devel
-            fi
+          python-version: "3.x"
 
       - name: Build sdist
-        uses: PyO3/maturin-action@v1
-        with:
-          command: sdist
-          args: --out dist -m tsl-py/Cargo.toml
+        run: |
+          python -m pip install --upgrade pip maturin
+          maturin sdist -m tsl-py/Cargo.toml --out dist
 
       # Guard against a forgotten bump: the built version must equal the tag.
       - name: Check version matches tag
@@ -57,11 +47,12 @@ jobs:
           echo "tag=$tag built=$built"
           [ "$tag" = "$built" ] || { echo "::error::tag $tag != built $built"; exit 1; }
 
-      # Smoke-test the built wheel: install it and import the package.
-      - name: Smoke test wheel
+      # Build the package from the sdist to prove it installs and imports.
+      - name: Smoke test sdist
         run: |
-          python -m pip install --upgrade pip
-          pip install dist/*.whl
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev gfortran pkg-config libssl-dev
+          pip install dist/*.tar.gz
           python -c "import tsl_py; from tsl_py import TSLRegressor; print('import OK')"
 
       - uses: actions/upload-artifact@v4
