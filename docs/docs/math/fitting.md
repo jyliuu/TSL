@@ -137,8 +137,8 @@ tested in `tests/stage1_positive_only.rs`.
 ## Candidate sampling, stopping, and binning
 
 - **Sampling.** Two parameters bound the search per iteration:
-  $\texttt{split\_try}$ split positions are sampled per (feature, interval) from the
-  *valid* positions (those leaving $\ge\texttt{min\_interval\_samples}$ on both sides), and
+  $\texttt{split_try}$ split positions are sampled per (feature, interval) from the
+  *valid* positions (those leaving $\ge\texttt{min_interval_samples}$ on both sides), and
   $\texttt{colsample}\in[0,1]$ samples a fraction of features. The `SplitStrategy` enum
   offers `Random` (default), `Best`, and `TopK`.
 - **Stopping.** Refinement stops when `n_iter` iterations are reached, no split exceeds the
