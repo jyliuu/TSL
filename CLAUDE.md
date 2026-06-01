@@ -51,11 +51,36 @@ Changes under `tsl-py/examples/` are not library changes: use `docs(examples):` 
 scripts and README, and `chore(examples):` for regenerated `figures/` or pretrained
 `models/` binaries.
 
-Write commit messages, comments, and docstrings as if the current behavior was
-always intended — describe what the code does, not what it used to do or what was
-just fixed. Don't add a comment to justify a change or flag that something "now
-works"; that rationale already lives in git history and PRs. Comment only
-non-obvious intent or invariants, and leave self-evident code uncommented.
+## Describe the code as it is (VERY IMPORTANT)
+
+Write commit messages, comments, and docstrings **as if the current behavior was
+always intended**. Describe what the code *does*, not what it used to do, what
+changed, or what was just fixed — that history already lives in git and PRs.
+Don't justify a change in a comment or flag that something "now works". Comment
+only non-obvious intent or invariants, and leave self-evident code uncommented.
+
+The tell is any phrasing that only makes sense relative to a past version —
+"now", "no longer", "previously", "used to", "instead of", "fixed", "still" — or
+framing a thing by what it is *not* ("no shadows, no gradients"). Cut it and
+state the present behavior directly.
+
+**Docstrings — describe, don't contrast with a rejected alternative:**
+- ✗ `"""Flat theme. No translucency, no shadows, no gradient mesh. Solid colours…"""`
+- ✓ `"""Flat theme: solid colours, hairline borders, a faint dot-grid…"""`
+
+**Comments — state the present behavior, don't narrate the edit:**
+- ✗ `# changed to inches so the gap no longer scales with the figure`
+- ✓ `# inches, so the gap stays constant as the figure auto-sizes`
+- ✗ `# handle non-contiguous input (this used to panic)`
+- ✓ `# rows may be non-contiguous; copy to a contiguous buffer before the BLAS call`
+
+**Comment only what isn't obvious from the code:**
+- ✗ `x = x + 1  # increment x`
+- ✓ `# λ₊, λ₋ ≥ 0, so the f₊ − f₋ difference carries the sign; clamp negatives here`
+
+**Commit subjects — name the behavior, not the repair:**
+- ✗ `fix(plot): bars no longer overflow the card; the spacing was too big before`
+- ✓ `fix(plot): keep bar labels inside the card`
 
 ## Architecture
 
