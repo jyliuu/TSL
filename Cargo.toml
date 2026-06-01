@@ -1,11 +1,11 @@
 [package]
 name = "tsl_rust"
-version = "0.1.0"
-edition = "2021"
-authors = ["Jinyang Liu <jl@math.ku.dk>"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
 description = "Tensor Separation Learning: interpretable regression via sums of rank-1 separable components."
-license = "MIT"
-repository = "https://github.com/jyliuu/TSL"
+license.workspace = true
+repository.workspace = true
 readme = "README.md"
 
 [lib]
@@ -53,3 +53,10 @@ members = [
     ".",
     "tsl-py"
 ]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Jinyang Liu <jl@math.ku.dk>"]
+license = "MIT"
+repository = "https://github.com/jyliuu/TSL"

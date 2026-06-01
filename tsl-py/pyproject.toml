@@ -1,6 +1,6 @@
 [project]
-name = "tsl-py"
-version = "0.1.0"
+name = "tensorsl"
+dynamic = ["version"]
 description = "Tensor Separation Learning: interpretable regression via sums of rank-1 separable components."
 readme = {file = "../README.md", content-type = "text/markdown"}
 requires-python = ">=3.9"
