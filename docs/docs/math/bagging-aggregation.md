@@ -82,7 +82,7 @@ The `Aggregation` enum on `StagePredictor` selects how the bag is reduced to the
 |------|----------|
 | `Mean` | arithmetic mean of the unscaled per-grid predictions |
 | `GeometricMean` | sign-preserving geometric mean of predictions |
-| `Combined` | extract $f_+, f_-$ from the aggregated two-tensor grid and apply the OLS `scaling_plus`/`scaling_minus` |
+| `Combined` | extract $\tilde{m}_+, \tilde{m}_-$ from the aggregated two-tensor grid and apply the OLS `scaling_plus`/`scaling_minus` |
 
 The component-space pipeline above (align → normalize → similarity-filter → log-space
 average) is implemented in `aggregate_bagged_two_tensor`; the chosen `Aggregation` then

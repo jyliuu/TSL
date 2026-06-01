@@ -25,11 +25,11 @@ where $\hat{m}^{(\ell)}$ is the current in-progress stage prediction.
 
 !!! note "Implementation note — unscaled products"
     Pseudocode and code use the **unscaled** per-sample product
-    $\hat{m}_{\pm}^{(i)} \coloneqq \prod_{j=1}^p \hat{m}_{\pm,j}^{(\ell)}(x_j^{(i)})$, so the
-    full stage prediction is $\lambda_{+}^{(\ell)}\hat{m}_{+}^{(i)} - \lambda_{-}^{(\ell)}\hat{m}_{-}^{(i)}$.
+    $\tilde{m}_{\pm}^{(i)} \coloneqq \prod_{j=1}^p \hat{m}_{\pm,j}^{(\ell)}(x_j^{(i)})$, so the
+    full stage prediction is $\lambda_{+}^{(\ell)}\tilde{m}_{+}^{(i)} - \lambda_{-}^{(\ell)}\tilde{m}_{-}^{(i)}$.
     In the codebase the $\lambda$'s are applied once at the `StagePredictor` level as
     `scaling_plus`/`scaling_minus`; `GridTensor::predict_unscaled` and
-    `extract_two_tensor_predictions_unscaled` deliberately return unscaled $f_+,f_-$.
+    `extract_two_tensor_predictions_unscaled` deliberately return unscaled $\tilde{m}_+,\tilde{m}_-$.
     See the [architecture invariants](../code/architecture.md#two-critical-invariants).
 
 ## The grid tensor
@@ -57,7 +57,7 @@ $\hat{v}_{\pm,j,I_S} = \hat{v}_{\pm,j,I}\,u_\pm^S$, and the updates $u_\pm^S$ mi
 regularized least-squares objective:
 
 $$
-\mathcal{L}_S(u_+^S, u_-^S) = \sum_{x_j^{(i)}\in I_S} w_i\bigl(R_i^{(\ell-1)} - (u_+^S \hat{m}_{+}^{(i)} - u_-^S \hat{m}_{-}^{(i)})\bigr)^2 + \alpha\bigl((u_+^S-1)^2 + (u_-^S-1)^2\bigr),
+\mathcal{L}_S(u_+^S, u_-^S) = \sum_{x_j^{(i)}\in I_S} w_i\bigl(R_i^{(\ell-1)} - (u_+^S \tilde{m}_{+}^{(i)} - u_-^S \tilde{m}_{-}^{(i)})\bigr)^2 + \alpha\bigl((u_+^S-1)^2 + (u_-^S-1)^2\bigr),
 $$
 
 with stabilizing weights $w_i\ge 0$ and ridge strength $\alpha\ge 0$. The split that
@@ -70,18 +70,18 @@ It is convenient to work with the **delta** $\hat{u}_\pm = u_\pm - 1$ (so the ba
 "no update" is $\hat{u}_\pm=0$). The objective becomes
 
 $$
-\mathcal{L}_S(\hat{u}_+,\hat{u}_-) = \sum_{i\in S} w_i\bigl(r_i - (\hat{u}_+\hat{m}_{+}^{(i)} - \hat{u}_-\hat{m}_{-}^{(i)})\bigr)^2 + \alpha(\hat{u}_+^2 + \hat{u}_-^2),
+\mathcal{L}_S(\hat{u}_+,\hat{u}_-) = \sum_{i\in S} w_i\bigl(r_i - (\hat{u}_+\tilde{m}_{+}^{(i)} - \hat{u}_-\tilde{m}_{-}^{(i)})\bigr)^2 + \alpha(\hat{u}_+^2 + \hat{u}_-^2),
 $$
 
 minimized by a $2\times2$ linear system built from five **sufficient statistics**:
 
 $$
 \begin{aligned}
-S_{11} &= \sum_{i\in S} w_i\bigl(\hat{m}_{+}^{(i)}\bigr)^2, &
-S_{22} &= \sum_{i\in S} w_i\bigl(\hat{m}_{-}^{(i)}\bigr)^2, &
-S_{12} &= -\sum_{i\in S} w_i\,\hat{m}_{+}^{(i)}\hat{m}_{-}^{(i)}, \\
-t_1 &= \sum_{i\in S} w_i\,r_i\,\hat{m}_{+}^{(i)}, &
-t_2 &= -\sum_{i\in S} w_i\,r_i\,\hat{m}_{-}^{(i)}. & &
+S_{11} &= \sum_{i\in S} w_i\bigl(\tilde{m}_{+}^{(i)}\bigr)^2, &
+S_{22} &= \sum_{i\in S} w_i\bigl(\tilde{m}_{-}^{(i)}\bigr)^2, &
+S_{12} &= -\sum_{i\in S} w_i\,\tilde{m}_{+}^{(i)}\tilde{m}_{-}^{(i)}, \\
+t_1 &= \sum_{i\in S} w_i\,r_i\,\tilde{m}_{+}^{(i)}, &
+t_2 &= -\sum_{i\in S} w_i\,r_i\,\tilde{m}_{-}^{(i)}. & &
 \end{aligned}
 $$
 
@@ -126,7 +126,7 @@ initialized from residual signs. When **all** outer residuals are non-negative
 objective reduces to 1D ridge least squares on the $(+)$ product,
 
 $$
-\hat{u}_+^S = \frac{\sum_{i\in S} w_i\,r_i\,\hat{m}_{+}^{(i)}}{\sum_{i\in S} w_i\,(\hat{m}_{+}^{(i)})^2 + \alpha}.
+\hat{u}_+^S = \frac{\sum_{i\in S} w_i\,r_i\,\tilde{m}_{+}^{(i)}}{\sum_{i\in S} w_i\,(\tilde{m}_{+}^{(i)})^2 + \alpha}.
 $$
 
 This invariant — positive-only stage 1 produces non-negative predictions with $d_j=0$ — is
@@ -175,7 +175,7 @@ far, improving on frozen-coefficient greedy fitting.
 
 !!! note "Implementation note — where the coefficients live"
     The backfit is solved in `src/forest/fitter.rs` (via `LeastSquaresSvd`) over the
-    $[f_+^{(k)}, -f_-^{(k)}]$ columns of every completed stage. The solved coefficients are
+    $[\tilde{m}_+^{(k)}, -\tilde{m}_-^{(k)}]$ columns of every completed stage. The solved coefficients are
     stored as `scaling_plus`/`scaling_minus` on each `StagePredictor` rather than mutating
     the grid's `lambda_plus`/`lambda_minus` — mathematically equivalent, and the reason
     scaling is applied exactly once at the stage level.

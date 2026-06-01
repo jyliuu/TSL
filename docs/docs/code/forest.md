@@ -22,9 +22,9 @@ each stage already carrying its OLS scaling.
 1. initialize the outer residuals $R = y$;
 2. for each epoch:
     - fit a `StagePredictor` on the current residuals (`fit_ensemble`);
-    - extract the per-stage unscaled $f_+, f_-$;
+    - extract the per-stage unscaled $\tilde{m}_+, \tilde{m}_-$;
     - **incremental OLS backfit:** refit `scaling_plus`/`scaling_minus` for *all* stages so
-      far simultaneously, regressing $y$ on the stacked $[f_+^{(k)}, -f_-^{(k)}]$ columns
+      far simultaneously, regressing $y$ on the stacked $[\tilde{m}_+^{(k)}, -\tilde{m}_-^{(k)}]$ columns
       (solved with `LeastSquaresSvd`);
     - recompute residuals $R = y - \sum_k \hat{m}^{(k)}$;
     - after the first epoch, decay the split budget: `n_iter ← n_iter * decay`.
@@ -34,7 +34,7 @@ coefficients re-optimized together) is what makes later stages correct earlier o
 than merely stacking. The math is in [Fitting](../math/fitting.md#coefficient-backfitting).
 
 If a `visualdb_path` is set (and `evo-logging` is on), per-stage snapshots — grid JSON,
-$f_+/f_-$ arrays, scaling — are streamed to SQLite; see [Logging](logging.md).
+$\tilde{m}_+/\tilde{m}_-$ arrays, scaling — are streamed to SQLite; see [Logging](logging.md).
 
 ## Parameters (`forest/params.rs`)
 

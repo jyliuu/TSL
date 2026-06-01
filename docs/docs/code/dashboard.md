@@ -41,7 +41,7 @@ The backend queries the tables the core's logger writes (see [Logging](logging.m
 - **`combined_grids`** — per-stage aggregated grid snapshots.
 - **`epoch_scalings`**, **`training_errors`**, **`combination_choices`**,
   **`f_component_stats`**, **`tensor_lambdas`** — scaling, learning curves, aggregation
-  choices, and $f_+/f_-$ branch statistics.
+  choices, and $\tilde{m}_+/\tilde{m}_-$ branch statistics.
 
 ## The JSON API
 
@@ -54,7 +54,7 @@ The backend queries the tables the core's logger writes (see [Logging](logging.m
 | `GET /api/run/{id}/learning`, `/convergence` | per-epoch learning / convergence curves |
 | `GET /api/run/{id}/tree_evolution?epoch&tree_id&iteration` | reconstruct a tree's state up to an iteration |
 | `GET /api/run/{id}/backbone_tilt_evolution[_all_columns]` | backbone/tilt over iterations |
-| `GET /api/run/{id}/f_component_evolution`, `/f_component_per_axis` | $f_+/f_-$ branch evolution |
+| `GET /api/run/{id}/f_component_evolution`, `/f_component_per_axis` | $\tilde{m}_+/\tilde{m}_-$ branch evolution |
 | `GET /api/run/{id}/identified_components[_all]` | final per-feature components after identification |
 | `GET /api/run/{id}/tensor_lambdas`, `/scalings`, `/energy` | $\lambda_\pm$, OLS scalings, stage energy |
 

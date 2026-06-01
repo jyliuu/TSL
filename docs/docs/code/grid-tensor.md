@@ -19,17 +19,17 @@ pub struct GridTensor {
 }
 ```
 
-Prediction follows the model directly,
-$f(\mathbf{x}) = \lambda_+\prod_j b_j e^{d_j} - \lambda_-\prod_j b_j e^{-d_j}$:
+Prediction follows the model directly — the difference of the two non-negative branches,
+$\hat{m}_+ - \hat{m}_- = \lambda_+\prod_j b_j e^{d_j} - \lambda_-\prod_j b_j e^{-d_j}$:
 
 | Method | Returns |
 |--------|---------|
 | `new_two_tensor(...)` | construct from the two-tensor fields (sets `scaling = 1.0`) |
-| `predict_single_unscaled(x)` / `predict_unscaled(X)` | **unscaled** $f_+ - f_-$ (one point / batch) |
+| `predict_single_unscaled(x)` / `predict_unscaled(X)` | **unscaled** $\tilde{m}_+ - \tilde{m}_-$ (one point / batch) |
 | `predict_single_backbone_and_tilt(x)` / `predict_backbone_and_tilt(X)` | decompose into $(\prod_j b_j,\ \sum_j d_j)$ |
 
 !!! warning "Use the unscaled path"
-    `predict_unscaled` returns $f_+ - f_-$ **without** $\lambda$ scaling beyond what is
+    `predict_unscaled` returns $\tilde{m}_+ - \tilde{m}_-$ **without** $\lambda$ scaling beyond what is
     baked into the grid; the OLS stage scaling lives on `StagePredictor`. See the
     [scaling invariant](architecture.md#two-critical-invariants).
 

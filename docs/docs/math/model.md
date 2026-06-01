@@ -30,11 +30,14 @@ $$
 
 subject to **positive univariate components** $\hat{m}_{+,j}^{(\ell)}(x_j) > 0$ and
 $\hat{m}_{-,j}^{(\ell)}(x_j) > 0$ for all $j\in[p]$, with non-negative stage scalars
-$\lambda_{\pm}^{(\ell)} \ge 0$. For brevity, define the **signed products** and the **stage
-predictor**:
+$\lambda_{\pm}^{(\ell)} \ge 0$. For brevity, define the **unscaled products**
+$\tilde{m}_{\pm}^{(\ell)}$, the **(scaled) signed branches** $\hat{m}_{\pm}^{(\ell)}$, and the
+**stage predictor** $\hat{m}^{(\ell)}$:
 
 $$
-\hat{m}_{\pm}^{(\ell)}(\mathbf{x}) \coloneqq \lambda_{\pm}^{(\ell)}\prod_{j=1}^p \hat{m}_{\pm,j}^{(\ell)}(x_j),
+\tilde{m}_{\pm}^{(\ell)}(\mathbf{x}) \coloneqq \prod_{j=1}^p \hat{m}_{\pm,j}^{(\ell)}(x_j),
+\qquad
+\hat{m}_{\pm}^{(\ell)}(\mathbf{x}) \coloneqq \lambda_{\pm}^{(\ell)}\,\tilde{m}_{\pm}^{(\ell)}(\mathbf{x}),
 \qquad
 \hat{m}^{(\ell)}(\mathbf{x}) \coloneqq \hat{m}_{+}^{(\ell)}(\mathbf{x}) - \hat{m}_{-}^{(\ell)}(\mathbf{x}).
 $$

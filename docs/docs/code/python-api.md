@@ -276,7 +276,7 @@ marginalizing over the **empirical joint** of the non-fixed features.
 
 | Type | Description |
 |------|-------------|
-| `tuple[list, ndarray]` | per-stage $(C_+, C_-)$ constants, and branch curves $[f_+^{(0)}, f_-^{(0)}, f_+^{(1)}, \dots]$ |
+| `tuple[list, ndarray]` | per-stage $(C_+, C_-)$ constants, and branch curves $[\hat{m}_+^{(0)}, \hat{m}_-^{(0)}, \hat{m}_+^{(1)}, \dots]$ |
 
 ### `compute_first_order_partial_dependence_functions` { #meth-tsl-pd1 }
 
@@ -457,7 +457,7 @@ One boosting stage ([details](stage-predictor.md)).
 | `grid_tensors` | `list[GridTensor]` | the bag of fitted components |
 | `combined_grid_tensor` | `GridTensor` | the aggregated primary grid |
 | `candidate_indices` | `list[int] | None` | bags kept after similarity filtering |
-| `scaling_plus`, `scaling_minus` | `float | None` | OLS coefficients for $f_+$ and $-f_-$ |
+| `scaling_plus`, `scaling_minus` | `float | None` | OLS coefficients for $\tilde{m}_+$ and $-\tilde{m}_-$ |
 
 ### `predict` { #meth-stagepredictor-predict }
 

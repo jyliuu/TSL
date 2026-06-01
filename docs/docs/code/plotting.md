@@ -41,7 +41,7 @@ plot_first_order_pd(model, X, features=None, feature_names=None, grid_points=200
                     show_data_density=False) -> PDDifferenceResult
 ```
 
-First-order partial dependence — the $f_+$ and $f_-$ branch curves — per stage for the
+First-order partial dependence — the $\hat{m}_+$ and $\hat{m}_-$ branch curves — per stage for the
 selected features (one row per stage, one column per feature).
 
 | Parameter | Type | Default | Description |
@@ -53,7 +53,7 @@ selected features (one row per stage, one column per feature).
 
 | Type | Description |
 |------|-------------|
-| `PDDifferenceResult` | figure plus the per-stage $f_+$ and $f_-$ branch curves and constants for the selected features. |
+| `PDDifferenceResult` | figure plus the per-stage $\hat{m}_+$ and $\hat{m}_-$ branch curves and constants for the selected features. |
 
 ### `pd_difference_plot` { #fn-pd-difference-plot }
 
@@ -264,7 +264,7 @@ stage weights (bar).
 compute_local_explanation(model, x) -> LocalExplanation
 ```
 
-Per-stage decomposition of a single prediction: the $f_+/f_-$ contributions, per-feature
+Per-stage decomposition of a single prediction: the $\hat{m}_+$ and $-\hat{m}_-$ contributions, per-feature
 backbone/tilt values, and the intercept $(b_0, d_0)$ absorbing the OLS scaling.
 
 | Parameter | Type | Default | Description |
@@ -389,22 +389,22 @@ Returned by `plot_first_order_pd` and `pd_difference_plot`.
 | `feature_indices` | `list[int]` | plotted feature columns |
 | `feature_names` | `list[str]` | their labels |
 | `x_grids` | `list[ndarray (n_grid,)]` | evaluation grid per feature |
-| `f_plus` | `ndarray (n_features, n_grid, n_stages)` | scaled $f_+$ branch curves |
-| `f_minus` | `ndarray (n_features, n_grid, n_stages)` | scaled $f_-$ curves; carries the model's negative sign, so the positive $\mathrm{PD}_- = -f_-$ |
+| `f_plus` | `ndarray (n_features, n_grid, n_stages)` | scaled $\hat{m}_+$ branch curves |
+| `f_minus` | `ndarray (n_features, n_grid, n_stages)` | scaled $-\hat{m}_-$ curves (the array already carries the model's negative sign), so the positive branch PD is $\mathrm{PD}_- = \hat{m}_-$ |
 | `constants` | `ndarray (n_features, n_stages, 2)` | $(c_+, c_-)$ per (feature, stage); $c_-$ stored with model sign, so $C_- = -c_-$ |
 | `pd_scale` | `str` | `"raw"` or `"component"` |
 | `normalized` | `NormalizedDiagnostics | None` | populated only when `pd_scale="component"` |
 
 ### `NormalizedDiagnostics` { #dc-normalizeddiagnostics }
 
-Component-space ($m$-space) diagnostics carried on a `PDDifferenceResult`; present only when `pd_scale="component"`. Every array has shape `(n_features, n_grid, n_stages)`. See [Backbone–tilt reconstruction from PD](../math/partial-dependence.md#backbonetilt-reconstruction-from-pd) for the $m_\pm \to (b, d)$ map.
+Component-space ($\hat{m}$-space) diagnostics carried on a `PDDifferenceResult`; present only when `pd_scale="component"`. Every array has shape `(n_features, n_grid, n_stages)`. See [Backbone–tilt reconstruction from PD](../math/partial-dependence.md#backbonetilt-reconstruction-from-pd) for the $\hat{m}_\pm \to (b, d)$ map.
 
 | Field | Type | Description |
 |------|------|-------------|
 | `m_plus` | `ndarray` | $\mathrm{PD}_+ / C_+$ (positive component factor) |
 | `m_minus` | `ndarray` | $\mathrm{PD}_- / C_-$ |
-| `backbone` | `ndarray` | $\sqrt{m_+ m_-}$, the intrinsic per-feature backbone |
-| `tilt` | `ndarray` | $\tfrac12\log(m_+/m_-)$, the intrinsic per-feature tilt |
+| `backbone` | `ndarray` | $\sqrt{\hat{m}_+ \hat{m}_-}$, the intrinsic per-feature backbone |
+| `tilt` | `ndarray` | $\tfrac12\log(\hat{m}_+/\hat{m}_-)$, the intrinsic per-feature tilt |
 | `tilt_centered` | `ndarray` | `tilt` minus its mean over the $x$-grid |
 | `tilt_score` | `ndarray` | $\tanh$ of `tilt_centered` |
 
@@ -460,7 +460,7 @@ Returned by `plot_2d_backbone`.
 | `x_vals`, `y_vals` | `ndarray (grid_points,)` | coordinate axes |
 | `X`, `Y` | `ndarray (grid_points, grid_points)` | meshgrid |
 | `backbone_per_stage` | `ndarray (n_stages, grid_points, grid_points)` | per-stage product $b_x(x)\,b_y(y)$ |
-| `pd_per_stage` | `ndarray (n_stages, grid_points, grid_points)` | per-stage 2D PD ($f_+ + f_-$) |
+| `pd_per_stage` | `ndarray (n_stages, grid_points, grid_points)` | per-stage 2D PD ($\hat{m}_+ - \hat{m}_-$) |
 | `stages` | `list[int]` | stage indices included |
 
 ### `Tilt1DResult` { #dc-tilt1dresult }
@@ -502,20 +502,20 @@ Returned by `plot_tilt_diagnostics`.
 | `feature_names` | `list[str]` | their labels |
 | `stages` | `list[int]` | stage indices included |
 | `x_grids` | `list[ndarray (grid_points,)]` | evaluation grid per feature |
-| `B` | `ndarray (n_features, grid_points, n_stages)` | intrinsic backbone $\sqrt{m_+ m_-}$ |
-| `d` | `ndarray (n_features, grid_points, n_stages)` | intrinsic tilt $\tfrac12\log(m_+/m_-)$ |
+| `B` | `ndarray (n_features, grid_points, n_stages)` | intrinsic backbone $\sqrt{\hat{m}_+ \hat{m}_-}$ |
+| `d` | `ndarray (n_features, grid_points, n_stages)` | intrinsic tilt $\tfrac12\log(\hat{m}_+/\hat{m}_-)$ |
 | `d_centered` | `ndarray (same shape as d)` | `d` minus its mean over the grid |
 | `curves` | `ndarray (n_features, grid_points, n_stages, 4)` | the four plotted curves stacked last: $[\tanh d,\ B\tanh d,\ \tanh d_c,\ B\tanh d_c]$, where $d_c$ is `d_centered` |
 
 ### `LocalExplanation` { #dc-localexplanation }
 
-Returned by `compute_local_explanation`; the per-stage decomposition of a single prediction (intercept treated as axis $j=0$). Each stage satisfies the [$\sinh$ form](../math/model.md#the-sinh-form), $m^{(\ell)}(\mathbf{x}) = 2\,b^{(\ell)}(\mathbf{x})\,\sinh d^{(\ell)}(\mathbf{x})$.
+Returned by `compute_local_explanation`; the per-stage decomposition of a single prediction (intercept treated as axis $j=0$). Each stage satisfies the [$\sinh$ form](../math/model.md#the-sinh-form), $\hat{m}^{(\ell)}(\mathbf{x}) = 2\,b^{(\ell)}(\mathbf{x})\,\sinh d^{(\ell)}(\mathbf{x})$.
 
 | Field | Type | Description |
 |------|------|-------------|
 | `stage_contributions` | `ndarray (n_stages,)` | net signed contribution per stage |
-| `f_plus_contributions` | `ndarray (n_stages,)` | `scaling_plus` $\cdot f_+$ |
-| `f_minus_contributions` | `ndarray (n_stages,)` | $-$ `scaling_minus` $\cdot f_-$ |
+| `f_plus_contributions` | `ndarray (n_stages,)` | `scaling_plus` $\cdot \tilde{m}_+$ |
+| `f_minus_contributions` | `ndarray (n_stages,)` | $-$ `scaling_minus` $\cdot \tilde{m}_-$ |
 | `backbone_magnitudes` | `ndarray (n_stages,)` | $\prod_{j=1}^{p} b_j(x_j)$ |
 | `tilt_sums` | `ndarray (n_stages,)` | $\sum_{j=1}^{p} d_j(x_j)$ |
 | `feature_backbone` | `ndarray (n_stages, n_features)` | per-stage, per-feature backbone $b_j(x_j)$ |

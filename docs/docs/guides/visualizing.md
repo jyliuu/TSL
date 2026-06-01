@@ -1,7 +1,7 @@
 # Visualizing a fit
 
 The [`tslviz` dashboard](../code/dashboard.md) replays how a TSL model was built — every
-split, the backbone/tilt evolution, the $f_+/f_-$ branches, and the per-stage aggregation.
+split, the backbone/tilt evolution, the $\tilde{m}_+/\tilde{m}_-$ branches, and the per-stage aggregation.
 It reads a SQLite database that the core writes during a fit (the
 [evo-logging](../code/logging.md) system).
 
@@ -41,7 +41,7 @@ The single-page UI is backed by the read-only JSON API
 - **Tree evolution** — reconstruct a single grid's interval structure up to any iteration.
 - **Backbone / tilt evolution** — watch the magnitude gate and signed direction form per
   feature.
-- **$f_+ / f_-$ components** — the two positive branches whose difference is the stage.
+- **$\tilde{m}_+ / \tilde{m}_-$ components** — the two positive branches whose difference is the stage.
 - **λ scatter / scalings / energy** — diagnose aggregation across the bagged grids
   (the [bimodal-alignment](../math/bagging-aggregation.md#the-bimodal-alignment-example)
   issue shows up here).

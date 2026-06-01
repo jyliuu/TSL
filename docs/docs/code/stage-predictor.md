@@ -12,8 +12,8 @@ pub struct StagePredictor {
     pub primary_grid_tensor: GridTensor,      // the aggregated representative grid
     pub candidate_indices: Option<Vec<usize>>,// indices kept after similarity filtering
     pub aggregation_method: Aggregation,      // Mean | GeometricMean | Combined
-    pub scaling_plus: Option<f64>,            // OLS coefficient for f₊
-    pub scaling_minus: Option<f64>,           // OLS coefficient for −f₋
+    pub scaling_plus: Option<f64>,            // OLS coefficient for m̃₊
+    pub scaling_minus: Option<f64>,           // OLS coefficient for −m̃₋
     pub energy: Option<f64>,                  // optional unscaled prediction energy
 }
 ```
@@ -23,10 +23,10 @@ pub struct StagePredictor {
 `StagePredictor::predict` is where the OLS scaling is applied — exactly once:
 
 $$
-\text{stage prediction} = \texttt{scaling_plus}\cdot f_+ \;+\; \texttt{scaling_minus}\cdot(-f_-).
+\text{stage prediction} = \texttt{scaling_plus}\cdot \tilde{m}_+ \;+\; \texttt{scaling_minus}\cdot(-\tilde{m}_-).
 $$
 
-The free function `extract_two_tensor_predictions_unscaled(grid, x)` pulls $f_+$ and $f_-$
+The free function `extract_two_tensor_predictions_unscaled(grid, x)` pulls $\tilde{m}_+$ and $\tilde{m}_-$
 straight from the two-tensor fields with **no** scaling — this is what the
 [backfit](../math/fitting.md#coefficient-backfitting) regresses on, and what enforces the
 [scaling invariant](architecture.md#two-critical-invariants). `predict_unscaled` returns the
@@ -42,7 +42,7 @@ pub enum Aggregation { Mean, GeometricMean, Combined }
 |---------|------------------------|
 | `Mean` | arithmetic mean of the unscaled per-grid predictions |
 | `GeometricMean` | sign-preserving geometric mean |
-| `Combined` | take $f_+, f_-$ from the aggregated two-tensor `primary_grid_tensor` and apply `scaling_plus`/`scaling_minus` |
+| `Combined` | take $\tilde{m}_+, \tilde{m}_-$ from the aggregated two-tensor `primary_grid_tensor` and apply `scaling_plus`/`scaling_minus` |
 
 ## Fitting a stage (`fitter.rs`)
 

@@ -29,7 +29,7 @@ where the feature support $\mathcal{X}\subseteq\mathbb{R}^p$ may be **non-rectan
 | $R$ | number of stages (separation rank $\le 2R$) |
 | $\hat{m}^{(\ell)}(\mathbf{x})$ | stage-$\ell$ predictor, $\hat{m}_{+}^{(\ell)} - \hat{m}_{-}^{(\ell)}$ |
 | $\hat{m}_{\pm,j}^{(\ell)}(x_j)$ | positive univariate factor for feature $j$, sign branch $\pm$ ($>0$) |
-| $\hat{m}_{\pm}^{(\ell)}(\mathbf{x})$ | signed product $\lambda_{\pm}^{(\ell)}\prod_j \hat{m}_{\pm,j}^{(\ell)}(x_j)\ (\ge 0)$ |
+| $\hat{m}_{\pm}^{(\ell)}(\mathbf{x})$ | **scaled** signed branch $\lambda_{\pm}^{(\ell)}\prod_j \hat{m}_{\pm,j}^{(\ell)}(x_j) = \lambda_{\pm}^{(\ell)}\,\tilde{m}_{\pm}^{(\ell)}\ (\ge 0)$ |
 | $\lambda_{+}^{(\ell)},\lambda_{-}^{(\ell)}$ | non-negative stage scalars |
 | $b_j^{(\ell)}(x_j)$ | **backbone** (magnitude / activity gate), $>0$ |
 | $d_j^{(\ell)}(x_j)$ | **tilt** (signed log-imbalance), $\in\mathbb{R}$ |
@@ -47,7 +47,7 @@ where the feature support $\mathcal{X}\subseteq\mathbb{R}^p$ may be **non-rectan
 | $\mathbbm{1}_I(x_j)$ | indicator that $x_j$ falls in interval $I$ |
 | $R_i^{(\ell-1)}$ | outer residual at stage $\ell$ (target minus previous stages) |
 | $r_i$ | within-stage residual (outer residual minus current stage) |
-| $\hat{m}_{\pm}^{(i)}$ | **unscaled** per-sample product $\prod_j \hat{m}_{\pm,j}^{(\ell)}(x_j^{(i)})$ |
+| $\tilde{m}_{\pm}^{(\ell)},\ \tilde{m}_{\pm}^{(i)}$ | **unscaled** product $\prod_j \hat{m}_{\pm,j}^{(\ell)}(x_j)$ (per-sample at $\mathbf{x}^{(i)}$); the scaled branch is $\hat{m}_{\pm}^{(\ell)} = \lambda_{\pm}^{(\ell)}\,\tilde{m}_{\pm}^{(\ell)}$ |
 | $w_i$ | stabilizing weight ($=1$ for L2; Huber-dependent otherwise) |
 | $u_\pm^S,\ \hat{u}_\pm^S$ | multiplicative bin update on region $S$, and its delta $u_\pm-1$ |
 | $\alpha$ | ridge regularization on the bin update |

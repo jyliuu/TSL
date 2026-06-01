@@ -39,7 +39,7 @@ struct.
    Internally this fits `n_trees` `GridTensor`s (in parallel under `use-rayon`) via the
    grid-refinement loop, then aggregates them.
 3. **Backfit:** refit `scaling_plus`/`scaling_minus` for *all* stages so far by incremental
-   OLS over the per-stage $[f_+, -f_-]$ columns.
+   OLS over the per-stage $[\tilde{m}_+, -\tilde{m}_-]$ columns.
 4. Update residuals; `n_iter` decays by `decay` after the first epoch.
 
 See [Fitting](../math/fitting.md) for the math.
@@ -51,13 +51,13 @@ double-count scale or lose the sign structure.
 
 1. **Scaling is applied exactly once**, at the `StagePredictor` level, via
    `scaling_plus`/`scaling_minus` from the OLS backfit. `GridTensor::predict_unscaled` and
-   `extract_two_tensor_predictions_unscaled` deliberately return **unscaled** $f_+$/$f_-$;
+   `extract_two_tensor_predictions_unscaled` deliberately return **unscaled** $\tilde{m}_+$/$\tilde{m}_-$;
    the legacy `GridTensor::scaling` field is ignored in two-tensor mode (set to `1.0`). Do
    not multiply by it.
 
-2. **Positivity:** $\lambda_+,\lambda_-\ge 0$ and $b\ge 0$, so $f_+,f_-\ge 0$. This removes
+2. **Positivity:** $\lambda_+,\lambda_-\ge 0$ and $b\ge 0$, so $\tilde{m}_+,\tilde{m}_-\ge 0$. This removes
    the sign ambiguity of unconstrained tensor decompositions; signed effects come only from
-   the $f_+ - f_-$ difference. Enforced by clamping in the solver
+   the $\tilde{m}_+ - \tilde{m}_-$ difference. Enforced by clamping in the solver
    (`solve_two_tensor`); checked in `tests/forest.rs` and `tests/stage1_positive_only.rs`.
 
 ## The action/reducer pattern

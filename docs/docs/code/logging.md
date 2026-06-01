@@ -28,11 +28,11 @@ stubs in `logging.rs`), so the core has zero logging overhead.
 - **`SplitEvent`** — a split/resplit/merge: column, split value, error reduction, left/right
   counts, optional per-point residual `Update`s.
 - **`CombinedGridSnapshot`** — a per-stage snapshot: epoch, energy, scaling, grid JSON, and
-  $f_+/f_-$ arrays.
+  $\tilde{m}_+/\tilde{m}_-$ arrays.
 - **`EpochScalingSnapshot`** — the scaling coefficients each time they are re-optimized.
 - **`ComponentStateSnapshot`** — per-feature component state (backbone/tilt per interval, in
   binary form) at an iteration.
-- **`FComponentStats`** — summary statistics of an $f_+$ or $f_-$ branch.
+- **`FComponentStats`** — summary statistics of an $\tilde{m}_+$ or $\tilde{m}_-$ branch.
 - **`LoggingConfig`** — DB path, run label, and flags (`record_residual_updates`,
   `pack_updates_as_blob`).
 
@@ -40,7 +40,7 @@ stubs in `logging.rs`), so the core has zero logging overhead.
 
 The grid-tensor reducer calls into the logging reducers (`logging/reducer.rs`,
 `src/grid_tensor/logging_helpers.rs`) as it applies each action: split events, component
-snapshots, and $f$-component stats are buffered with their epoch/tree context
+snapshots, and $\tilde{m}_\pm$ branch statistics are buffered with their epoch/tree context
 (`logging/context.rs`) and flushed to SQLite. Binary arrays are encoded with the
 `encode_f64_array` / `decode_f64_array` helpers shared with the dashboard backend.
 
