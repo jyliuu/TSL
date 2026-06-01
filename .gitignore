@@ -34,5 +34,6 @@ docs/site/
 # macOS
 .DS_Store
 
-# Claude internal files
-.claude/
+# Claude internal files (local-only), but keep shared project skills tracked
+.claude/*
+!.claude/skills/
