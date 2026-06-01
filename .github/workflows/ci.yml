@@ -46,13 +46,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # ndarray-linalg is built with the `openblas-system` feature, so it
-      # links against a system OpenBLAS (which also provides LAPACK).
-      - name: Install OpenBLAS
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev gfortran pkg-config
-
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
@@ -71,12 +64,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
-      # tsl-py depends on tsl_rust, which needs system OpenBLAS to build.
-      - name: Install OpenBLAS
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev gfortran pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -116,7 +103,7 @@ jobs:
       - uses: actions/checkout@v6
 
       # `cargo metadata` resolves the workspace version; it parses manifests
-      # only (no compile), so no OpenBLAS toolchain is needed here.
+      # only, no compile.
       - uses: dtolnay/rust-toolchain@stable
 
       # Asserts the R package version tracks the canonical Cargo version. While

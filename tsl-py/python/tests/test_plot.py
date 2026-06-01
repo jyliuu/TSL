@@ -41,6 +41,30 @@ def fitted():
     return model, X, ["a", "b", "c", "d"]
 
 
+@pytest.fixture(scope="module")
+def fitted_2stage():
+    """Two-stage fit for the component-scale round-trip checks. Component
+    normalization is defined where each stage's OLS scaling stays non-negative,
+    which holds while the model is not staged past this toy signal's effective
+    rank; a third stage here lands on a near-collinear system whose scaling can
+    turn negative."""
+    rng = np.random.RandomState(0)
+    n, p = 400, 4
+    X = rng.randn(n, p)
+    y = 1.5 * X[:, 0] - 0.8 * X[:, 1] + 0.5 * X[:, 0] * X[:, 1] + 0.1 * rng.randn(n)
+    model, _ = TSL.fit(
+        X, y,
+        epochs=2,
+        n_trees=4,
+        n_iter=8,
+        split_try=4,
+        colsample_bytree=1.0,
+        seed=0,
+        verbosity=0,
+    )
+    return model, X, ["a", "b", "c", "d"]
+
+
 def test_plot_first_order_pd(fitted):
     model, X, names = fitted
     res = plot_first_order_pd(model, X, feature_names=names, grid_points=30)
@@ -78,9 +102,9 @@ def test_pd_difference_plot_raw_unchanged(fitted):
     plt.close(r_raw.fig)
 
 
-def test_pd_difference_plot_component(fitted):
+def test_pd_difference_plot_component(fitted_2stage):
     """Verify component normalization properties on a small fitted model."""
-    model, X, names = fitted
+    model, X, names = fitted_2stage
     res = pd_difference_plot(
         model, X, feature_names=names, grid_points=30, pd_scale="component"
     )

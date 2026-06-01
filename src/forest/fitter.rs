@@ -8,9 +8,26 @@ use rand::{rngs::StdRng, SeedableRng};
 
 use super::{params::TSLBoostedParams, TSL};
 use crate::stage_predictor::fit_ensemble;
-use ndarray_linalg::LeastSquaresSvd;
+use nalgebra::{DMatrix, DVector};
 
 type Logger = Option<std::rc::Rc<std::cell::RefCell<Box<dyn crate::logging::EvoLogger>>>>;
+
+/// Minimum-norm least-squares solution of `x w ≈ y` via SVD.
+///
+/// Singular values at or below `σ_max · max(n, k) · ε` are treated as zero, so a
+/// rank-deficient design — which arises once stages contribute near-collinear
+/// `f₊`/`−f₋` columns — yields the pseudo-inverse solution instead of diverging.
+/// Returns `None` only when the SVD lacks the factors needed to back-substitute.
+fn solve_least_squares(x: ArrayView2<f64>, y: ArrayView1<f64>) -> Option<Array1<f64>> {
+    let (n, k) = (x.nrows(), x.ncols());
+    let a = DMatrix::from_row_iterator(n, k, x.iter().copied());
+    let b = DVector::from_iterator(n, y.iter().copied());
+    let svd = a.svd(true, true);
+    let sigma_max = svd.singular_values.iter().copied().fold(0.0_f64, f64::max);
+    let cutoff = sigma_max * (n.max(k) as f64) * f64::EPSILON;
+    let w = svd.solve(&b, cutoff).ok()?;
+    Some(Array1::from_iter(w.iter().copied()))
+}
 
 /// Set up logging and event channel if visualdb_path is specified
 fn setup_logging(
@@ -210,8 +227,7 @@ where
                 // This is incremental OLS: at each epoch, we add 2 new columns and refit on all columns
                 // This is the "Orthogonal Greedy" approach - greedy in the sense that we add columns
                 // incrementally (one stage at a time), and orthogonal in that we refit OLS on all columns
-                let (err, residuals) = if let Ok(result) = x_mat.least_squares(&y) {
-                    let w = result.solution;
+                let (err, residuals) = if let Some(w) = solve_least_squares(x_mat, y) {
                     log::info!("New projected weights (two-tensor mode): {:?}", w);
 
                     // Update scalings for all families based on OLS solution

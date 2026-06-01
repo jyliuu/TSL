@@ -26,7 +26,7 @@ once_cell = "1.21.3"
 rusqlite = { version = "0.31", optional = true, features = ["bundled"] }
 time = { version = "0.3", optional = true, features = ["formatting"] }
 bytemuck = { version = "1.24", optional = true }
-ndarray-linalg = { version = "0.17", features = ["openblas-system"] }
+nalgebra = "0.33"
 
 
 [features]

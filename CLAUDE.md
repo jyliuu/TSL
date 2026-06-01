@@ -15,15 +15,14 @@ visualizes split-event logs written during a fit.
 
 This is a Cargo workspace (root crate `tsl_rust` + member `tsl-py`).
 
-**Rust — always pass `--release`** (tests run numerical/OpenBLAS workloads; debug is far too slow):
+**Rust — always pass `--release`** (tests run numerical workloads; debug is far too slow):
 ```sh
 cargo build --release
 cargo test -p tsl_rust --release                       # full core test suite (owns tests/)
 cargo test -p tsl_rust --release test_fit_result_is_correct   # single test by name
 cargo test --release --test forest                     # one integration-test file (tests/forest.rs)
 ```
-Building requires a **system OpenBLAS** (`ndarray-linalg` uses the `openblas-system`
-feature): on Debian/Ubuntu `libopenblas-dev gfortran pkg-config`. Default cargo features
+The core is pure Rust — no system libraries are required to build. Default cargo features
 are `use-rayon` (parallel bag fitting) and `evo-logging` (SQLite split logging).
 
 **Python (`tsl-py/`)** — maturin can't auto-detect the machine's Python 3.14, so use the
