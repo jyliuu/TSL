@@ -60,7 +60,7 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
 | `bagged` | `bool` | `False` | enable the bagged-aggregation path |
 | `seed` | `int` | `42` | RNG seed (fits are deterministic) |
 | `verbosity` | `int` | `1` | log verbosity |
-| `visualdb` | `str \| None` | `None` | evo-logging SQLite path |
+| `visualdb` | `str | None` | `None` | evo-logging SQLite path |
 
 **Attributes** (set after `fit`)
 
@@ -456,8 +456,8 @@ One boosting stage ([details](stage-predictor.md)).
 |------|------|-------------|
 | `grid_tensors` | `list[GridTensor]` | the bag of fitted components |
 | `combined_grid_tensor` | `GridTensor` | the aggregated primary grid |
-| `candidate_indices` | `list[int] \| None` | bags kept after similarity filtering |
-| `scaling_plus`, `scaling_minus` | `float \| None` | OLS coefficients for $f_+$ and $-f_-$ |
+| `candidate_indices` | `list[int] | None` | bags kept after similarity filtering |
+| `scaling_plus`, `scaling_minus` | `float | None` | OLS coefficients for $f_+$ and $-f_-$ |
 
 ### `predict` { #meth-stagepredictor-predict }
 

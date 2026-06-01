@@ -20,12 +20,12 @@ ones.
 |------|------|:--:|-------------|
 | `model` | `TSL` | _required_ | a fitted model (`TSLRegressor.core_estimator_`) |
 | `X` | `ndarray (n_samples, n_features)` | _required_ | background data to marginalize over |
-| `features` | `Iterable[int \| str] \| None` | `None` | features to plot (default: all) |
-| `feature_x`, `feature_y` | `int \| str` | _required_ | the two features for 2D plots |
-| `feature_names` | `Sequence[str] \| None` | `None` | names for labelling |
-| `stages` | `Iterable[int] \| None` | `None` | which stages to draw (default: all) |
+| `features` | `Iterable[int | str] | None` | `None` | features to plot (default: all) |
+| `feature_x`, `feature_y` | `int | str` | _required_ | the two features for 2D plots |
+| `feature_names` | `Sequence[str] | None` | `None` | names for labelling |
+| `stages` | `Iterable[int] | None` | `None` | which stages to draw (default: all) |
 | `grid_points` | `int` | `200`/`100`/`50` | evaluation resolution |
-| `figsize` | `tuple[float, float] \| None` | `None` | matplotlib figure size |
+| `figsize` | `tuple[float, float] | None` | `None` | matplotlib figure size |
 
 ---
 
@@ -44,7 +44,7 @@ selected features (one row per stage, one column per feature).
 
 | Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
-| `pd_scale` | `"raw" \| ...` | `"raw"` | scaling applied to the PD curves |
+| `pd_scale` | `"raw" | ...` | `"raw"` | scaling applied to the PD curves |
 | `show_data_density` | `bool` | `False` | overlay a data-density rug |
 
 **Returns**
@@ -89,14 +89,14 @@ Two-feature partial dependence per stage.
 | Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `kind` | `str` | `"surface"` | `"surface"` or `"lines"` |
-| `y_values` | `Sequence[float] \| None` | `None` | (for `"lines"`) values of `feature_y` to slice at |
-| `cmap` | `Colormap \| None` | `None` | colormap |
+| `y_values` | `Sequence[float] | None` | `None` | (for `"lines"`) values of `feature_y` to slice at |
+| `cmap` | `Colormap | None` | `None` | colormap |
 
 **Returns**
 
 | Type | Description |
 |------|-------------|
-| `PD2DResult \| PD2DLinesResult` | `PD2DResult` when `kind="surface"`, `PD2DLinesResult` when `kind="lines"`. |
+| `PD2DResult | PD2DLinesResult` | `PD2DResult` when `kind="surface"`, `PD2DLinesResult` when `kind="lines"`. |
 
 <figure markdown="span">
   ![Hour × working-day 2D partial dependence](../assets/img/pd_hour_workingday_tsl.png){ width="75%" }
@@ -114,10 +114,10 @@ Individual Conditional Expectation curves for one feature.
 
 | Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
-| `feature` | `int \| str` | _required_ | feature to vary |
+| `feature` | `int | str` | _required_ | feature to vary |
 | `n_ice` | `int` | `50` | number of observations sampled |
 | `seed` | `int` | `0` | sampling seed |
-| `ax` | `Axes \| None` | `None` | draw onto an existing axis |
+| `ax` | `Axes | None` | `None` | draw onto an existing axis |
 
 **Returns**
 
@@ -143,7 +143,7 @@ cartopy.
 
 | Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
-| `cmap_backbone`, `cmap_pd` | `Colormap \| None` | `None` | colormaps for each panel |
+| `cmap_backbone`, `cmap_pd` | `Colormap | None` | `None` | colormaps for each panel |
 | `return_data_only` | `bool` | `False` | skip drawing; return arrays only |
 
 **Returns**
@@ -169,7 +169,7 @@ The per-feature, per-stage tilt $d_j(x_j)$ as step curves (layout mirrors
 
 | Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
-| `color` | `str \| None` | `None` | step-curve color (default: a violet accent) |
+| `color` | `str | None` | `None` | step-curve color (default: a violet accent) |
 
 **Returns**
 
@@ -189,7 +189,7 @@ The 2D tilt product $d_x(x)\cdot d_y(y)$ per stage.
 
 | Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
-| `cmap` | `Colormap \| str \| None` | `None` | diverging colormap (default: the package pink↔white↔emerald) |
+| `cmap` | `Colormap | str | None` | `None` | diverging colormap (default: the package pink↔white↔emerald) |
 | `return_data_only` | `bool` | `False` | skip drawing; return arrays only (`fig`/`axes` are `None`) |
 
 **Returns**
@@ -211,8 +211,8 @@ density-weighted tilt).
 
 | Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
-| `pure_color` | `str \| None` | `None` | color for the two `tanh`-only panels (default: sky blue) |
-| `weighted_color` | `str \| None` | `None` | color for the two backbone-weighted panels (default: emerald) |
+| `pure_color` | `str | None` | `None` | color for the two `tanh`-only panels (default: sky blue) |
+| `weighted_color` | `str | None` | `None` | color for the two backbone-weighted panels (default: emerald) |
 
 **Returns**
 
@@ -323,7 +323,7 @@ Plot a single `GridTensor`'s backbone/tilt component curves.
 |------|------|:--:|-------------|
 | `grid_tensor` | `GridTensor` | _required_ | the component to plot |
 | `individual_plots` | `bool` | `False` | one figure per axis vs. a combined grid |
-| `axis` | `int \| None` | `None` | restrict to a single feature axis |
+| `axis` | `int | None` | `None` | restrict to a single feature axis |
 
 **Returns**
 
@@ -342,7 +342,7 @@ Overlay the combined grid-tensor components across a model's stages.
 | Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
 | `individual_plots` | `bool` | `True` | one figure per axis vs. a combined grid |
-| `axis` | `int \| None` | `None` | restrict to a single feature axis |
+| `axis` | `int | None` | `None` | restrict to a single feature axis |
 
 **Returns**
 
@@ -389,7 +389,7 @@ Returned by `plot_first_order_pd` and `pd_difference_plot`.
 | `f_minus` | `ndarray (n_features, n_grid, n_stages)` | scaled f₋ curves; carries the model's negative sign, so the positive PD₋ = −`f_minus` |
 | `constants` | `ndarray (n_features, n_stages, 2)` | (c₊, c₋) per (feature, stage); c₋ stored with model sign, so C₋ = −c₋ |
 | `pd_scale` | `str` | `"raw"` or `"component"` |
-| `normalized` | `NormalizedDiagnostics \| None` | populated only when `pd_scale="component"` |
+| `normalized` | `NormalizedDiagnostics | None` | populated only when `pd_scale="component"` |
 
 ### `NormalizedDiagnostics` { #dc-normalizeddiagnostics }
 
@@ -450,8 +450,8 @@ Returned by `plot_2d_backbone`.
 
 | Field | Type | Description |
 |------|------|-------------|
-| `fig` | `Figure \| None` | `None` when `return_data_only=True` |
-| `axes` | `ndarray of Axes (2, n_stages) \| None` | row 0 backbone-product panels, row 1 2D-PD panels |
+| `fig` | `Figure | None` | `None` when `return_data_only=True` |
+| `axes` | `ndarray of Axes (2, n_stages) | None` | row 0 backbone-product panels, row 1 2D-PD panels |
 | `feature_x`, `feature_y` | `int` | the two plotted feature columns |
 | `x_vals`, `y_vals` | `ndarray (grid_points,)` | coordinate axes |
 | `X`, `Y` | `ndarray (grid_points, grid_points)` | meshgrid |
@@ -478,8 +478,8 @@ Returned by `plot_2d_tilt`.
 
 | Field | Type | Description |
 |------|------|-------------|
-| `fig` | `Figure \| None` | `None` when `return_data_only=True` |
-| `axes` | `ndarray of Axes \| None` | the tilt panels |
+| `fig` | `Figure | None` | `None` when `return_data_only=True` |
+| `axes` | `ndarray of Axes | None` | the tilt panels |
 | `feature_x`, `feature_y` | `int` | the two plotted feature columns |
 | `x_vals`, `y_vals` | `ndarray` | the two coordinate axes |
 | `X`, `Y` | `ndarray (grid_points, grid_points)` | meshgrid |
