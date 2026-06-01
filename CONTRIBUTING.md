@@ -67,8 +67,10 @@ bump is deliberate and manual; `git-cliff` writes the changelog from the Convent
 since the previous tag (`cliff.toml` controls grouping).
 
 Pushing the `vX.Y.Z` tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml),
-which builds the wheel and sdist, checks the built version matches the tag, and publishes to
-PyPI via Trusted Publishing (OIDC — no stored token), then drafts a GitHub Release.
+which builds an sdist, checks the built version matches the tag, and publishes it to PyPI via
+Trusted Publishing (OIDC — no stored token), then drafts a GitHub Release. `pip install
+tensorsl` builds from source for now; prebuilt wheels come once the linear-algebra backend is
+finalized.
 
 One-time project setup (already done for the canonical repo): register a PyPI Trusted
 Publisher for project `tensorsl` pointing at this repo's `release.yml` and the `pypi`
