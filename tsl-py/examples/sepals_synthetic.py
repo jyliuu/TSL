@@ -43,7 +43,6 @@ from tsl_py.plot._theme import (
     grid_card_layout,
     grid_figsize,
     header,
-    panel_note,
     setup_fonts,
     zero_ref,
 )
@@ -164,8 +163,8 @@ def plot_sepals_factors(model, X_background, save_path: Path, grid_points: int =
             axis_label(ax, mono, xlabel=rf"$x_{{{k + 1}}}$",
                        ylabel=(rf"$g^{{({ell + 1})}}$" if k == 0 else None))
             header(fig, bgax, cards, (ell, k), f"Term {ell + 1}",
-                   rf"$x_{{{k + 1}}}$", "", disp, mono)
-            panel_note(ax, f"s={scales[ell]:.4g}", mono)
+                   rf"$x_{{{k + 1}}}$", f"s={scales[ell]:.4g}", disp, mono,
+                   fn_pill=True)
 
     fig.savefig(save_path, bbox_inches="tight")
     plt.close(fig)
