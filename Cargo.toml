@@ -37,7 +37,7 @@ evo-logging = ["rusqlite", "time", "bytemuck"]
 [dev-dependencies]
 csv = "1.4.0"
 criterion = "0.8.2"
-bincode = "1.3"
+bincode = "3.0"
 
 # Criterion drives its own harness; see benches/fit.rs.
 [[bench]]
