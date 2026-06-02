@@ -674,6 +674,7 @@ def plot_2d_pd(
     stages: Optional[Iterable[int]] = None,
     cmap=None,
     figsize: Optional[Tuple[float, float]] = None,
+    show_total: bool = True,
 ):
     """Two-feature partial dependence plot.
 
@@ -689,6 +690,10 @@ def plot_2d_pd(
         (capped at 8 distinct values).
     stages : iterable of int, optional
         Subset of stages to render side-by-side; if None, plots the summed PD only.
+    show_total : bool, default True
+        Only used when `kind="lines"`. Append a final "Total" card showing the
+        PD summed over the plotted stages. Set False to show the per-stage cards
+        alone.
     """
     plt = _require_matplotlib()
     disp, mono = setup_fonts()
@@ -757,9 +762,9 @@ def plot_2d_pd(
         per_stage = _compute_2d_pd_grid(model, X_arr, fx, fy, x_vals, y_arr)
         pd_total = per_stage.sum(axis=0)  # (len(y_arr), len(x_vals))
 
-        # One card per stage, plus a final "Total" card.
+        # One card per stage, with an optional final "Total" card.
         panel_stages = list(stages) if stages is not None else list(range(per_stage.shape[0]))
-        n_p = len(panel_stages) + 1
+        n_p = len(panel_stages) + (1 if show_total else 0)
         margin_top_in = 1.7            # title block + a band for the shared legend
         if figsize is None:
             figsize = grid_figsize(1, n_p, cell_w_in=4.2, cell_h_in=3.9,
@@ -786,20 +791,20 @@ def plot_2d_pd(
             axis_label(ax, mono, xlabel=names[fx], ylabel="PD" if i == 0 else None)
             header(fig, bgax, cards, (0, i), f"Stage {s + 1}", names[fx],
                    "", disp, mono)
-        # Total card
-        ax_total = card_inset(fig, cards, (0, n_p - 1))
-        axes[n_p - 1] = ax_total
-        for yi, yv in enumerate(y_arr):
-            ax_total.plot(
-                x_vals, pd_total[yi],
-                marker="o", ms=3, lw=2,
-                color=line_colors[yi % len(line_colors)],
-                label=f"{names[fy]}={yv:g}",
-            )
-        airy(ax_total, mono)
-        axis_label(ax_total, mono, xlabel=names[fx])
-        header(fig, bgax, cards, (0, n_p - 1), "All stages", "Total",
-               "", disp, mono)
+        if show_total:
+            ax_total = card_inset(fig, cards, (0, n_p - 1))
+            axes[n_p - 1] = ax_total
+            for yi, yv in enumerate(y_arr):
+                ax_total.plot(
+                    x_vals, pd_total[yi],
+                    marker="o", ms=3, lw=2,
+                    color=line_colors[yi % len(line_colors)],
+                    label=f"{names[fy]}={yv:g}",
+                )
+            airy(ax_total, mono)
+            axis_label(ax_total, mono, xlabel=names[fx])
+            header(fig, bgax, cards, (0, n_p - 1), "All stages", "Total",
+                   "", disp, mono)
 
         # Shared legend in the top band by the badge — same y-values everywhere.
         handles, labels = axes[0].get_legend_handles_labels()

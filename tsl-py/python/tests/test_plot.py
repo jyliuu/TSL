@@ -146,6 +146,20 @@ def test_plot_2d_pd_lines(fitted):
         grid_points=20, kind="lines", y_values=[-1.0, 0.0, 1.0],
     )
     assert res.pd_per_stage.shape == (3, 3, 20)
+    # one card per stage plus the appended "Total" card
+    assert res.axes.shape == (len(model.stage_predictors) + 1,)
+    plt.close(res.fig)
+
+
+def test_plot_2d_pd_lines_no_total(fitted):
+    model, X, names = fitted
+    res = plot_2d_pd(
+        model, X, feature_x="a", feature_y="b", feature_names=names,
+        grid_points=20, kind="lines", y_values=[-1.0, 0.0, 1.0],
+        show_total=False,
+    )
+    # the per-stage cards alone, no "Total" card
+    assert res.axes.shape == (len(model.stage_predictors),)
     plt.close(res.fig)
 
 
