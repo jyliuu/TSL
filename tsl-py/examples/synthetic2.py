@@ -55,6 +55,7 @@ from tsl_py.plot._theme import (
     figure_title,
     flat_backbone_cmap,
     flat_canvas,
+    flat_legend,
     mix,
     panel_title,
     reserve_title_band,
@@ -228,9 +229,6 @@ def plot_figure(
     disp, mono = setup_fonts()
     fig, axes = plt.subplots(3, 2, figsize=(11, 11))
 
-    legend_kw = dict(loc="best", frameon=False,
-                     prop={"family": mono, "size": 8}, labelcolor=TOKENS["muted"])
-
     for j in range(2):
         # ---- Row 1: two illustrative groups ----
         ax = axes[0, j]
@@ -263,7 +261,7 @@ def plot_figure(
         panel_title(ax, "Extremes by scale", disp)
         axis_label(ax, mono, xlabel=rf"$x_{{{j + 1}}}$", ylabel=rf"$b_{{{j + 1}}}$")
         ax.set_xlim(x_min, x_max)
-        ax.legend(**legend_kw)
+        flat_legend(ax, mono, loc="best", fontsize=8)
 
         # ---- Row 2: combination candidates ----
         ax = axes[1, j]
@@ -287,9 +285,10 @@ def plot_figure(
         handles, labels = ax.get_legend_handles_labels()
         ordered = ["Candidates", "Reference", "Combined"]
         items = {k: (h, l) for h, l in zip(handles, labels) for k in ordered if l.startswith(k)}
-        ax.legend([items[k][0] for k in ordered if k in items],
-                  [items[k][1] for k in ordered if k in items],
-                  **legend_kw)
+        flat_legend(ax, mono,
+                    [items[k][0] for k in ordered if k in items],
+                    [items[k][1] for k in ordered if k in items],
+                    loc="best", fontsize=8)
         airy(ax, mono)
         panel_title(ax, "Filtered candidates", disp)
         axis_label(ax, mono, xlabel=rf"$x_{{{j + 1}}}$", ylabel=rf"$b_{{{j + 1}}}$")
@@ -310,7 +309,7 @@ def plot_figure(
         panel_title(ax, "All bagged grids", disp)
         axis_label(ax, mono, xlabel=rf"$x_{{{j + 1}}}$", ylabel=rf"$b_{{{j + 1}}}$")
         ax.set_xlim(x_min, x_max)
-        ax.legend(**legend_kw)
+        flat_legend(ax, mono, loc="best", fontsize=8)
 
     fig.tight_layout(rect=[0, 0.07, 1, reserve_title_band(fig, 1.3)])
 

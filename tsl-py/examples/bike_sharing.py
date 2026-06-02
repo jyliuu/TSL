@@ -37,12 +37,12 @@ import pandas as pd
 from tsl_py import TSL
 from tsl_py.plot import pd_difference_plot, plot_2d_pd, plot_tilt_diagnostics
 from tsl_py.plot._theme import (
-    TOKENS,
     airy,
     axis_label,
     card_inset,
     figure_title,
     flat_background,
+    flat_legend,
     grid_card_layout,
     grid_figsize,
     header,
@@ -112,8 +112,7 @@ def plot_ebm_pd_hour_workingday(
     zero_ref(ax)
     airy(ax, mono)
     axis_label(ax, mono, xlabel=feat_x_name, ylabel="PD")
-    ax.legend(loc="best", frameon=False, prop={"family": mono, "size": 9},
-              labelcolor=TOKENS["muted"])
+    flat_legend(ax, mono, loc="upper left")
     header(fig, bgax, cards, (0, 0), "Empirical PD",
            f"{feat_x_name} × {feat_y_name}", "", disp, mono)
     path = out / f"pd_{feat_x_name}_{feat_y_name}_ebm.pdf"

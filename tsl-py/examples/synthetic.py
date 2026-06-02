@@ -52,6 +52,7 @@ from tsl_py.plot._theme import (
     card_inset,
     figure_title,
     flat_background,
+    flat_legend,
     grid_card_layout,
     grid_figsize,
     header,
@@ -133,8 +134,7 @@ def _plot_ice(out: Path, model_name: str, x_grid: np.ndarray, ice: np.ndarray, p
     ax.plot(x_grid, pd, color=TOKENS["ink"], lw=2.4, label="PDP", zorder=3)
     airy(ax, mono)
     axis_label(ax, mono, xlabel=r"$x_1$", ylabel="prediction")
-    ax.legend(loc="best", frameon=False, prop={"family": mono, "size": 9},
-              labelcolor=TOKENS["muted"])
+    flat_legend(ax, mono, loc="upper right")
     header(fig, bgax, cards, (0, 0), r"$x_1$", "ICE & PD", "", disp, mono)
     path = out / f"ice_x1_{model_name}.pdf"
     fig.savefig(path, bbox_inches="tight")
@@ -157,8 +157,7 @@ def _plot_combined_pd1_x1(out: Path, x_grid: np.ndarray, pd_tsl, pd_ebm, pd_xgb)
     ax.plot(x_grid, pd_xgb, lw=2.2, color=LINE_CYCLE[2], label="XGBoost", zorder=3)
     airy(ax, mono)
     axis_label(ax, mono, xlabel=r"$x_1$", ylabel=r"$\mathrm{PD}_1(x_1)$")
-    ax.legend(loc="best", frameon=False, prop={"family": mono, "size": 9},
-              labelcolor=TOKENS["muted"])
+    flat_legend(ax, mono, loc="upper right")
     header(fig, bgax, cards, (0, 0), r"$x_1$", "Model overlay", "", disp, mono)
     path = out / "pd_x1_all_models.pdf"
     fig.savefig(path, bbox_inches="tight")

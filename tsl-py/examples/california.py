@@ -79,11 +79,10 @@ from tsl_py.plot._theme import (
     axis_label,
     card_inset,
     figure_title,
-    flat_backbone_cmap,
     flat_background,
     flat_canvas,
     flat_colorbar,
-    flat_diverging_cmap,
+    flat_legend,
     grid_card_layout,
     grid_figsize,
     header,
@@ -463,6 +462,25 @@ def _flat_basemap(ax, mono, *, extent):
     ax.spines["geo"].set_linewidth(0.9)
 
 
+def _spatial_backbone_cmap():
+    """Pale → indigo → near-black ramp for the spatial backbone magnitude, with
+    extra dark stops so high-backbone regions read distinctly across the map."""
+    from matplotlib.colors import LinearSegmentedColormap
+    return LinearSegmentedColormap.from_list(
+        "spatial_backbone",
+        ["#F4F4F5", "#C7C3F2", "#8B83EC", "#4F46E5", "#312E81", "#1B1840"])
+
+
+def _spatial_diverging_cmap():
+    """Deep-blue → pale → orange → brick diverging ramp, anchored at zero, with
+    saturated extremes so the signed 2D-PD / tilt gradient stays legible."""
+    from matplotlib.colors import LinearSegmentedColormap
+    return LinearSegmentedColormap.from_list(
+        "spatial_div",
+        ["#1E3A8A", "#2563EB", "#93B4FB", "#F4F4F5",
+         "#FBB874", "#F97316", "#9A3412"])
+
+
 def save_spatial_backbone_with_map(
     result, out: Path, variant: str, *, margin: float = 0.5,
 ) -> None:
@@ -485,15 +503,17 @@ def save_spatial_backbone_with_map(
     lat_min, lat_max = float(result.y_vals.min()), float(result.y_vals.max())
     extent = [lon_min - margin, lon_max + margin,
               lat_min - margin, lat_max + margin]
-    cmap_b, cmap_d = flat_backbone_cmap(), flat_diverging_cmap()
+    cmap_b, cmap_d = _spatial_backbone_cmap(), _spatial_diverging_cmap()
     bb_pair = r"$b_{lon}\times b_{lat}$"
 
     def _backbone_norm(Z):
-        return mcolors.Normalize(vmin=0.0, vmax=max(float(Z.max()), 1e-10))
+        # span the bulk of the data (2nd–98th pct) so the magnitude gradient is
+        # visible rather than washed out by a few high-backbone cells
+        lo, hi = (float(np.percentile(Z, 2)), float(np.percentile(Z, 98)))
+        return mcolors.Normalize(vmin=lo, vmax=(hi if hi > lo else lo + 1e-10))
 
     def _pd_norm(Z):
-        vmax = float(np.max(np.abs(Z)))
-        vmax = vmax if vmax > 0 else 1.0
+        vmax = float(np.percentile(np.abs(Z), 98)) or 1.0
         return mcolors.TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
 
     n_cols = len(result.stages)
@@ -546,11 +566,10 @@ def save_spatial_tilt_with_map(
     lat_min, lat_max = float(result.y_vals.min()), float(result.y_vals.max())
     extent = [lon_min - margin, lon_max + margin,
               lat_min - margin, lat_max + margin]
-    cmap_d = flat_diverging_cmap()
+    cmap_d = _spatial_diverging_cmap()
 
     def _tilt_norm(Z):
-        vmax = float(np.max(np.abs(Z)))
-        vmax = vmax if vmax > 0 else 1.0
+        vmax = float(np.percentile(np.abs(Z), 98)) or 1.0
         return mcolors.TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
 
     n_cols = len(result.stages)
@@ -685,8 +704,7 @@ def plot_pd_comparison(
     zero_ref(ax)
     airy(ax, mono)
     axis_label(ax, mono, xlabel=feat_name, ylabel=pd_label)
-    ax.legend(loc="best", frameon=False, prop={"family": mono, "size": 9},
-              labelcolor=TOKENS["muted"])
+    flat_legend(ax, mono, loc="upper right")
     header(fig, bgax, cards, (0, 0), feat_name, "Model overlay", "", disp, mono)
 
     path = out / f"pd_comparison_{feat_name.lower()}_{variant}.pdf"
