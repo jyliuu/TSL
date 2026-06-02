@@ -71,17 +71,26 @@ from tsl_py.plot import (
     plot_tilt_1d,
     plot_tilt_diagnostics,
 )
-from tsl_py.plot._common import PALETTE, PALETTE_CYCLE
+from tsl_py.plot._common import PALETTE
+from tsl_py.plot.pd import LINE_CYCLE
 from tsl_py.plot._theme import (
     TOKENS,
+    airy,
+    axis_label,
+    card_inset,
     figure_title,
     flat_backbone_cmap,
+    flat_background,
     flat_canvas,
     flat_colorbar,
     flat_diverging_cmap,
+    grid_card_layout,
+    grid_figsize,
+    header,
     panel_title,
     reserve_title_band,
     setup_fonts,
+    zero_ref,
 )
 
 FEATURE_NAMES = [
@@ -650,29 +659,36 @@ def plot_pd_comparison(
     pd_xgb_in = _standard_pd_1d(xgb_interpretable.predict, X, feat_idx, x_grid) if xgb_interpretable else None
     pd_sepals = _standard_pd_1d(sepals_model.predict, X, feat_idx, x_grid) if sepals_model is not None else None
 
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(x_grid, pd_tsl, lw=2.6, color=PALETTE["backbone"],
-            alpha=0.95, label="TSL (Stage 1)", zorder=5)
-    ax.plot(x_grid, pd_ebm, lw=1.7, color=PALETTE_CYCLE[1],
-            alpha=0.9, label="EBM")
-    if pd_xgb_bb is not None:
-        ax.plot(x_grid, pd_xgb_bb, lw=1.7, color=PALETTE_CYCLE[2],
-                alpha=0.9, label="XGBoost (blackbox)")
-    if pd_xgb_in is not None:
-        ax.plot(x_grid, pd_xgb_in, lw=1.7, color=PALETTE_CYCLE[3],
-                alpha=0.9, label="XGBoost (interpretable)")
-    if pd_sepals is not None:
-        ax.plot(x_grid, pd_sepals, lw=1.7, color=PALETTE_CYCLE[4],
-                alpha=0.9, label="SepALS")
-    ax.axhline(0, color=PALETTE["neutral_dark"], ls="--", lw=0.5, alpha=0.5)
-    ax.set_xlabel(feat_name, fontsize=12)
     pd_label = r"$\mathrm{PD}_{\mathrm{lat}}$" if feat_name == "Latitude" else r"$\mathrm{PD}_{\mathrm{lon}}$"
-    ax.set_ylabel(pd_label, fontsize=12)
-    ax.grid(True, alpha=0.25)
-    ax.legend(loc="best", fontsize=10)
-    for spine in ("top", "right"):
-        ax.spines[spine].set_visible(False)
-    fig.tight_layout()
+
+    disp, mono = setup_fonts()
+    fig = plt.figure(figsize=grid_figsize(1, 1, cell_w_in=6.2, cell_h_in=4.4))
+    fw, fh = fig.get_size_inches()
+    cards = grid_card_layout(fw, fh, 1, 1)
+    bgax = flat_background(fig, cards)
+    figure_title(fig, "Benchmark / comparison", f"First-order PD · {feat_name}",
+                 badge="empirical PD")
+    ax = card_inset(fig, cards, (0, 0))
+
+    ax.plot(x_grid, pd_tsl, lw=2.6, color=LINE_CYCLE[0], zorder=5,
+            label="TSL (Stage 1)")
+    ax.plot(x_grid, pd_ebm, lw=1.9, color=LINE_CYCLE[1], label="EBM")
+    if pd_xgb_bb is not None:
+        ax.plot(x_grid, pd_xgb_bb, lw=1.9, color=LINE_CYCLE[2],
+                label="XGBoost (blackbox)")
+    if pd_xgb_in is not None:
+        ax.plot(x_grid, pd_xgb_in, lw=1.9, color=LINE_CYCLE[3],
+                label="XGBoost (interpretable)")
+    if pd_sepals is not None:
+        ax.plot(x_grid, pd_sepals, lw=1.9, color=LINE_CYCLE[4], label="SepALS")
+
+    zero_ref(ax)
+    airy(ax, mono)
+    axis_label(ax, mono, xlabel=feat_name, ylabel=pd_label)
+    ax.legend(loc="best", frameon=False, prop={"family": mono, "size": 9},
+              labelcolor=TOKENS["muted"])
+    header(fig, bgax, cards, (0, 0), feat_name, "Model overlay", "", disp, mono)
+
     path = out / f"pd_comparison_{feat_name.lower()}_{variant}.pdf"
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)

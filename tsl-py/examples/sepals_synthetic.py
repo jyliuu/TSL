@@ -33,6 +33,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from synthetic import make_dataset
+from tsl_py.plot._theme import (
+    TOKENS,
+    airy,
+    axis_label,
+    card_inset,
+    figure_title,
+    flat_background,
+    grid_card_layout,
+    grid_figsize,
+    header,
+    panel_note,
+    setup_fonts,
+    zero_ref,
+)
 
 try:
     from sepals import SeparatedALSRegressor
@@ -120,6 +134,8 @@ def run_tuning(X_train, y_train, n_trials: int, n_splits: int, seed: int):
 # Plotting
 # ---------------------------------------------------------------------------
 def plot_sepals_factors(model, X_background, save_path: Path, grid_points: int = 300):
+    """Flat card grid of the SepALS factor functions: one card per (rank term ℓ,
+    feature k), each holding the curve g_{ℓ,k}(x_k) with its rank-term scale s_ℓ."""
     n_features = X_background.shape[1]
     n_stages = int(model.rank)
     scales = np.asarray(model.scales_, dtype=float).ravel()
@@ -129,30 +145,28 @@ def plot_sepals_factors(model, X_background, save_path: Path, grid_points: int =
         for k in range(n_features)
     ]
 
-    fig, axes = plt.subplots(
-        n_stages, n_features,
-        figsize=(4 * n_features, 4 * n_stages),
-        squeeze=False,
-    )
+    disp, mono = setup_fonts()
+    fig = plt.figure(figsize=grid_figsize(n_stages, n_features, cell_w_in=4.1, cell_h_in=3.7))
+    fw, fh = fig.get_size_inches()
+    cards = grid_card_layout(fw, fh, n_stages, n_features)
+    bgax = flat_background(fig, cards)
+    figure_title(fig, "SepALS / benchmark", "Separated factor values",
+                 badge="factor values")
 
     for ell in range(n_stages):
         for k in range(n_features):
-            ax = axes[ell, k]
+            ax = card_inset(fig, cards, (ell, k))
             grid = feature_grids[k]
             g = model.factor_values(k, grid)[:, ell]
-            ax.plot(grid, g, color="C0", linewidth=1.8,
-                    label=rf"$g_{{{k + 1}}}^{{({ell + 1})}}$")
-            ax.axhline(0.0, color="black", linestyle="--", linewidth=0.5, alpha=0.5)
-            ax.set_xlabel(rf"$x_{k + 1}$", fontsize=12)
-            ax.set_ylabel(rf"$g_{{{k + 1}}}^{{({ell + 1})}}(x_{k + 1})$", fontsize=12)
-            ax.set_title(
-                rf"Rank term $\ell={ell + 1}$: $s_{{{ell + 1}}}={scales[ell]:.4g}$",
-                fontsize=11,
-            )
-            ax.grid(True, alpha=0.3)
-            ax.legend(loc="best", fontsize=9)
+            ax.plot(grid, g, color=TOKENS["accent"], lw=2.0)
+            zero_ref(ax)
+            airy(ax, mono)
+            axis_label(ax, mono, xlabel=rf"$x_{{{k + 1}}}$",
+                       ylabel=(rf"$g^{{({ell + 1})}}$" if k == 0 else None))
+            header(fig, bgax, cards, (ell, k), f"Term {ell + 1}",
+                   rf"$x_{{{k + 1}}}$", "", disp, mono)
+            panel_note(ax, f"s={scales[ell]:.4g}", mono)
 
-    plt.tight_layout()
     fig.savefig(save_path, bbox_inches="tight")
     plt.close(fig)
 

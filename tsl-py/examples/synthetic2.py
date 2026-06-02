@@ -16,10 +16,10 @@ figure shows that
     converged representations on Feature 0;
   * the similarity-filtering step (Algorithm 11) selects a single coherent
     set so the averaged backbone is sharp and stable;
-  * all 389 raw backbones span a viridis-colored fan whose extremes match
-    the two clusters of row 1.
+  * all 389 raw backbones span a flat sequential (pale → indigo) fan whose
+    extremes match the two clusters of row 1.
 
-Outputs (PNG, 12 x 12 in @ dpi=150):
+Outputs (PDF, flat theme):
 
   * backbone_bimodal_epoch0.pdf
         3-row x 2-col panel:
@@ -42,12 +42,24 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
+import matplotlib.cm as mcm
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib import cm
 from matplotlib.colors import Normalize
 
 from tsl_py import TSL
+from tsl_py.plot._theme import (
+    TOKENS,
+    airy,
+    axis_label,
+    figure_title,
+    flat_backbone_cmap,
+    flat_canvas,
+    mix,
+    panel_title,
+    reserve_title_band,
+    setup_fonts,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -208,11 +220,16 @@ def plot_figure(
     x_grid = np.linspace(x_min, x_max, n_grid_eval)
     combined_b = [_combined_backbone_on_grid(kept_grids, x_grid, j) for j in range(2)]
 
-    # Viridis normalisation for row 3
+    # Flat sequential normalisation for row 3
     norm = Normalize(vmin=lambda_total.min(), vmax=lambda_total.max())
-    cmap = cm.viridis
+    cmap = flat_backbone_cmap()
+    candidate_c = mix(TOKENS["accent"], 0.55)
 
-    fig, axes = plt.subplots(3, 2, figsize=(12, 12))
+    disp, mono = setup_fonts()
+    fig, axes = plt.subplots(3, 2, figsize=(11, 11))
+
+    legend_kw = dict(loc="best", frameon=False,
+                     prop={"family": mono, "size": 8}, labelcolor=TOKENS["muted"])
 
     for j in range(2):
         # ---- Row 1: two illustrative groups ----
@@ -223,30 +240,30 @@ def plot_figure(
                 np.asarray(grids[i].backbone_values[j], dtype=np.float64),
                 x_min, x_max,
             )
-            ax.step(xs, ys, where="post", color="tab:blue", lw=1, alpha=0.4)
+            ax.step(xs, ys, where="post", color=TOKENS["neg"], lw=1, alpha=0.4)
         for i in high_idx:
             xs, ys = _step_xy(
                 np.asarray(grids[i].splits[j], dtype=np.float64),
                 np.asarray(grids[i].backbone_values[j], dtype=np.float64),
                 x_min, x_max,
             )
-            ax.step(xs, ys, where="post", color="tab:orange", lw=1, alpha=0.4)
-        ax.plot(x_grid, combined_b[j], color="black", lw=2.0)
+            ax.step(xs, ys, where="post", color=TOKENS["pos"], lw=1, alpha=0.4)
+        ax.plot(x_grid, combined_b[j], color=TOKENS["ink"], lw=2.2)
 
         # Empty handles for legend (so colours show as solid swatches)
-        ax.plot([], [], color="tab:blue", lw=2,
+        ax.plot([], [], color=TOKENS["neg"], lw=2,
                 label=rf"Low $\lambda^+\!+\!\lambda^- <$ {low_max:.1f} ({n_extreme})")
-        ax.plot([], [], color="tab:orange", lw=2,
+        ax.plot([], [], color=TOKENS["pos"], lw=2,
                 label=rf"High $\lambda^+\!+\!\lambda^- \geq$ {high_min:.1f} ({n_extreme})")
         ax.plot(
-            [], [], color="black", lw=2,
+            [], [], color=TOKENS["ink"], lw=2,
             label=rf"Combined ($\xi={xi:.1f}$, $|\mathcal{{K}}|={keep_count}$, $\lambda^\star \approx {lambda_ref:.4f}$)",
         )
-        ax.set_xlabel(rf"$x_{j + 1}$")
-        ax.set_ylabel(rf"Stage 1 backbone $b_{j + 1}$")
+        airy(ax, mono)
+        panel_title(ax, "Extremes by scale", disp)
+        axis_label(ax, mono, xlabel=rf"$x_{{{j + 1}}}$", ylabel=rf"$b_{{{j + 1}}}$")
         ax.set_xlim(x_min, x_max)
-        ax.grid(True, alpha=0.3)
-        ax.legend(loc="best", fontsize=8)
+        ax.legend(**legend_kw)
 
         # ---- Row 2: combination candidates ----
         ax = axes[1, j]
@@ -256,27 +273,27 @@ def plot_figure(
                 np.asarray(grids[i].backbone_values[j], dtype=np.float64),
                 x_min, x_max,
             )
-            ax.step(xs, ys, where="post", color="#7fb3d5", lw=1, alpha=0.4)
+            ax.step(xs, ys, where="post", color=candidate_c, lw=1, alpha=0.45)
         xs_ref, ys_ref = _step_xy(
             np.asarray(grids[ref_idx].splits[j], dtype=np.float64),
             np.asarray(grids[ref_idx].backbone_values[j], dtype=np.float64),
             x_min, x_max,
         )
-        ax.step(xs_ref, ys_ref, where="post", color="tab:orange",
+        ax.step(xs_ref, ys_ref, where="post", color=TOKENS["pos"],
                 lw=2.0, label="Reference grid")
-        ax.plot(x_grid, combined_b[j], color="black", lw=2.0, label="Combined")
+        ax.plot(x_grid, combined_b[j], color=TOKENS["ink"], lw=2.2, label="Combined")
 
-        ax.plot([], [], color="#7fb3d5", lw=2, label=f"Candidates ({keep_count})")
+        ax.plot([], [], color=candidate_c, lw=2, label=f"Candidates ({keep_count})")
         handles, labels = ax.get_legend_handles_labels()
         ordered = ["Candidates", "Reference", "Combined"]
         items = {k: (h, l) for h, l in zip(handles, labels) for k in ordered if l.startswith(k)}
         ax.legend([items[k][0] for k in ordered if k in items],
                   [items[k][1] for k in ordered if k in items],
-                  loc="best", fontsize=9)
-        ax.set_xlabel(rf"$x_{j + 1}$")
-        ax.set_ylabel(rf"Stage 1 backbone $b_{j + 1}$")
+                  **legend_kw)
+        airy(ax, mono)
+        panel_title(ax, "Filtered candidates", disp)
+        axis_label(ax, mono, xlabel=rf"$x_{{{j + 1}}}$", ylabel=rf"$b_{{{j + 1}}}$")
         ax.set_xlim(x_min, x_max)
-        ax.grid(True, alpha=0.3)
 
         # ---- Row 3: all n_grids tensors colored by lambda+ + lambda- ----
         ax = axes[2, j]
@@ -287,22 +304,32 @@ def plot_figure(
                 x_min, x_max,
             )
             ax.step(xs, ys, where="post", color=cmap(norm(lambda_total[i])),
-                    lw=1, alpha=0.4)
-        ax.plot(x_grid, combined_b[j], color="black", lw=2.0, label="Combined")
-        ax.set_xlabel(rf"$x_{j + 1}$")
-        ax.set_ylabel(rf"Stage 1 backbone $b_{j + 1}$")
+                    lw=1, alpha=0.45)
+        ax.plot(x_grid, combined_b[j], color=TOKENS["ink"], lw=2.2, label="Combined")
+        airy(ax, mono)
+        panel_title(ax, "All bagged grids", disp)
+        axis_label(ax, mono, xlabel=rf"$x_{{{j + 1}}}$", ylabel=rf"$b_{{{j + 1}}}$")
         ax.set_xlim(x_min, x_max)
-        ax.grid(True, alpha=0.3)
-        ax.legend(loc="best", fontsize=9)
+        ax.legend(**legend_kw)
 
-    fig.tight_layout(rect=(0.0, 0.05, 1.0, 1.0))
+    fig.tight_layout(rect=[0, 0.07, 1, reserve_title_band(fig, 1.3)])
 
     # Shared horizontal colorbar at bottom (row 3 cells)
-    cbar_ax = fig.add_axes([0.20, 0.02, 0.60, 0.015])
-    sm = cm.ScalarMappable(norm=norm, cmap=cmap)
+    sm = mcm.ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])
+    cbar_ax = fig.add_axes([0.25, 0.045, 0.50, 0.015])
     cbar = fig.colorbar(sm, cax=cbar_ax, orientation="horizontal")
-    cbar.set_label(r"$\lambda^+\!+\!\lambda^-$")
+    cbar.outline.set_edgecolor(TOKENS["border"])
+    cbar.outline.set_linewidth(0.9)
+    cbar.ax.tick_params(length=0, labelsize=7.5, colors=TOKENS["muted"])
+    for lab in cbar.ax.get_xticklabels():
+        lab.set_family(mono)
+    cbar.set_label(r"$\lambda^+\!+\!\lambda^-$", family=mono, fontsize=8,
+                   color=TOKENS["muted"])
+
+    flat_canvas(fig)
+    figure_title(fig, "TSL / diagnostics", "Backbone bimodality",
+                 badge="stage 1 · epoch 0", badge_color=TOKENS["accent"])
 
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)

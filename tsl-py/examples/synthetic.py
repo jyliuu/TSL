@@ -44,9 +44,20 @@ import numpy as np
 
 from tsl_py import TSL
 from tsl_py.plot import pd_difference_plot, plot_2d_pd, plot_ice, plot_tilt_diagnostics
-from tsl_py.plot._common import (
-    PALETTE,
-    PALETTE_CYCLE,
+from tsl_py.plot.pd import LINE_CYCLE
+from tsl_py.plot._theme import (
+    TOKENS,
+    airy,
+    axis_label,
+    card_inset,
+    figure_title,
+    flat_background,
+    grid_card_layout,
+    grid_figsize,
+    header,
+    mix,
+    setup_fonts,
+    zero_ref,
 )
 
 
@@ -106,20 +117,25 @@ def _ice_1d(predict_fn, X_ref: np.ndarray, feat_idx: int, x_grid: np.ndarray, n_
 
 
 def _plot_ice(out: Path, model_name: str, x_grid: np.ndarray, ice: np.ndarray, pd: np.ndarray) -> None:
-    fig, ax = plt.subplots(figsize=(7, 4))
+    label = {"ebm": "EBM", "xgboost": "XGBoost"}.get(model_name, model_name.upper())
+    disp, mono = setup_fonts()
+    fig = plt.figure(figsize=grid_figsize(1, 1, cell_w_in=7.4, cell_h_in=4.4))
+    fw, fh = fig.get_size_inches()
+    cards = grid_card_layout(fw, fh, 1, 1)
+    bgax = flat_background(fig, cards)
+    figure_title(fig, f"{label} / benchmark", "Individual conditional expectation",
+                 badge="empirical ICE")
+    ax = card_inset(fig, cards, (0, 0))
+    ice_color = mix(TOKENS["accent"], 0.5)
     for k in range(ice.shape[0]):
-        ax.plot(x_grid, ice[k], color=PALETTE["backbone"], alpha=0.10, lw=1)
-    ax.plot(x_grid, pd, color=PALETTE["neutral_dark"], lw=2.5, label="PDP")
-    ax.axhline(0, color=PALETTE["neutral_dark"], ls="--", lw=0.8, alpha=0.5)
-    ax.set_xlabel(r"$x_1$", fontsize=12)
-    ax.set_ylabel("prediction", fontsize=12)
-    ax.set_title(f"{model_name} — ICE for $x_1$",
-                 color=PALETTE["neutral_dark"], fontweight="semibold")
-    ax.grid(True, alpha=0.25)
-    ax.legend(loc="best")
-    for spine in ("top", "right"):
-        ax.spines[spine].set_visible(False)
-    fig.tight_layout()
+        ax.plot(x_grid, ice[k], color=ice_color, alpha=0.10, lw=1, zorder=2)
+    zero_ref(ax)
+    ax.plot(x_grid, pd, color=TOKENS["ink"], lw=2.4, label="PDP", zorder=3)
+    airy(ax, mono)
+    axis_label(ax, mono, xlabel=r"$x_1$", ylabel="prediction")
+    ax.legend(loc="best", frameon=False, prop={"family": mono, "size": 9},
+              labelcolor=TOKENS["muted"])
+    header(fig, bgax, cards, (0, 0), r"$x_1$", "ICE & PD", "", disp, mono)
     path = out / f"ice_x1_{model_name}.pdf"
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
@@ -127,18 +143,23 @@ def _plot_ice(out: Path, model_name: str, x_grid: np.ndarray, ice: np.ndarray, p
 
 
 def _plot_combined_pd1_x1(out: Path, x_grid: np.ndarray, pd_tsl, pd_ebm, pd_xgb) -> None:
-    fig, ax = plt.subplots(figsize=(4, 4))
-    ax.plot(x_grid, pd_tsl, lw=2.2, color=PALETTE_CYCLE[0], label="TSL")
-    ax.plot(x_grid, pd_ebm, lw=2.2, color=PALETTE_CYCLE[1], label="EBM")
-    ax.plot(x_grid, pd_xgb, lw=2.2, color=PALETTE_CYCLE[2], label="XGBoost")
-    ax.axhline(0, color=PALETTE["neutral_dark"], ls="--", lw=0.8, alpha=0.6)
-    ax.set_xlabel(r"$x_1$", fontsize=12)
-    ax.set_ylabel(r"$\mathrm{PD}_1(x_1)$", fontsize=12)
-    ax.grid(True, alpha=0.25)
-    ax.legend(loc="best", fontsize=10)
-    for spine in ("top", "right"):
-        ax.spines[spine].set_visible(False)
-    fig.tight_layout()
+    disp, mono = setup_fonts()
+    fig = plt.figure(figsize=grid_figsize(1, 1, cell_w_in=5.4, cell_h_in=4.4))
+    fw, fh = fig.get_size_inches()
+    cards = grid_card_layout(fw, fh, 1, 1)
+    bgax = flat_background(fig, cards)
+    figure_title(fig, "Benchmark / comparison", "First-order partial dependence",
+                 badge="empirical PD")
+    ax = card_inset(fig, cards, (0, 0))
+    zero_ref(ax)
+    ax.plot(x_grid, pd_tsl, lw=2.2, color=LINE_CYCLE[0], label="TSL", zorder=3)
+    ax.plot(x_grid, pd_ebm, lw=2.2, color=LINE_CYCLE[1], label="EBM", zorder=3)
+    ax.plot(x_grid, pd_xgb, lw=2.2, color=LINE_CYCLE[2], label="XGBoost", zorder=3)
+    airy(ax, mono)
+    axis_label(ax, mono, xlabel=r"$x_1$", ylabel=r"$\mathrm{PD}_1(x_1)$")
+    ax.legend(loc="best", frameon=False, prop={"family": mono, "size": 9},
+              labelcolor=TOKENS["muted"])
+    header(fig, bgax, cards, (0, 0), r"$x_1$", "Model overlay", "", disp, mono)
     path = out / "pd_x1_all_models.pdf"
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
