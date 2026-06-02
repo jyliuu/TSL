@@ -110,7 +110,7 @@ though the signed PD cancels. This is the practical payoff of the two-tensor for
 
 <figure markdown="span">
   ![Signed 1D PD on x1 across models for the masked interaction](../assets/img/synthetic_pd_x1_all_models.png){ width="100%" }
-  <figcaption markdown="span">Synthetic masked-interaction dataset ($Y = x_1^2\,x_2\,(1+x_3)+\varepsilon$, $\mathbb{E}[1+X_3]=0$) — the signed 1D PD of $x_1$ is near zero for every model (TSL, EBM, XGBoost), matching the population identity $\mathrm{PD}_1(x_1)=0$. Yet the TSL-specific $\hat{m}_+$ branch curve recovers the underlying quadratic shape of $x_1$: the backbone $b_j$ separates magnitude from sign, so the $\hat{m}_+ \hat{m}_-$ product is large and quadratic even when the signed difference $\hat{m}_+ - \hat{m}_-$ cancels. Reproduced by the <a href="../index.md#examples"><code>synthetic.py</code></a> example script.</figcaption>
+  <figcaption markdown="span">Synthetic masked-interaction dataset ($Y = x_1^2\,x_2\,(1+x_3)+\varepsilon$, $\mathbb{E}[1+X_3]=0$) — the signed 1D PD of $x_1$ is near zero for every model (TSL, EBM, XGBoost), matching the population identity $\mathrm{PD}_1(x_1)=0$. Yet the TSL-specific $\hat{m}_+$ branch curve recovers the underlying quadratic shape of $x_1$: the backbone $b_j$ separates magnitude from sign, so the $\hat{m}_+ \hat{m}_-$ product is large and quadratic even when the signed difference $\hat{m}_+ - \hat{m}_-$ cancels. Reproduced by the [`synthetic.py`](../index.md#examples) example script.</figcaption>
 </figure>
 
 ## Derived diagnostics
@@ -127,7 +127,7 @@ The Python layer builds several interpretation primitives on top of the PD math:
 
 <figure markdown="span">
   ![ICE curves on x1 for TSL](../assets/img/ice_x1_tsl.png){ width="80%" }
-  <figcaption markdown="span">Individual conditional expectation (ICE) curves on California housing for MedInc — each faint line traces one sampled observation's predicted price as MedInc varies while all other features are held fixed. The bold line is the average PD curve. The tight, upward-trending band shows that MedInc has a consistent positive direction across observations: every home benefits from higher income, but homes in high-value locations start from a higher baseline (vertical spread). ICE is the per-observation analogue of PD; see <a href="../code/plotting.md#fn-plot-ice"><code>plot_ice</code></a> for the API.</figcaption>
+  <figcaption markdown="span">Individual conditional expectation (ICE) curves on California housing for MedInc — each faint line traces one sampled observation's predicted price as MedInc varies while all other features are held fixed. The bold line is the average PD curve. The tight, upward-trending band shows that MedInc has a consistent positive direction across observations: every home benefits from higher income, but homes in high-value locations start from a higher baseline (vertical spread). ICE is the per-observation analogue of PD; see [`plot_ice`](../code/plotting.md#fn-plot-ice) for the API.</figcaption>
 </figure>
 
 All of these are plotted by the `tsl_py.plot` helpers — see the
