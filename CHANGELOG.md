@@ -4,7 +4,12 @@ All notable changes to TSL are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com) and the project adheres to
 [Semantic Versioning](https://semver.org).
 
-## [0.1.1] - 2026-06-01
+## [0.1.3] - 2026-06-02
+
+### Features
+
+- **plot:** Complete plotting overhaul (#22)
+## [0.1.1] - 2026-06-02
 
 ### Refactor
 
