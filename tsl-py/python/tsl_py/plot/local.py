@@ -507,7 +507,7 @@ def plot_local_interpretation(
         global_scale = max(feature_only_mags) if feature_only_mags else 1.0
         tilt_pad = max(global_scale * 1.30, 1e-6)
 
-        ax_tilt = card_inset(fig, cards, (panel_idx, col_tilt), pad_l_in=0.34,
+        ax_tilt = card_inset(fig, cards, (panel_idx, col_tilt), pad_l_in=1.22,
                              pad_r_in=0.24)
         ax_tilt.set_xlim(-tilt_pad, tilt_pad)
         ax_tilt.set_ylim(n_stages - 0.5, -0.5)
@@ -530,7 +530,10 @@ def plot_local_interpretation(
             tilt_axis = np.concatenate(
                 [[expl.intercept_tilt[s_idx]], expl.feature_tilt[s_idx]]
             )
-            top = per_row_tilts[r]
+            # Stack the selected axes by signed effect, descending, so the
+            # positive tilts sit above the negative ones within each stage.
+            top = sorted(per_row_tilts[r], key=lambda j: float(tilt_axis[j]),
+                         reverse=True)
             # Fix the sub-bar thickness at top_k_features so stages with fewer
             # active tilts render thin bars (matching the per-feature height in
             # fully-populated rows), not one wide bar.
@@ -543,14 +546,15 @@ def plot_local_interpretation(
                 clipped = max(min(raw, tilt_pad * 0.96), -tilt_pad * 0.96)
                 rbar_h(ax_tilt, 0.0, clipped, yy, sub_height * 0.85, color,
                        r_disp=2, z=2)
-                # Axis label on the far left of the panel column.
-                ax_tilt.text(-tilt_pad * 0.98, yy, axis_labels[j],
-                             ha="left", va="center", fontsize=8.5, family=disp,
-                             color=T["ink"], zorder=3)
+                # Axis label in the card's left margin, outside the value axis.
+                ax_tilt.text(-0.025, yy, _ellipsize(axis_labels[j], 8.5, 1.0),
+                             ha="right", va="center", fontsize=8.5, family=disp,
+                             color=T["ink"], zorder=3, clip_on=False,
+                             transform=ax_tilt.get_yaxis_transform())
                 # Raw numeric annotation at the bar tip. Off-scale values
                 # (typical for a one-sided stage where d_0 is large) are bold; a
-                # small opaque white pill keeps the number legible where a bar
-                # tip lands over the feature-name label on the left.
+                # small opaque white pill keeps the number legible where a short
+                # bar's tip lands over a neighbouring bar.
                 tx = clipped + (0.02 * tilt_pad if raw >= 0 else -0.02 * tilt_pad)
                 ha = "left" if raw >= 0 else "right"
                 ax_tilt.text(
