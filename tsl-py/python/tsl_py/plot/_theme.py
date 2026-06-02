@@ -26,7 +26,7 @@ TOKENS = dict(
     radius_px=7, card_lw=0.9, line_w=2.2, base_w=1.4,
 )
 
-FONT_FILES = ("Geist[wght].ttf", "GeistMono[wght].ttf")
+FONT_FILES = ("Geist-Light.ttf", "Geist-SemiBold.ttf", "GeistMono-Light.ttf")
 _DISPLAY, _MONO = "Geist", "Geist Mono"
 
 
@@ -231,9 +231,15 @@ def grid_card_layout(fw, fh, n_rows, n_cols, *, margin_x_in=0.62,
 
 def grid_figsize(n_rows, n_cols, *, cell_w_in, cell_h_in, margin_x_in=0.62,
                  margin_top_in=1.15, margin_bot_in=0.55, gap_in=0.45,
-                 max_w=34.0, max_h=42.0):
+                 max_w=72.0, max_h=200.0):
     """Figure size that gives each card a ``cell_w_in × cell_h_in`` target,
-    with the same fixed margins/gaps :func:`grid_card_layout` assumes."""
+    with the same fixed margins/gaps :func:`grid_card_layout` assumes.
+
+    ``max_w`` / ``max_h`` are safety rails for pathologically large grids; they
+    sit far above what any realistic stage×feature grid needs, so the figure
+    grows with the content and each card keeps a size that :func:`card_inset`'s
+    fixed-inch pads fit inside.
+    """
     w = 2 * margin_x_in + n_cols * cell_w_in + (n_cols - 1) * gap_in
     h = margin_top_in + margin_bot_in + n_rows * cell_h_in + (n_rows - 1) * gap_in
     return (min(w, max_w), min(h, max_h))
