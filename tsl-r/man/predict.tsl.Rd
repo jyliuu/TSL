@@ -20,3 +20,18 @@ A numeric vector of predictions, one per row of \code{newdata}.
 \description{
 Predict from a fitted TSL model
 }
+\examples{
+set.seed(1)
+x <- matrix(runif(150 * 3, -2, 2), ncol = 3,
+            dimnames = list(NULL, c("a", "b", "c")))
+y <- 2 * x[, "a"] - x[, "b"] + 0.5 * x[, "c"] + rnorm(150, sd = 0.1)
+fit <- tsl(x, y, epochs = 5L, n_trees = 5L, verbosity = 0L)
+
+## Predict on new data
+newx <- matrix(runif(10 * 3, -2, 2), ncol = 3,
+               dimnames = list(NULL, c("a", "b", "c")))
+predict(fit, newx)
+}
+\seealso{
+\code{\link[=tsl]{tsl()}}
+}

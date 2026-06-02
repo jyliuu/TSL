@@ -36,6 +36,18 @@ interval, together with the branch scalars \eqn{\lambda_+, \lambda_- \ge 0}.
 The component's prediction is the ordered difference
 \eqn{\lambda_+ \prod_j b_j e^{d_j} - \lambda_- \prod_j b_j e^{-d_j}}.
 }
+\examples{
+set.seed(1)
+x <- matrix(runif(150 * 3, -2, 2), ncol = 3,
+            dimnames = list(NULL, c("a", "b", "c")))
+y <- 2 * x[, "a"] - x[, "b"] + 0.5 * x[, "c"] + rnorm(150, sd = 0.1)
+fit <- tsl(x, y, epochs = 5L, n_trees = 5L, verbosity = 0L)
+
+## Inspect the glass-box structure: one entry per boosting stage
+comp <- tsl_components(fit)
+length(comp)
+str(comp[[1]], max.level = 1)
+}
 \seealso{
 \code{\link[=tsl]{tsl()}}
 }

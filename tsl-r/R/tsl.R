@@ -38,9 +38,21 @@
 #'
 #' @return An object of class `"tsl"`: a list with the fitted model pointer
 #'   (`ptr`), training error (`err`), `residuals`, fitted values (`y_hat`),
-#'   the `feature_names`, and the matched `call`.
+#'   the `feature_names`, the matched `call`, and `x_background` -- a copy of the
+#'   training design matrix retained so the plotting and interpretability
+#'   functions (e.g. [plot_first_order_pd()]) can marginalise over the data
+#'   without it being passed again.
 #'
 #' @seealso [predict.tsl()]
+#' @examples
+#' set.seed(1)
+#' x <- matrix(runif(150 * 3, -2, 2), ncol = 3,
+#'             dimnames = list(NULL, c("a", "b", "c")))
+#' y <- 2 * x[, "a"] - x[, "b"] + 0.5 * x[, "c"] + rnorm(150, sd = 0.1)
+#'
+#' ## Fit a small boosted TSL model and inspect it
+#' fit <- tsl(x, y, epochs = 5L, n_trees = 5L, verbosity = 0L)
+#' print(fit)
 #' @export
 tsl <- function(x, y,
                 epochs = 10L,
@@ -105,6 +117,7 @@ tsl <- function(x, y,
       feature_names = colnames(x),
       n_features = ncol(x),
       n_obs = nrow(x),
+      x_background = x,
       call = match.call()
     ),
     class = "tsl"
@@ -119,6 +132,19 @@ tsl <- function(x, y,
 #' @param ... Ignored.
 #'
 #' @return A numeric vector of predictions, one per row of `newdata`.
+#'
+#' @seealso [tsl()]
+#' @examples
+#' set.seed(1)
+#' x <- matrix(runif(150 * 3, -2, 2), ncol = 3,
+#'             dimnames = list(NULL, c("a", "b", "c")))
+#' y <- 2 * x[, "a"] - x[, "b"] + 0.5 * x[, "c"] + rnorm(150, sd = 0.1)
+#' fit <- tsl(x, y, epochs = 5L, n_trees = 5L, verbosity = 0L)
+#'
+#' ## Predict on new data
+#' newx <- matrix(runif(10 * 3, -2, 2), ncol = 3,
+#'                dimnames = list(NULL, c("a", "b", "c")))
+#' predict(fit, newx)
 #' @export
 predict.tsl <- function(object, newdata, ...) {
   x <- as.matrix(newdata)
@@ -172,6 +198,17 @@ print.tsl <- function(x, ...) {
 #'   scalars `lambda_plus`, `lambda_minus`, and the legacy `scaling`.
 #'
 #' @seealso [tsl()]
+#' @examples
+#' set.seed(1)
+#' x <- matrix(runif(150 * 3, -2, 2), ncol = 3,
+#'             dimnames = list(NULL, c("a", "b", "c")))
+#' y <- 2 * x[, "a"] - x[, "b"] + 0.5 * x[, "c"] + rnorm(150, sd = 0.1)
+#' fit <- tsl(x, y, epochs = 5L, n_trees = 5L, verbosity = 0L)
+#'
+#' ## Inspect the glass-box structure: one entry per boosting stage
+#' comp <- tsl_components(fit)
+#' length(comp)
+#' str(comp[[1]], max.level = 1)
 #' @export
 tsl_components <- function(object) {
   if (!inherits(object, "tsl")) {

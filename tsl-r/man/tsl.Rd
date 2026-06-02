@@ -86,7 +86,10 @@ trees within a stage.}
 \value{
 An object of class \code{"tsl"}: a list with the fitted model pointer
 (\code{ptr}), training error (\code{err}), \code{residuals}, fitted values (\code{y_hat}),
-the \code{feature_names}, and the matched \code{call}.
+the \code{feature_names}, the matched \code{call}, and \code{x_background} -- a copy of the
+training design matrix retained so the plotting and interpretability
+functions (e.g. \code{\link[=plot_first_order_pd]{plot_first_order_pd()}}) can marginalise over the data
+without it being passed again.
 }
 \description{
 Fits a boosted TSL regression model. TSL is a glass-box model: the fitted
@@ -96,6 +99,16 @@ rank-1 products of univariate functions.
 \details{
 The hyperparameters mirror the Python \code{TSLRegressor}, so a model fit in R
 with the same data and \code{seed} reproduces the Python results.
+}
+\examples{
+set.seed(1)
+x <- matrix(runif(150 * 3, -2, 2), ncol = 3,
+            dimnames = list(NULL, c("a", "b", "c")))
+y <- 2 * x[, "a"] - x[, "b"] + 0.5 * x[, "c"] + rnorm(150, sd = 0.1)
+
+## Fit a small boosted TSL model and inspect it
+fit <- tsl(x, y, epochs = 5L, n_trees = 5L, verbosity = 0L)
+print(fit)
 }
 \seealso{
 \code{\link[=predict.tsl]{predict.tsl()}}
