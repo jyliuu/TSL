@@ -10,6 +10,7 @@ from ._theme import (
     card_inset,
     figure_title,
     flat_background,
+    flat_legend,
     grid_card_layout,
     grid_figsize,
     header,
@@ -54,8 +55,7 @@ def _style_axes(fig, ax, bgax, cards, disp, mono, kicker, title, legend=True):
     """Flat styling shared by every component card: optional mono legend, airy
     spines with a faint dot-grid, muted x/value axis labels, and a card header."""
     if legend and ax.get_legend_handles_labels()[1]:
-        ax.legend(frameon=False, prop={"family": mono, "size": 8},
-                  labelcolor=TOKENS["muted"])
+        flat_legend(ax, mono, loc="upper right", fontsize=8)
     airy(ax, mono, grid_axis="both")
     axis_label(ax, mono, xlabel="x", ylabel="value")
     header(fig, bgax, cards, (0, 0), kicker, title, "", disp, mono)

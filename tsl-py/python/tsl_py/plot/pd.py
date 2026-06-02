@@ -25,6 +25,7 @@ from ._theme import (
     figure_title,
     flat_background,
     flat_diverging_cmap,
+    flat_legend,
     flat_surface_axes,
     grid_card_layout,
     grid_figsize,
@@ -481,13 +482,13 @@ def pd_difference_plot(
     n_f = len(feature_indices)
     n_s = len(stage_idxs)
     n_rows = n_s + (1 if show_global else 0)
-    margin_bot_in = 1.15            # base margin + a band for the shared legend
+    margin_top_in = 1.7             # title block + a band for the shared legend
     if figsize is None:
         figsize = grid_figsize(n_rows, n_f, cell_w_in=4.1, cell_h_in=3.7,
-                               margin_bot_in=margin_bot_in)
+                               margin_top_in=margin_top_in)
     fig = plt.figure(figsize=figsize)
     fw, fh = fig.get_size_inches()
-    cards = grid_card_layout(fw, fh, n_rows, n_f, margin_bot_in=margin_bot_in)
+    cards = grid_card_layout(fw, fh, n_rows, n_f, margin_top_in=margin_top_in)
     bgax = flat_background(fig, cards)
     figure_title(fig, "TSL / diagnostics", "Partial-dependence difference",
                  badge="pd_difference_plot()", badge_color=TOKENS["accent"])
@@ -621,11 +622,10 @@ def pd_difference_plot(
             if lbl and lbl not in seen:
                 seen[lbl] = h
     if seen:
-        fig.legend(
-            seen.values(), seen.keys(),
-            loc="lower center", ncol=len(seen),
-            bbox_to_anchor=(0.5, 0.40 / fh), prop={"family": mono, "size": 9},
-            frameon=False, labelcolor=TOKENS["muted"],
+        flat_legend(
+            fig, mono, list(seen.values()), list(seen.keys()),
+            loc="upper right", bbox_to_anchor=(0.965, 1 - 1.06 / fh),
+            ncol=len(seen),
         )
     return PDDifferenceResult(
         fig=fig,
@@ -760,13 +760,13 @@ def plot_2d_pd(
         # One card per stage, plus a final "Total" card.
         panel_stages = list(stages) if stages is not None else list(range(per_stage.shape[0]))
         n_p = len(panel_stages) + 1
-        margin_bot_in = 1.15            # base margin + a band for the shared legend
+        margin_top_in = 1.7            # title block + a band for the shared legend
         if figsize is None:
             figsize = grid_figsize(1, n_p, cell_w_in=4.2, cell_h_in=3.9,
-                                   margin_bot_in=margin_bot_in)
+                                   margin_top_in=margin_top_in)
         fig = plt.figure(figsize=figsize)
         fw, fh = fig.get_size_inches()
-        cards = grid_card_layout(fw, fh, 1, n_p, margin_bot_in=margin_bot_in)
+        cards = grid_card_layout(fw, fh, 1, n_p, margin_top_in=margin_top_in)
         bgax = flat_background(fig, cards)
         figure_title(fig, "TSL / diagnostics", "2D partial dependence",
                      badge="plot_2d_pd()", badge_color=TOKENS["accent"])
@@ -801,15 +801,12 @@ def plot_2d_pd(
         header(fig, bgax, cards, (0, n_p - 1), "All stages", "Total",
                "", disp, mono)
 
-        # Shared legend in the bottom margin — same y-values across every card.
+        # Shared legend in the top band by the badge — same y-values everywhere.
         handles, labels = axes[0].get_legend_handles_labels()
-        fig.legend(
-            handles, labels,
-            loc="lower center",
-            bbox_to_anchor=(0.5, 0.40 / fh),
+        flat_legend(
+            fig, mono, handles, labels,
+            loc="upper right", bbox_to_anchor=(0.965, 1 - 1.06 / fh),
             ncol=min(len(y_arr), 6),
-            prop={"family": mono, "size": 9}, frameon=False,
-            labelcolor=TOKENS["muted"],
         )
 
         return PD2DLinesResult(
@@ -868,8 +865,7 @@ def plot_ice(
     ax.plot(x_grid, pd, color=TOKENS["ink"], lw=2.4, label="PDP", zorder=3)
     airy(ax, mono)
     axis_label(ax, mono, xlabel=names[feat_idx], ylabel="prediction")
-    ax.legend(loc="best", frameon=False, prop={"family": mono, "size": 9},
-              labelcolor=TOKENS["muted"])
+    flat_legend(ax, mono, loc="upper right")
 
     if owns_figure:
         header(fig, bgax, cards, (0, 0), names[feat_idx], "ICE & PD",

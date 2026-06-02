@@ -565,6 +565,12 @@ def tile_grid(ax, M, cmap, row_labels, col_labels, disp, mono, card=None,
 
     xpp, ypp = _ppx(ax)
     R = max(radius_px * xpp, 1e-9)
+    # shrink the cell value font so it fits the cell width on dense grids
+    val_fs = 7.5
+    if show_values:
+        pos = ax.get_position()
+        cell_w_px = pos.width * ax.figure.get_size_inches()[0] * ax.figure.dpi / nc
+        val_fs = float(np.clip(cell_w_px / 5.2, 5.0, 7.5))
     for r in range(nr):
         for c in range(nc):
             rgba = cmap(norm(M[r, c]))
@@ -576,7 +582,7 @@ def tile_grid(ax, M, cmap, row_labels, col_labels, disp, mono, card=None,
                 lw=T["card_lw"], zorder=3))
             if show_values:
                 ax.text(c + 0.5, r + 0.5, value_fmt.format(M[r, c]),
-                        ha="center", va="center", fontsize=7.5,
+                        ha="center", va="center", fontsize=val_fs,
                         family=mono, color=_text_on(rgba), zorder=4)
 
 
@@ -634,6 +640,29 @@ def axis_label(ax, mono, xlabel=None, ylabel=None, fontsize=8.5):
         ax.set_xlabel(xlabel, family=mono, fontsize=fontsize, color=T["muted"])
     if ylabel is not None:
         ax.set_ylabel(ylabel, family=mono, fontsize=fontsize, color=T["muted"])
+
+
+def flat_legend(target, mono, handles=None, labels=None, *, loc="upper right",
+                bbox_to_anchor=None, ncol=1, fontsize=9):
+    """Bordered flat-theme legend: hairline rounded border, opaque white fill,
+    mono muted labels. ``target`` is a Figure (shared legend) or Axes (in-panel);
+    the opaque fill lets it sit over data. Pass ``handles``/``labels`` for a
+    curated set, or omit them to collect from the axes."""
+    T = TOKENS
+    kw = dict(loc=loc, ncol=ncol, frameon=True, fancybox=True,
+              prop={"family": mono, "size": fontsize}, labelcolor=T["muted"],
+              borderpad=0.55, handlelength=1.5, handletextpad=0.6,
+              columnspacing=1.3)
+    if bbox_to_anchor is not None:
+        kw["bbox_to_anchor"] = bbox_to_anchor
+    leg = (target.legend(handles, labels, **kw) if handles is not None
+           else target.legend(**kw))
+    fr = leg.get_frame()
+    fr.set_facecolor(T["card"])
+    fr.set_edgecolor(T["border"])
+    fr.set_linewidth(0.9)
+    fr.set_alpha(1.0)
+    return leg
 
 
 def zero_ref(ax, axis="y", lw=0.8):

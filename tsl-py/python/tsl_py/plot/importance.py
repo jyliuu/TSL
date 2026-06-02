@@ -263,13 +263,15 @@ def plot_feature_importance(
 
     ax_bb = card_axes(fig, cards, "backbone_heat", pad_t_in=1.24, pad_l=0.048)
     tile_grid(ax_bb, backbone_per_stage.T, flat_backbone_cmap(),
-              names, stage_labels, disp, mono, card=cards["backbone_heat"])
+              names, stage_labels, disp, mono, card=cards["backbone_heat"],
+              show_values=True)
     header(fig, bgax, cards, "backbone_heat", "01 · per stage · unsigned",
            "Backbone importance", "", disp, mono)
 
     ax_tt = card_axes(fig, cards, "tilt_heat", pad_t_in=1.24, pad_l=0.048)
     tile_grid(ax_tt, tilt_per_stage.T, flat_tilt_cmap(),
-              names, stage_labels, disp, mono, card=cards["tilt_heat"])
+              names, stage_labels, disp, mono, card=cards["tilt_heat"],
+              show_values=True)
     header(fig, bgax, cards, "tilt_heat", "02 · per stage · signed",
            "Tilt importance", "", disp, mono)
 
