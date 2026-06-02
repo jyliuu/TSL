@@ -524,8 +524,9 @@ def plot_local_interpretation(
         global_scale = max(feature_only_mags) if feature_only_mags else 1.0
         tilt_pad = max(global_scale * 1.30, 1e-6)
 
+        tilt_pad_r_in = 0.24
         ax_tilt = card_inset(fig, cards, (panel_idx, col_tilt), pad_l_in=1.22,
-                             pad_r_in=0.24)
+                             pad_r_in=tilt_pad_r_in)
         ax_tilt.set_xlim(-tilt_pad, tilt_pad)
         ax_tilt.set_ylim(n_stages - 0.5, -0.5)
         ax_tilt.tick_params(axis="y", length=0, labelleft=False)
@@ -542,6 +543,12 @@ def plot_local_interpretation(
         ax_tilt.tick_params(axis="x", length=0, colors=T["muted"], labelsize=8)
         for lab in ax_tilt.get_xticklabels():
             lab.set_family(mono)
+
+        # inches per data unit, plus the room a tip label has past the right
+        # axis edge before it would reach the card border.
+        tilt_plot_w_in = ax_tilt.get_position().width * fw
+        in_per_unit = tilt_plot_w_in / (2 * tilt_pad)
+        right_room = max(tilt_pad_r_in - 0.06, 0.0) / in_per_unit
 
         for r, s_idx in enumerate(order):
             tilt_axis = np.concatenate(
@@ -560,24 +567,35 @@ def plot_local_interpretation(
                 yy = r - bar_h / 2 + sub_height * (k + 0.5)
                 raw = float(tilt_axis[j])
                 color = color_pos if raw >= 0 else color_neg
-                clipped = max(min(raw, tilt_pad * 0.96), -tilt_pad * 0.96)
-                rbar_h(ax_tilt, 0.0, clipped, yy, sub_height * 0.85, color,
+                label = f"{raw:+.2f}"
+                gap = 0.02 * tilt_pad
+                label_w = _text_w_in(label, 8.5) / in_per_unit
+                off_scale = abs(raw) > tilt_pad
+                # The number sits just past the bar tip. An off-scale tilt (a
+                # one-sided stage where d_0 is large) is drawn clipped and bold;
+                # its tip is pulled in enough to leave the label room — on the
+                # right inside the card margin, on the left inside the value
+                # axis (the left margin already holds the axis name).
+                if raw >= 0:
+                    tip = (min(tilt_pad, tilt_pad + right_room - gap - label_w)
+                           if off_scale else raw)
+                    tx, ha = tip + gap, "left"
+                else:
+                    tip = -tilt_pad + gap + label_w if off_scale else raw
+                    tx, ha = tip - gap, "right"
+                rbar_h(ax_tilt, 0.0, tip, yy, sub_height * 0.85, color,
                        r_disp=2, z=2)
                 # Axis label in the card's left margin, outside the value axis.
                 ax_tilt.text(-0.025, yy, _ellipsize(axis_labels[j], 8.5, 1.0),
                              ha="right", va="center", fontsize=8.5, family=disp,
                              color=T["ink"], zorder=3, clip_on=False,
                              transform=ax_tilt.get_yaxis_transform())
-                # Raw numeric annotation at the bar tip. Off-scale values
-                # (typical for a one-sided stage where d_0 is large) are bold; a
-                # small opaque white pill keeps the number legible where a short
-                # bar's tip lands over a neighbouring bar.
-                tx = clipped + (0.02 * tilt_pad if raw >= 0 else -0.02 * tilt_pad)
-                ha = "left" if raw >= 0 else "right"
+                # A small opaque white pill keeps the number legible where a
+                # short bar's tip lands beside a neighbouring sub-bar.
                 ax_tilt.text(
-                    tx, yy, f"{raw:+.2f}",
+                    tx, yy, label,
                     ha=ha, va="center", fontsize=8.5, family=mono, color=color,
-                    fontweight="bold" if abs(raw) > tilt_pad else "normal",
+                    fontweight="bold" if off_scale else "normal",
                     bbox=dict(boxstyle="round,pad=0.15", facecolor="white",
                               edgecolor="none"),
                     zorder=4,
