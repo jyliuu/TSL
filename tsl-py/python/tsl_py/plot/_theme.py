@@ -170,10 +170,77 @@ _HDR_TITLE_IN = 0.31    # kicker → title baseline
 _HDR_DIV_IN = 0.18      # title → divider
 
 
-def header(fig, bgax, cards, key, kicker, title, fn, disp, mono):
-    """Card header: mono kicker (left), accent ``plot_…()`` tag (right),
-    display title, and a hairline divider underneath. Vertical spacing is fixed
-    in inches so it does not stretch when the figure grows."""
+def _pill_behind(fig, bgax, txt, *, fill, edge, pad_x_in=0.06, pad_y_in=0.045,
+                 radius_px=5, lw=0.8, z=1.8):
+    """Round a chip to an already-placed ``fig.text`` artist, drawn in
+    figure-fraction coords on ``bgax`` so the text stays crisp on top."""
+    from matplotlib.patches import FancyBboxPatch
+
+    bb = txt.get_window_extent(_renderer(fig))
+    inv = fig.transFigure.inverted()
+    (x0, y0) = inv.transform((bb.x0, bb.y0))
+    (x1, y1) = inv.transform((bb.x1, bb.y1))
+    fw, fh = fig.get_size_inches()
+    px, py = pad_x_in / fw, pad_y_in / fh
+    bgax.add_patch(FancyBboxPatch(
+        (x0 - px, y0 - py), (x1 - x0) + 2 * px, (y1 - y0) + 2 * py,
+        boxstyle="round,pad=0,rounding_size=%.5f" % (radius_px / fig.dpi / fw),
+        mutation_aspect=fw / fh, fc=fill, ec=edge, lw=lw, zorder=z,
+        clip_on=False))
+
+
+def _constant_pills(fig, bgax, x_right, y, items, mono, disp, *,
+                    pad_x_in=0.052, pad_y_in=0.05, gap_in=0.05,
+                    label_size=8.5, value_size=7.5, radius_px=5):
+    """Right-aligned row of colour-coded chips ending at ``x_right``. ``items``
+    is ``[(label, value, colour), …]``; each chip tints toward its colour with a
+    semibold display-font label in that colour and a crisp ink mono value, so a
+    signed pair (e.g. C+ / C−) reads as two distinct, colour-keyed tags."""
+    from matplotlib.font_manager import FontProperties
+    from matplotlib.patches import FancyBboxPatch
+
+    T = TOKENS
+    fw, fh = fig.get_size_inches()
+    renderer = _renderer(fig)
+    inv = fig.transFigure.inverted()
+    px, py, gap = pad_x_in / fw, pad_y_in / fh, gap_in / fw
+    lab_gap = 0.022 / fw
+
+    def _wfrac(s, fam, size):
+        fp = FontProperties(family=fam, size=size)
+        return renderer.get_text_width_height_descent(
+            str(s), fp, False)[0] / (fw * fig.dpi)
+
+    cur_right = x_right
+    for label, value, color in reversed(list(items)):
+        chip_w = px + _wfrac(label, disp, label_size) + lab_gap \
+            + _wfrac(value, mono, value_size) + px
+        chip_left = cur_right - chip_w
+        tv = fig.text(cur_right - px, y, value, family=mono, fontsize=value_size,
+                      color=T["ink"], ha="right", va="center", zorder=5)
+        tl = fig.text(chip_left + px, y, label, family=disp, fontsize=label_size,
+                      color=color, ha="left", va="center", weight="semibold",
+                      zorder=5)
+        yb = inv.transform((0, min(tv.get_window_extent(renderer).y0,
+                                   tl.get_window_extent(renderer).y0)))[1] - py
+        yt = inv.transform((0, max(tv.get_window_extent(renderer).y1,
+                                   tl.get_window_extent(renderer).y1)))[1] + py
+        bgax.add_patch(FancyBboxPatch(
+            (chip_left, yb), chip_w, yt - yb,
+            boxstyle="round,pad=0,rounding_size=%.5f" % (radius_px / fig.dpi / fw),
+            mutation_aspect=fw / fh, fc=mix(color, 0.88), ec=mix(color, 0.42),
+            lw=0.8, zorder=1.8, clip_on=False))
+        cur_right = chip_left - gap
+
+
+def header(fig, bgax, cards, key, kicker, title, fn, disp, mono, fn_color=None,
+           fn_pill=False, fn_pills=None):
+    """Card header: mono kicker (left), a right-aligned tag, display title, and a
+    hairline divider underneath. The tag is either ``fn`` (accent text, or a
+    pale-indigo chip when ``fn_pill``) or ``fn_pills`` — a list of
+    ``(label, value, colour)`` rendered as colour-keyed chips for a signed pair.
+    Vertical spacing is fixed in inches so it does not stretch as the figure
+    grows."""
     T = TOKENS
     fh = fig.get_size_inches()[1]
     x0, y0, w, h = cards[key]
@@ -183,9 +250,15 @@ def header(fig, bgax, cards, key, kicker, title, fn, disp, mono):
     y_div = top - (_HDR_KICK_IN + _HDR_TITLE_IN + _HDR_DIV_IN) / fh
     fig.text(x0 + 0.028, y_kick, kicker.upper(), family=mono,
              fontsize=7.5, color=T["muted"])
-    if fn:
-        fig.text(x0 + w - 0.028, y_kick, fn, family=mono, fontsize=7.5,
-                 color=T["accent"], ha="right")
+    if fn_pills:
+        _constant_pills(fig, bgax, x0 + w - 0.028, y_kick, fn_pills, mono, disp)
+    elif fn:
+        color = fn_color or (T["ink"] if fn_pill else T["accent"])
+        txt = fig.text(x0 + w - 0.028, y_kick, fn, family=mono, fontsize=7.5,
+                       color=color, ha="right", zorder=5)
+        if fn_pill:
+            _pill_behind(fig, bgax, txt, fill=mix(T["accent"], 0.92),
+                         edge=mix(T["accent"], 0.55))
     fig.text(x0 + 0.028, y_title, title, family=disp, fontsize=12.5,
              color=T["ink"], weight="semibold")
     bgax.plot([x0 + 0.028, x0 + w - 0.028], [y_div] * 2,

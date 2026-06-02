@@ -30,7 +30,6 @@ from ._theme import (
     grid_figsize,
     header,
     mix,
-    panel_note,
     panel_title,
     setup_fonts,
     signed_fill,
@@ -51,6 +50,12 @@ LINE_CYCLE = [
     TOKENS["accent"], TOKENS["pos"], TOKENS["neg"], "#0D9488",
     "#9333EA", "#D97706", TOKENS["greys"][2], TOKENS["greys"][1],
 ]
+
+
+def _fmt_const(c: float) -> str:
+    """Component constant for the header readout, with numerical-zero (a
+    switched-off component) collapsed to ``0`` instead of a tiny exponent."""
+    return "0" if abs(c) < 1e-6 else f"{c:.3g}"
 
 
 class NormalizedDiagnostics(NamedTuple):
@@ -348,8 +353,9 @@ def plot_first_order_pd(
             axis_label(ax, mono, xlabel=selected_names[col],
                        ylabel=ylabel if col == 0 else None)
             header(fig, bgax, cards, (row, col), f"Stage {s + 1}",
-                   selected_names[col], "", disp, mono)
-            panel_note(ax, f"C+={c_plus:.3g}  C-={-c_minus:.3g}", mono)
+                   selected_names[col], "", disp, mono,
+                   fn_pills=[("C+", _fmt_const(c_plus), _PD_PLUS_LINE),
+                             ("C-", _fmt_const(-c_minus), _PD_MINUS_LINE)])
     return PDDifferenceResult(
         fig=fig,
         axes=axes,
@@ -556,8 +562,9 @@ def pd_difference_plot(
             axis_label(ax, mono, xlabel=selected_names[col],
                        ylabel=ylabel if col == 0 else None)
             header(fig, bgax, cards, (row, col), f"Stage {s + 1}",
-                   selected_names[col], "", disp, mono)
-            panel_note(ax, f"C+={c_plus:.3g}  C-={-c_minus:.3g}", mono)
+                   selected_names[col], "", disp, mono,
+                   fn_pills=[("C+", _fmt_const(c_plus), _PD_PLUS_LINE),
+                             ("C-", _fmt_const(-c_minus), _PD_MINUS_LINE)])
 
     if show_global:
         stage_arr = np.asarray(stage_idxs, dtype=int)
@@ -606,8 +613,7 @@ def pd_difference_plot(
             axis_label(ax, mono, xlabel=selected_names[col],
                        ylabel=ylabel_global if col == 0 else None)
             header(fig, bgax, cards, (n_s, col), "Global",
-                   selected_names[col], "", disp, mono)
-            panel_note(ax, title_eq, mono, fontsize=8.5)
+                   selected_names[col], title_eq, disp, mono, fn_pill=True)
 
     seen: dict = {}
     for ax in axes.ravel():
