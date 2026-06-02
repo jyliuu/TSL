@@ -225,7 +225,7 @@ def plot_feature_importance(
       3. Aggregated backbone importance (bars)
       4. Aggregated tilt importance (bars)
       5. Combined importance I_j = I_j^b + gamma * I_j^d (bars)
-      6. Energy-based stage weights (bars)
+      6. Stage weights — each stage's share of prediction magnitude (bars)
 
     Parameters
     ----------
@@ -279,11 +279,11 @@ def plot_feature_importance(
 
     ax_stage = _vbar_panel(fig, bgax, cards, "stage_bar", stage_labels, stage_weights,
                            TOKENS["greys"][2], disp, mono,
-                           "03 · each stage's share of prediction energy",
+                           "03 · each stage's share of prediction magnitude",
                            "Stage weights", "")
     ax_ttbar = _bar_panel(fig, bgax, cards, "tilt_bar", names, global_tilt,
                           TOKENS["pos"], disp, mono,
-                          "04 · tilt variance, energy-weighted over stages",
+                          "04 · tilt variance, magnitude-weighted over stages",
                           "Tilt, global", "")
     ax_combar = _bar_panel(fig, bgax, cards, "combined_bar", names, combined,
                            TOKENS["neg"], disp, mono,
@@ -291,7 +291,7 @@ def plot_feature_importance(
                            "Combined importance", "")
     ax_bbbar = _bar_panel(fig, bgax, cards, "backbone_bar", names, global_backbone,
                           TOKENS["accent"], disp, mono,
-                          "06 · backbone variance, energy-weighted over stages",
+                          "06 · backbone variance, magnitude-weighted over stages",
                           "Backbone, global", "")
 
     axes = np.array([ax_bb, ax_tt, ax_bbbar, ax_ttbar, ax_combar, ax_stage])
