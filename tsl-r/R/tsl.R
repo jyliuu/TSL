@@ -162,8 +162,8 @@ print.tsl <- function(x, ...) {
 #'   \describe{
 #'     \item{`scaling_plus`, `scaling_minus`}{the stage's OLS coefficients on
 #'       the \eqn{+} and \eqn{-} branches (the only place scaling is applied).}
-#'     \item{`candidate_indices`}{1-based indices of the bagged trees kept
-#'       after similarity filtering (empty if none was applied).}
+#'     \item{`candidate_indices`}{1-based indices of the bagged trees in the
+#'       stage (`1:n_trees`).}
 #'     \item{`combined_grid_tensor`}{the aggregated representative component.}
 #'     \item{`grid_tensors`}{the bag of per-tree components.}
 #'   }

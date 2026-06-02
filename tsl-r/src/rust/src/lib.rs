@@ -170,7 +170,7 @@ fn tsl_model_structure(model: ExternalPtr<TSL>) -> List {
         .map(|sp| -> Robj {
             let grid_tensors =
                 List::from_values(sp.get_grid_tensors().iter().map(grid_tensor_to_list));
-            // 1-based indices for R; empty when no similarity filtering was applied.
+            // 1-based indices of the per-tree components in the stage.
             let candidate_indices: Vec<i32> = sp
                 .get_candidate_indices()
                 .map(|idx| idx.iter().map(|&i| i as i32 + 1).collect())

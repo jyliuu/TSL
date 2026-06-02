@@ -14,8 +14,8 @@ A list with one element per stage. Each stage is a list with:
 \describe{
 \item{\code{scaling_plus}, \code{scaling_minus}}{the stage's OLS coefficients on
 the \eqn{+} and \eqn{-} branches (the only place scaling is applied).}
-\item{\code{candidate_indices}}{1-based indices of the bagged trees kept
-after similarity filtering (empty if none was applied).}
+\item{\code{candidate_indices}}{1-based indices of the bagged trees in the
+stage (\code{1:n_trees}).}
 \item{\code{combined_grid_tensor}}{the aggregated representative component.}
 \item{\code{grid_tensors}}{the bag of per-tree components.}
 }
