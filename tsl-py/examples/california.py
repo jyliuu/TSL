@@ -9,14 +9,18 @@
       B_j*tanh(d_j), tanh(d_j - mean d_j), B_j*tanh(d_j - mean d_j) — for
       Latitude, Longitude, and MedInc.  [library: plot_tilt_diagnostics]
 
-  * spatial_backbone_evolution.pdf
+  * spatial_backbone_evolution_{blackbox,interpretable}.pdf
       Combined 2-row × 2-stage figure showing the backbone product
       b_lon · b_lat (top) and the signed 2D partial dependence (bottom).
       [library: plot_2d_backbone]
 
-  * spatial_backbone_stage{1,2}.pdf, spatial_pd_stage{1,2}.pdf
-      Per-stage single-panel split-outs of the above (the paper LaTeX
-      includes each as a separate `\\includegraphics`).
+  * spatial_tilt_evolution_{blackbox,interpretable}.pdf
+      Signed 2D tilt over Longitude × Latitude on the California map, a
+      combined 1-row × 2-stage grid.  [library: plot_2d_tilt]
+
+  * tilt_1d_{blackbox,interpretable}.pdf
+      1D tilt curves for Latitude, Longitude, and MedInc.
+      [library: plot_tilt_1d]
 
   * feature_importance_{blackbox,interpretable}.pdf
       Per-stage backbone/tilt heatmap + aggregated importance + combined
@@ -25,6 +29,10 @@
   * local_explanations_{blackbox,interpretable}.pdf
       Verbatim port of `cali_analysis.py::plot_figure_5_local_explanations`,
       using the TSL `compute_local_explanation` primitive.
+
+  * local_interpretation_intercept_{coastal,desert}_{blackbox,interpretable}.pdf
+      Per-point card grid — stage contribution, backbone share, signed tilt —
+      with the model intercept broken out.  [library: plot_local_interpretation]
 
   * pd_comparison_{latitude,longitude}_{blackbox,interpretable}.pdf
       1D PD overlay: TSL (stage 1 only) vs EBM vs XGBoost (blackbox)
@@ -64,6 +72,17 @@ from tsl_py.plot import (
     plot_tilt_diagnostics,
 )
 from tsl_py.plot._common import PALETTE, PALETTE_CYCLE
+from tsl_py.plot._theme import (
+    TOKENS,
+    figure_title,
+    flat_backbone_cmap,
+    flat_canvas,
+    flat_colorbar,
+    flat_diverging_cmap,
+    panel_title,
+    reserve_title_band,
+    setup_fonts,
+)
 
 FEATURE_NAMES = [
     "Longitude",
@@ -413,107 +432,87 @@ def plot_figure_5_local_explanations(
 # ---------------------------------------------------------------------------
 
 
+def _flat_basemap(ax, mono, *, extent):
+    """Style a cartopy ``GeoAxes`` as a flat-theme map tile: hairline coast
+    above the fill, fainter state boundaries, a dashed mono-labelled graticule,
+    and a hairline outline."""
+    import cartopy.crs as ccrs
+    import cartopy.feature as cfeature
+
+    ax.set_extent(extent, crs=ccrs.PlateCarree())
+    # features sit above the fill so the coast reads as a crisp hairline
+    ax.add_feature(cfeature.COASTLINE, edgecolor=TOKENS["ink"], linewidth=0.7,
+                   zorder=3)
+    ax.add_feature(cfeature.STATES, edgecolor=TOKENS["muted"], linewidth=0.5,
+                   zorder=3)
+    gl = ax.gridlines(draw_labels=True, linewidth=0.6, color=TOKENS["grid"],
+                      linestyle=(0, (3, 3)), zorder=2)
+    gl.top_labels = gl.right_labels = False
+    gl.xlabel_style = {"family": mono, "size": 7.5, "color": TOKENS["muted"]}
+    gl.ylabel_style = {"family": mono, "size": 7.5, "color": TOKENS["muted"]}
+    ax.spines["geo"].set_edgecolor(TOKENS["border"])
+    ax.spines["geo"].set_linewidth(0.9)
+
+
 def save_spatial_backbone_with_map(
     result, out: Path, variant: str, *, margin: float = 0.5,
 ) -> None:
-    """Render the spatial backbone and 2D PD panels on a cartopy basemap.
+    """Render the spatial backbone and 2D PD panels on a flat-theme cartopy
+    basemap.
 
     Uses `result.X` (longitude mesh) and `result.Y` (latitude mesh) as
-    PlateCarree coordinates and overlays coastline + state boundaries.
+    PlateCarree coordinates, overlaying a hairline coastline + state boundaries
+    and filling with the flat colormaps — pale→indigo backbone magnitude,
+    blue→pale→orange signed PD.
 
-    Writes:
-      - `spatial_backbone_evolution_{variant}.pdf` (2 × n_stages combined grid)
-      - `spatial_backbone_stage{k}_{variant}.pdf`  (single backbone panel)
-      - `spatial_pd_stage{k}_{variant}.pdf`        (single 2D PD panel)
+    Writes `spatial_backbone_evolution_{variant}.pdf`: a 2 × n_stages combined
+    grid with the backbone product (top row) and signed 2D PD (bottom row).
     """
     import cartopy.crs as ccrs
-    import cartopy.feature as cfeature
     import matplotlib.colors as mcolors
 
+    disp, mono = setup_fonts()
     lon_min, lon_max = float(result.x_vals.min()), float(result.x_vals.max())
     lat_min, lat_max = float(result.y_vals.min()), float(result.y_vals.max())
-
-    def _setup(ax):
-        ax.add_feature(cfeature.COASTLINE)
-        ax.add_feature(cfeature.STATES)
-        ax.set_extent(
-            [lon_min - margin, lon_max + margin, lat_min - margin, lat_max + margin],
-            crs=ccrs.PlateCarree(),
-        )
-        gl = ax.gridlines(
-            draw_labels=True, linewidth=0.5, color="gray", alpha=0.5, linestyle="--",
-        )
-        gl.top_labels = gl.right_labels = False
+    extent = [lon_min - margin, lon_max + margin,
+              lat_min - margin, lat_max + margin]
+    cmap_b, cmap_d = flat_backbone_cmap(), flat_diverging_cmap()
+    bb_pair = r"$b_{lon}\times b_{lat}$"
 
     def _backbone_norm(Z):
         return mcolors.Normalize(vmin=0.0, vmax=max(float(Z.max()), 1e-10))
 
     def _pd_norm(Z):
         vmax = float(np.max(np.abs(Z)))
-        if vmax <= 0:
-            return mcolors.TwoSlopeNorm(vmin=-1.0, vcenter=0.0, vmax=1.0)
+        vmax = vmax if vmax > 0 else 1.0
         return mcolors.TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
 
-    cmap_b = "viridis"
-    cmap_d = "seismic"
-    title_kw = dict(color=PALETTE["neutral_dark"], fontweight="semibold")
-
-    for stage in result.stages:
-        Zb = result.backbone_per_stage[stage]
-        fig = plt.figure(figsize=(6, 5))
-        ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
-        _setup(ax)
-        cs = ax.contourf(
-            result.X, result.Y, Zb, levels=20, cmap=cmap_b,
-            norm=_backbone_norm(Zb), transform=ccrs.PlateCarree(), alpha=0.7,
-        )
-        fig.colorbar(cs, ax=ax, shrink=0.6, pad=0.05, label="Backbone Magnitude")
-        ax.set_title(f"Stage {stage + 1}: backbone $b_{{lon}} \\times b_{{lat}}$",
-                     **title_kw)
-        path = out / f"spatial_backbone_stage{stage + 1}_{variant}.pdf"
-        fig.savefig(path, bbox_inches="tight")
-        plt.close(fig)
-        print(f"  wrote {path}")
-
-        Zp = result.pd_per_stage[stage]
-        fig = plt.figure(figsize=(6, 5))
-        ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
-        _setup(ax)
-        cs = ax.contourf(
-            result.X, result.Y, Zp, levels=20, cmap=cmap_d,
-            norm=_pd_norm(Zp), transform=ccrs.PlateCarree(), alpha=0.7,
-        )
-        fig.colorbar(cs, ax=ax, shrink=0.6, pad=0.05, label="2D PD")
-        ax.set_title(f"Stage {stage + 1}: 2D PD over (lat, lon)", **title_kw)
-        path = out / f"spatial_pd_stage{stage + 1}_{variant}.pdf"
-        fig.savefig(path, bbox_inches="tight")
-        plt.close(fig)
-        print(f"  wrote {path}")
-
     n_cols = len(result.stages)
-    fig = plt.figure(figsize=(6 * n_cols, 10))
+    fig = plt.figure(figsize=(6 * n_cols, 10.5))
     for col, stage in enumerate(result.stages):
         Zb = result.backbone_per_stage[stage]
         ax_b = fig.add_subplot(2, n_cols, col + 1, projection=ccrs.PlateCarree())
-        _setup(ax_b)
-        cs_b = ax_b.contourf(
-            result.X, result.Y, Zb, levels=20, cmap=cmap_b,
-            norm=_backbone_norm(Zb), transform=ccrs.PlateCarree(), alpha=0.7,
-        )
-        fig.colorbar(cs_b, ax=ax_b, shrink=0.6, pad=0.05, label="Backbone Magnitude")
-        ax_b.set_title(f"Stage {stage + 1}: $b_{{lon}} \\times b_{{lat}}$", **title_kw)
+        _flat_basemap(ax_b, mono, extent=extent)
+        cs_b = ax_b.contourf(result.X, result.Y, Zb, levels=18, cmap=cmap_b,
+                             norm=_backbone_norm(Zb),
+                             transform=ccrs.PlateCarree(), zorder=1)
+        flat_colorbar(fig, ax_b, cs_b, mono, label="backbone")
+        panel_title(ax_b, f"Stage {stage + 1} · {bb_pair}", disp)
 
         Zp = result.pd_per_stage[stage]
-        ax_p = fig.add_subplot(2, n_cols, n_cols + col + 1, projection=ccrs.PlateCarree())
-        _setup(ax_p)
-        cs_p = ax_p.contourf(
-            result.X, result.Y, Zp, levels=20, cmap=cmap_d,
-            norm=_pd_norm(Zp), transform=ccrs.PlateCarree(), alpha=0.7,
-        )
-        fig.colorbar(cs_p, ax=ax_p, shrink=0.6, pad=0.05, label="2D PD")
-        ax_p.set_title(f"Stage {stage + 1}: 2D PD", **title_kw)
+        ax_p = fig.add_subplot(2, n_cols, n_cols + col + 1,
+                               projection=ccrs.PlateCarree())
+        _flat_basemap(ax_p, mono, extent=extent)
+        cs_p = ax_p.contourf(result.X, result.Y, Zp, levels=18, cmap=cmap_d,
+                             norm=_pd_norm(Zp), transform=ccrs.PlateCarree(),
+                             zorder=1)
+        flat_colorbar(fig, ax_p, cs_p, mono, label="2D PD")
+        panel_title(ax_p, f"Stage {stage + 1} · 2D PD", disp)
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, reserve_title_band(fig, 1.3)])
+    flat_canvas(fig)
+    figure_title(fig, "TSL / diagnostics", "Spatial backbone evolution",
+                 badge="plot_2d_backbone()", badge_color=TOKENS["accent"])
     combined = out / f"spatial_backbone_evolution_{variant}.pdf"
     fig.savefig(combined, bbox_inches="tight")
     plt.close(fig)
@@ -525,69 +524,42 @@ def save_spatial_tilt_with_map(
 ) -> None:
     """Render per-stage 2D tilt panels on a cartopy basemap.
 
-    Mirrors `save_spatial_backbone_with_map` but for the tilt product
-    `d_lon · d_lat`.  Writes:
-      - `spatial_tilt_stage{k}_{variant}.pdf`  (single panel per stage)
-      - `spatial_tilt_evolution_{variant}.pdf` (1 × n_stages combined grid)
+    Mirrors `save_spatial_backbone_with_map` but for the signed 2D tilt over
+    Longitude × Latitude, filled with the blue→pale→orange diverging colormap
+    anchored at zero.  Writes `spatial_tilt_evolution_{variant}.pdf`, a
+    1 × n_stages combined grid.
     """
     import cartopy.crs as ccrs
-    import cartopy.feature as cfeature
     import matplotlib.colors as mcolors
 
+    disp, mono = setup_fonts()
     lon_min, lon_max = float(result.x_vals.min()), float(result.x_vals.max())
     lat_min, lat_max = float(result.y_vals.min()), float(result.y_vals.max())
-
-    def _setup(ax):
-        ax.add_feature(cfeature.COASTLINE)
-        ax.add_feature(cfeature.STATES)
-        ax.set_extent(
-            [lon_min - margin, lon_max + margin, lat_min - margin, lat_max + margin],
-            crs=ccrs.PlateCarree(),
-        )
-        gl = ax.gridlines(
-            draw_labels=True, linewidth=0.5, color="gray", alpha=0.5, linestyle="--",
-        )
-        gl.top_labels = gl.right_labels = False
+    extent = [lon_min - margin, lon_max + margin,
+              lat_min - margin, lat_max + margin]
+    cmap_d = flat_diverging_cmap()
 
     def _tilt_norm(Z):
         vmax = float(np.max(np.abs(Z)))
-        if vmax <= 0:
-            return mcolors.TwoSlopeNorm(vmin=-1.0, vcenter=0.0, vmax=1.0)
+        vmax = vmax if vmax > 0 else 1.0
         return mcolors.TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
 
-    cmap_d = "seismic"
-    title_kw = dict(color=PALETTE["neutral_dark"], fontweight="semibold")
-
-    for stage in result.stages:
-        Z = result.tilt_per_stage[stage]
-        fig = plt.figure(figsize=(6, 5))
-        ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
-        _setup(ax)
-        cs = ax.contourf(
-            result.X, result.Y, Z, levels=20, cmap=cmap_d,
-            norm=_tilt_norm(Z), transform=ccrs.PlateCarree(), alpha=0.7,
-        )
-        fig.colorbar(cs, ax=ax, shrink=0.6, pad=0.05, label="2D Tilt")
-        ax.set_title(f"Stage {stage + 1}: 2D tilt over (lat, lon)", **title_kw)
-        path = out / f"spatial_tilt_stage{stage + 1}_{variant}.pdf"
-        fig.savefig(path, bbox_inches="tight")
-        plt.close(fig)
-        print(f"  wrote {path}")
-
     n_cols = len(result.stages)
-    fig = plt.figure(figsize=(6 * n_cols, 5))
+    fig = plt.figure(figsize=(6 * n_cols, 5.5))
     for col, stage in enumerate(result.stages):
         Z = result.tilt_per_stage[stage]
         ax = fig.add_subplot(1, n_cols, col + 1, projection=ccrs.PlateCarree())
-        _setup(ax)
-        cs = ax.contourf(
-            result.X, result.Y, Z, levels=20, cmap=cmap_d,
-            norm=_tilt_norm(Z), transform=ccrs.PlateCarree(), alpha=0.7,
-        )
-        fig.colorbar(cs, ax=ax, shrink=0.6, pad=0.05, label="2D Tilt")
-        ax.set_title(f"Stage {stage + 1}: 2D tilt", **title_kw)
+        _flat_basemap(ax, mono, extent=extent)
+        cs = ax.contourf(result.X, result.Y, Z, levels=18, cmap=cmap_d,
+                         norm=_tilt_norm(Z), transform=ccrs.PlateCarree(),
+                         zorder=1)
+        flat_colorbar(fig, ax, cs, mono, label="2D tilt")
+        panel_title(ax, f"Stage {stage + 1} · 2D tilt", disp)
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, reserve_title_band(fig, 1.3)])
+    flat_canvas(fig)
+    figure_title(fig, "TSL / diagnostics", "Spatial tilt evolution",
+                 badge="plot_2d_tilt()", badge_color=TOKENS["accent"])
     combined = out / f"spatial_tilt_evolution_{variant}.pdf"
     fig.savefig(combined, bbox_inches="tight")
     plt.close(fig)

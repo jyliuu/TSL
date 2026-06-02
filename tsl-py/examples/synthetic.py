@@ -14,9 +14,6 @@ even though it strongly drives predictions via interactions. Figures:
   * pd_difference_plot.pdf
       Combined 2×3 (stages × features) PD difference plot. [library]
 
-  * pd_difference_plot_x{1,2,3}.pdf
-      Per-feature, stage-1-only split-outs of the above (one square each).
-
   * tilt_diagnostics.pdf
       Four-curve tilt diagnostics per (stage, feature) cell — tanh(d_j),
       B_j*tanh(d_j), tanh(d_j - mean d_j), B_j*tanh(d_j - mean d_j) — for
@@ -50,8 +47,6 @@ from tsl_py.plot import pd_difference_plot, plot_2d_pd, plot_ice, plot_tilt_diag
 from tsl_py.plot._common import (
     PALETTE,
     PALETTE_CYCLE,
-    _apply_data_density,
-    _stage_backbone_tilt,
 )
 
 
@@ -69,82 +64,6 @@ def make_dataset(
     X = np.column_stack([x1, x2, x3])
     y = x1 ** 2 * x2 + x1 ** 2 * x2 * x3 + noise_std * rng.standard_normal(size=n)
     return np.ascontiguousarray(X), np.ascontiguousarray(y.astype(np.float64))
-
-
-# ---------------------------------------------------------------------------
-# Figure 3.1 per-feature split (stage 1 only) — what the paper LaTeX includes
-# ---------------------------------------------------------------------------
-
-
-def save_pd_difference_plot_split_panels(
-    result, model, out: Path, stage: int = 0,
-    X_background: Optional[np.ndarray] = None, show_data_density: bool = False,
-) -> None:
-    """Save one square PDF per feature for a fixed stage (default: stage 1).
-
-    For feature x_j, writes `pd_difference_plot_x{j}.pdf`. Same data as the
-    combined plot — just one PDF per panel, re-drawn from the arrays in
-    `result`. The backbone overlay is `√(C+·C−)·b_j`.
-
-    If `show_data_density` is True, overlay a semi-transparent rug of
-    `X_background[:, feat_idx]` along the x-axis.
-    """
-    stage_predictor = model.stage_predictors[stage]
-    for i, feat_idx in enumerate(result.feature_indices):
-        x_vals = result.x_grids[i]
-        f_plus = result.f_plus[i, :, stage]
-        f_minus = result.f_minus[i, :, stage]
-        c_plus, c_minus = result.constants[i, stage]
-        feat_name = result.feature_names[i]
-        j = feat_idx + 1
-
-        y_plus = f_plus
-        y_minus = -f_minus
-        label_plus = rf"$\mathrm{{PD}}_{{+,{j}}}$"
-        label_minus = rf"$\mathrm{{PD}}_{{-,{j}}}$"
-        ylabel = rf"$\mathrm{{PD}}_{{\pm,{j}}}$"
-        overlay_label = r"$\sqrt{C_+ C_-}\,b_j$"
-        fname = f"pd_difference_plot_{feat_name}.pdf"
-
-        diff = y_plus - y_minus
-
-        fig, ax = plt.subplots(figsize=(4, 4))
-        ax.fill_between(x_vals, y_minus, y_plus, where=(diff >= 0),
-                        color="#34d399", alpha=0.28)
-        ax.fill_between(x_vals, y_minus, y_plus, where=(diff <  0),
-                        color="#f87171", alpha=0.28)
-        ax.plot(x_vals, y_plus,  lw=1.7, color="#10b981",
-                alpha=0.95, label=label_plus)
-        ax.plot(x_vals, y_minus, lw=1.7, color="#dc2626",
-                alpha=0.95, label=label_minus)
-
-        product = c_plus * (-c_minus)
-        if product > 0:
-            backbone, _ = _stage_backbone_tilt(stage_predictor, feat_idx, x_vals)
-            overlay = backbone * np.sqrt(product)
-            ax.plot(x_vals, overlay, lw=2.0, color=PALETTE["neutral_dark"],
-                    ls=":", alpha=0.95, label=overlay_label)
-        if show_data_density and X_background is not None:
-            _apply_data_density(ax, X_background[:, feat_idx], kind="rug")
-        ax.axhline(0, color=PALETTE["neutral_dark"], ls="--", lw=0.5, alpha=0.5)
-        ax.set_xlabel(f"${feat_name}$" if feat_name.startswith("x") else feat_name, fontsize=12)
-        ax.set_ylabel(ylabel, fontsize=12)
-        c_minus_disp = -c_minus
-        ax.set_title(
-            f"$C_+={c_plus:.4f}$, $C_-={c_minus_disp:.4f}$"
-            if abs(c_plus) < 1000 and abs(c_minus_disp) < 1000
-            else f"$C_+={c_plus:.2e}$, $C_-={c_minus_disp:.2e}$",
-            fontsize=12, color=PALETTE["neutral_dark"], fontweight="semibold",
-        )
-        ax.grid(True, alpha=0.25)
-        ax.legend(loc="best", fontsize=10)
-        for spine in ("top", "right"):
-            ax.spines[spine].set_visible(False)
-        fig.tight_layout()
-        path = out / fname
-        fig.savefig(path, bbox_inches="tight")
-        plt.close(fig)
-        print(f"  wrote {path}")
 
 
 # ---------------------------------------------------------------------------
@@ -264,11 +183,6 @@ def main(
     r.fig.savefig(out / "pd_difference_plot.pdf", bbox_inches="tight")
     plt.close(r.fig)
     print(f"  wrote {out / 'pd_difference_plot.pdf'}")
-
-    # Per-feature stage-1 split-outs (raw).
-    save_pd_difference_plot_split_panels(
-        r, model, out, stage=0, X_background=X, show_data_density=True,
-    )
 
     print("Tilt diagnostics (x1, x2, x3) ...")
     r_tilt_diag = plot_tilt_diagnostics(

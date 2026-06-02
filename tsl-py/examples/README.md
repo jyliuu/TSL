@@ -33,12 +33,14 @@ Filenames are human-readable — no `figure_X_Y_` paper-index prefixes.
 | Output file | Source |
 |---|---|
 | `pd_difference_plot_{blackbox,interpretable}.pdf` | `pd_difference_plot` |
-| `spatial_backbone_evolution.pdf` | `plot_2d_backbone` (combined) |
-| `spatial_backbone_stage{1,2}.pdf` | per-stage backbone-product panel, re-drawn from `Backbone2DResult` |
-| `spatial_pd_stage{1,2}.pdf` | per-stage 2D-PD panel, re-drawn from `Backbone2DResult` |
+| `spatial_backbone_evolution_{blackbox,interpretable}.pdf` | `plot_2d_backbone` (combined 2×2: backbone product + 2D PD per stage) |
+| `spatial_tilt_evolution_{blackbox,interpretable}.pdf` | `plot_2d_tilt` (combined 1×2, on the California map) |
+| `tilt_1d_{blackbox,interpretable}.pdf` | `plot_tilt_1d` (Latitude, Longitude, MedInc) |
+| `tilt_diagnostics_{blackbox,interpretable}.pdf` | `plot_tilt_diagnostics` |
 | `feature_importance_{blackbox,interpretable}.pdf` | `plot_feature_importance` |
 | `local_explanations_{blackbox,interpretable}.pdf` | verbatim port of `cali_analysis.py::plot_figure_5_local_explanations` |
-| `pd_comparison_{latitude,longitude}.pdf` | 1D PD overlay: TSL (Stage 1) + EBM + XGBoost (blackbox) + XGBoost (interpretable) |
+| `local_interpretation_intercept_{coastal,desert}_{blackbox,interpretable}.pdf` | `plot_local_interpretation` (card grid, intercept broken out) |
+| `pd_comparison_{latitude,longitude}_{blackbox,interpretable}.pdf` | 1D PD overlay: TSL (Stage 1) + EBM + XGBoost (blackbox) + XGBoost (interpretable) + SepALS (optional) |
 
 Pass `--variant {blackbox, interpretable}` to switch the TSL model. To
 regenerate the paper's full California figure set, run both variants
@@ -63,7 +65,6 @@ python tsl-py/examples/california.py --variant interpretable --out tsl-py/exampl
 | Output file | Source |
 |---|---|
 | `pd_difference_plot.pdf` | `pd_difference_plot` (combined 2×3) |
-| `pd_difference_plot_x{1,2,3}.pdf` | per-feature, stage-1 split-out, re-drawn from `PDDifferenceResult` |
 | `ice_x1_tsl.pdf` | TSL `plot_ice` |
 | `ice_x1_ebm.pdf` | EBM ICE (custom) |
 | `ice_x1_xgboost.pdf` | XGBoost ICE (custom) |
