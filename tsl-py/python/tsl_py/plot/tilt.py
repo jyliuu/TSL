@@ -44,7 +44,6 @@ from ._theme import (
     grid_figsize,
     header,
     mix,
-    panel_note,
     setup_fonts,
     signed_fill,
     zero_ref,
@@ -486,10 +485,11 @@ def plot_tilt_diagnostics(
                     ax.set_ylim(-1.05, 1.05)
                 airy(ax, mono)
                 axis_label(ax, mono, xlabel=selected_names[fi])
+                d_tag = (r"$\overline{d_j}=0$" if abs(d_mean) < 1e-6
+                         else rf"$\overline{{d_j}}={d_mean:+.3g}$")
                 header(fig, bgax, cards, (row, cc),
                        f"{selected_names[fi]} · Stage {s + 1}",
-                       curve_titles[cc], "", disp, mono)
-                panel_note(ax, rf"$\overline{{d_j}}={d_mean:+.3g}$", mono)
+                       curve_titles[cc], d_tag, disp, mono, fn_pill=True)
                 curves_all[fi, :, si, cc] = curve
     stage_slice = np.asarray(stage_idxs, dtype=int)
     return TiltDiagnosticsResult(
