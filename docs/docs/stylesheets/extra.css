@@ -111,3 +111,23 @@
   vertical-align: middle;
 }
 .api-tag-dataclass { background: rgba(168, 85, 247, 0.18); color: #9333ea; }
+
+/* Figure captions: slightly inset on both sides relative to the figure.
+   Material sets max-width: 24rem by default; override to let captions
+   span nearly the full image width. */
+.md-typeset figure figcaption {
+  max-width: none;
+  width: 96%;
+  margin: 0.5em auto 0;
+}
+
+/* ---- Wider main column ----
+   The content + table-of-contents area is laid out inside `.md-grid`, capped at
+   61rem by default. The two sidebars stay a fixed 12.1rem each, so raising the
+   grid cap pours all the extra width into `.md-content` — the main column ends
+   up several times wider than either sidebar, giving the figures and wide tables
+   room on large screens. Below this width the layout is still fluid, so narrow
+   viewports are unaffected. */
+.md-grid {
+  max-width: 88rem;
+}

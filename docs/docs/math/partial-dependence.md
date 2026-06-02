@@ -64,9 +64,8 @@ therefore recover the fitted factor shapes (up to the constants $C^{(\ell)}_{\pm
 **without a surrogate**.
 
 <figure markdown="span">
-  ![1D partial dependence on latitude](../assets/img/california_pd_latitude.png){ width="49%" }
-  ![1D partial dependence on longitude](../assets/img/california_pd_longitude.png){ width="49%" }
-  <figcaption>California housing: TSL's 1D PD on latitude/longitude retains the localized coastal peaks (the exact factor shapes), where marginalization-based baselines flatten them.</figcaption>
+  ![1D partial dependence on latitude and longitude](../assets/img/california_pd_comparison.png){ width="100%" }
+  <figcaption markdown="span">California housing — TSL's summed $\hat{m}_+$ branch PD for Latitude (left) and Longitude (right) compared with EBM, XGBoost (blackbox and interpretable), and SepALS. TSL (dark blue) preserves sharp localized peaks — a spike near lat 37–38 (Bay Area) and a concentrated coastal band near lon −122 — while the baselines smooth this into nearly monotone slopes. The faithfulness follows directly from Proposition 1: for a separable model, marginalizing over the other features leaves the factor shape $\hat{m}_{\pm,j}(x_j)$ intact up to the constant $C_{\pm,j}$, so the 1D PD curve is an exact scaled copy of the factor, not a contaminated main effect.</figcaption>
 </figure>
 
 !!! note "Implementation note — empirical marginalization"
@@ -111,7 +110,7 @@ though the signed PD cancels. This is the practical payoff of the two-tensor for
 
 <figure markdown="span">
   ![Signed 1D PD on x1 across models for the masked interaction](../assets/img/synthetic_pd_x1_all_models.png){ width="100%" }
-  <figcaption>Masked interaction: the signed 1D PD of $x_1$ is ≈0 for every model (TSL, EBM, XGBoost), matching the population identity — yet TSL's backbone branch still recovers the quadratic effect.</figcaption>
+  <figcaption markdown="span">Synthetic masked-interaction dataset ($Y = x_1^2\,x_2\,(1+x_3)+\varepsilon$, $\mathbb{E}[1+X_3]=0$) — the signed 1D PD of $x_1$ is near zero for every model (TSL, EBM, XGBoost), matching the population identity $\mathrm{PD}_1(x_1)=0$. Yet the TSL-specific $\hat{m}_+$ branch curve recovers the underlying quadratic shape of $x_1$: the backbone $b_j$ separates magnitude from sign, so the $\hat{m}_+ \hat{m}_-$ product is large and quadratic even when the signed difference $\hat{m}_+ - \hat{m}_-$ cancels. Reproduced by the [`synthetic.py`](../index.md#examples) example script.</figcaption>
 </figure>
 
 ## Derived diagnostics
@@ -128,7 +127,7 @@ The Python layer builds several interpretation primitives on top of the PD math:
 
 <figure markdown="span">
   ![ICE curves on x1 for TSL](../assets/img/ice_x1_tsl.png){ width="80%" }
-  <figcaption>ICE curves trace each observation's prediction as one feature varies — the per-observation analogue of partial dependence.</figcaption>
+  <figcaption markdown="span">Individual conditional expectation (ICE) curves on California housing for MedInc — each faint line traces one sampled observation's predicted price as MedInc varies while all other features are held fixed. The bold line is the average PD curve. The tight, upward-trending band shows that MedInc has a consistent positive direction across observations: every home benefits from higher income, but homes in high-value locations start from a higher baseline (vertical spread). ICE is the per-observation analogue of PD; see [`plot_ice`](../code/plotting.md#fn-plot-ice) for the API.</figcaption>
 </figure>
 
 All of these are plotted by the `tsl_py.plot` helpers — see the

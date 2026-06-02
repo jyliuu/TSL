@@ -11,13 +11,24 @@ from typing import Iterable, List, NamedTuple, Optional, Sequence, Tuple, Union
 import numpy as np
 
 from ._common import (
-    PALETTE,
     _as_array_and_names,
     _require_matplotlib,
     _resolve_feature,
     _stage_backbone_tilt,
-    tsl_diverging_cmap,
-    tsl_sequential_cmap,
+)
+from ._theme import (
+    TOKENS,
+    card_colorbar,
+    card_inset,
+    figure_title,
+    flat_backbone_cmap,
+    flat_background,
+    flat_diverging_cmap,
+    flat_surface_axes,
+    grid_card_layout,
+    grid_figsize,
+    header,
+    setup_fonts,
 )
 
 Feature = Union[int, str]
@@ -132,45 +143,51 @@ def plot_2d_backbone(
         )
 
     plt = _require_matplotlib()
+    disp, mono = setup_fonts()
     n_p = len(stage_idxs)
     if figsize is None:
-        figsize = (5 * n_p, 8)
-    fig, axes = plt.subplots(2, n_p, figsize=figsize, squeeze=False)
+        figsize = grid_figsize(2, n_p, cell_w_in=5.2, cell_h_in=4.4)
+    fig = plt.figure(figsize=figsize)
+    fw, fh = fig.get_size_inches()
+    cards = grid_card_layout(fw, fh, 2, n_p)
+    bgax = flat_background(fig, cards)
+    figure_title(fig, "TSL / diagnostics", "2D backbone evolution",
+                 badge="plot_2d_backbone()", badge_color=TOKENS["accent"])
+    axes = np.empty((2, n_p), dtype=object)
 
-    cmap_b = cmap_backbone if cmap_backbone is not None else tsl_sequential_cmap()
-    cmap_p = cmap_pd if cmap_pd is not None else tsl_diverging_cmap()
-    title_kw = dict(color=PALETTE["neutral_dark"], fontweight="semibold")
+    cmap_b = cmap_backbone if cmap_backbone is not None else flat_backbone_cmap()
+    cmap_p = cmap_pd if cmap_pd is not None else flat_diverging_cmap()
+    bb_pair = f"$b_{{{names[fx]}}}\\times b_{{{names[fy]}}}$"
 
     for col, s in enumerate(stage_idxs):
+        # Backbone product b_x · b_y is an unsigned magnitude, mapped from zero.
         Zb = backbone_per_stage[s]
-        ax_b = axes[0, col]
+        ax_b = card_inset(fig, cards, (0, col), pad_r_in=1.05)
+        axes[0, col] = ax_b
         vmax_b = max(float(Zb.max()), 1e-10)
         cs_b = ax_b.contourf(
-            Xg, Yg, Zb, levels=20, cmap=cmap_b,
-            norm=mcolors.Normalize(vmin=0.0, vmax=vmax_b), alpha=0.9,
+            Xg, Yg, Zb, levels=18, cmap=cmap_b,
+            norm=mcolors.Normalize(vmin=0.0, vmax=vmax_b),
         )
-        fig.colorbar(cs_b, ax=ax_b, shrink=0.7, pad=0.04, label="backbone")
-        ax_b.set_xlabel(names[fx])
-        ax_b.set_ylabel(names[fy])
-        ax_b.set_title(
-            f"Stage {s + 1}: $b_{{{names[fx]}}}\\times b_{{{names[fy]}}}$",
-            **title_kw,
-        )
+        flat_surface_axes(ax_b, mono, xlabel=names[fx], ylabel=names[fy])
+        card_colorbar(fig, cards, (0, col), cs_b, mono, label="backbone")
+        header(fig, bgax, cards, (0, col), f"Stage {s + 1}", bb_pair,
+               "", disp, mono)
 
+        # 2D PD is signed, diverging colour anchored at zero.
         Zp = pd_per_stage[s]
         vmax_p = float(np.max(np.abs(Zp)))
         if vmax_p <= 0:
             norm_p = mcolors.TwoSlopeNorm(vmin=-1.0, vcenter=0.0, vmax=1.0)
         else:
             norm_p = mcolors.TwoSlopeNorm(vmin=-vmax_p, vcenter=0.0, vmax=vmax_p)
-        ax_p = axes[1, col]
-        cs_p = ax_p.contourf(Xg, Yg, Zp, levels=20, cmap=cmap_p, norm=norm_p, alpha=0.9)
-        fig.colorbar(cs_p, ax=ax_p, shrink=0.7, pad=0.04, label="PD")
-        ax_p.set_xlabel(names[fx])
-        ax_p.set_ylabel(names[fy])
-        ax_p.set_title(f"Stage {s + 1}: 2D PD", **title_kw)
-
-    fig.tight_layout()
+        ax_p = card_inset(fig, cards, (1, col), pad_r_in=1.05)
+        axes[1, col] = ax_p
+        cs_p = ax_p.contourf(Xg, Yg, Zp, levels=18, cmap=cmap_p, norm=norm_p)
+        flat_surface_axes(ax_p, mono, xlabel=names[fx], ylabel=names[fy])
+        card_colorbar(fig, cards, (1, col), cs_p, mono, label="PD")
+        header(fig, bgax, cards, (1, col), f"Stage {s + 1}",
+               "2D partial dependence", "", disp, mono)
     return Backbone2DResult(
         fig=fig, axes=axes, feature_x=fx, feature_y=fy,
         x_vals=x_vals, y_vals=y_vals, X=Xg, Y=Yg,

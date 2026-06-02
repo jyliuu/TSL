@@ -100,5 +100,5 @@ reproduces this diagnostic — see [Examples](../index.md#examples).
 
 <figure markdown="span">
   ![Bagged backbones splitting into two modes at epoch 0](../assets/img/backbone_bimodal_epoch0.png){ width="90%" }
-  <figcaption>Bagged grids at epoch 0 settling into two distinct backbone representations of the same stage — the bimodality the align-then-filter step is designed to collapse.</figcaption>
+  <figcaption markdown="span">Synthetic example — bagged [GridTensors](../code/grid-tensor.md) at epoch 0 converging to two distinct backbone shapes for the same stage (two clusters of curves visible in the plot). This bimodality is a consequence of the [sign-flip non-identifiability](model.md#identifiability-and-stability) of the two-tensor form: both orientations fit the residuals equally well, so different trees in the bag find different local optima. The align-then-filter step computes pairwise backbone similarity, anchors to a reference tree, and discards outlier trees before averaging — collapsing the two clusters into a single canonical representation. Reproduced by the [`synthetic2.py`](../index.md#examples) example script.</figcaption>
 </figure>

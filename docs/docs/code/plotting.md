@@ -55,6 +55,11 @@ selected features (one row per stage, one column per feature).
 |------|-------------|
 | `PDDifferenceResult` | figure plus the per-stage $\hat{m}_+$ and $\hat{m}_-$ branch curves and constants for the selected features. |
 
+<figure markdown="span">
+  ![Faithful first-order PD vs baselines](../assets/img/california_pd_comparison.png){ width="100%" }
+  <figcaption markdown="span"><code>plot_first_order_pd</code> on California housing — the summed $\hat{m}_+$ branch PD for Latitude (left) and Longitude (right) overlaid against EBM, XGBoost (blackbox and interpretable), and SepALS baselines. TSL (dark blue) preserves sharp localized peaks — a spike near lat 37–38 (Bay Area) and a coastal concentration near lon −122 — while additive-marginalization baselines produce nearly monotone slopes. Faithfulness follows from separability: for a product-form model the 1D PD curve recovers the exact factor shape; see [Partial dependence](../math/partial-dependence.md) for the proof.</figcaption>
+</figure>
+
 ### `pd_difference_plot` { #fn-pd-difference-plot }
 
 ```python
@@ -78,12 +83,17 @@ The signed PD difference $\mathrm{PD}_+ - \mathrm{PD}_-$ with the $\sqrt{C_+ C_-
 |------|-------------|
 | `PDDifferenceResult` | figure plus the per-stage signed-PD arrays, constants, and (if `pd_scale="component"`) normalized diagnostics. |
 
+<figure markdown="span">
+  ![Signed PD difference on California housing](../assets/img/california_pd_difference.png){ width="100%" }
+  <figcaption markdown="span"><code>pd_difference_plot</code> on California housing (interpretable model) — rows are stages, columns are features (Longitude, Latitude, MedInc). Each cell shows the signed PD difference $\mathrm{PD}_+ - \mathrm{PD}_-$ (solid orange fill) alongside the [backbone](../math/model.md#backbone-and-exponential-tilt) overlay $\sqrt{C_+ C_-}\,b_j$ (dotted), indicating where the stage gates on. Stage 1 shows broad, gently curved orange humps: the tilt $d_j$ is near-zero for Stage 1 (the stage encodes magnitude with minimal signed direction), so the PD difference traces the backbone shape. Stage 2 shows sharper spatial structure with both the orange curve and the dotted backbone varying more steeply, revealing where the second stage applies a focused signed correction. See [Backbone–tilt reconstruction](../math/partial-dependence.md#backbonetilt-reconstruction-from-pd) for how these curves relate to $b_j$ and $d_j$.</figcaption>
+</figure>
+
 ### `plot_2d_pd` { #fn-plot-2d-pd }
 
 ```python
 plot_2d_pd(model, X, feature_x, feature_y, feature_names=None, grid_points=50,
-           kind="surface", y_values=None, stages=None, cmap=None, figsize=None)
-           -> PD2DResult | PD2DLinesResult
+           kind="surface", y_values=None, stages=None, cmap=None, figsize=None,
+           show_total=True) -> PD2DResult | PD2DLinesResult
 ```
 
 Two-feature partial dependence per stage.
@@ -93,6 +103,7 @@ Two-feature partial dependence per stage.
 | `kind` | `str` | `"surface"` | `"surface"` or `"lines"` |
 | `y_values` | `Sequence[float] | None` | `None` | (for `"lines"`) values of `feature_y` to slice at |
 | `cmap` | `Colormap | None` | `None` | colormap |
+| `show_total` | `bool` | `True` | (for `"lines"`) append a final "Total" card summing the plotted stages |
 
 **Returns**
 
@@ -101,8 +112,13 @@ Two-feature partial dependence per stage.
 | `PD2DResult | PD2DLinesResult` | `PD2DResult` when `kind="surface"`, `PD2DLinesResult` when `kind="lines"`. |
 
 <figure markdown="span">
-  ![Hour × working-day 2D partial dependence](../assets/img/pd_hour_workingday_tsl.png){ width="75%" }
-  <figcaption><code>plot_2d_pd(..., kind="lines")</code> on bike-sharing.</figcaption>
+  ![2D PD surface on California housing](../assets/img/california_pd_2d_surface.png){ width="62%" }
+  <figcaption markdown="span"><code>plot_2d_pd(..., kind="surface")</code> on California housing — the 2D [partial dependence](../math/partial-dependence.md) $\hat{m}_+ - \hat{m}_-$ for Longitude × Latitude at Stage 1, rendered as a heatmap surface (warm orange = positive prediction, cool blue = negative). The cartopy basemap is added by the example script. The large positive region along the northern California coastline reflects Stage 1 encoding the coastal housing premium; the southern interior shows the lowest values.</figcaption>
+</figure>
+
+<figure markdown="span">
+  ![2D PD lines on California housing](../assets/img/california_pd_2d_lines.png){ width="100%" }
+  <figcaption markdown="span"><code>plot_2d_pd(..., kind="lines", show_total=False)</code> on California housing — one card per stage, each sweeping Longitude on the x-axis with one line per fixed Latitude slice (e.g. 32.56°, 33.98°, 37.6°). In Stage 1 all latitude slices produce shifted but parallel lines (the separable product $b_\mathrm{lon}\cdot b_\mathrm{lat}$ scales uniformly), while Stage 2 shows sharp peaks near lon −122 (Bay Area) whose height varies strongly by latitude — the signed correction the second stage applies to specific coastal locations.</figcaption>
 </figure>
 
 ### `plot_ice` { #fn-plot-ice }
@@ -126,6 +142,11 @@ Individual Conditional Expectation curves for one feature.
 | Type | Description |
 |------|-------------|
 | `ICEResult` | figure plus the ICE matrix and the average PD curve. |
+
+<figure markdown="span">
+  ![ICE curves on x1 for TSL](../assets/img/ice_x1_tsl.png){ width="100%" }
+  <figcaption markdown="span"><code>plot_ice</code> on the California housing dataset — ICE curves for MedInc (faint blue lines, one per sampled observation), each tracing one home's predicted price as MedInc varies while all other features are held fixed at that observation's values. The bold black line is the average PD curve. The tight band and upward trend confirm that MedInc has a consistent positive effect across the dataset, with individual homes varying in level (intercept) but not in direction. See [Partial dependence](../math/partial-dependence.md) for the ICE–PD relationship.</figcaption>
+</figure>
 
 ---
 
@@ -158,7 +179,7 @@ cartopy.
 
 <figure markdown="span">
   ![2D spatial backbone and PD per stage](../assets/img/california_spatial_backbone.png){ width="100%" }
-  <figcaption><code>plot_2d_backbone</code> on California latitude × longitude (cartopy basemap added by the example).</figcaption>
+  <figcaption markdown="span"><code>plot_2d_backbone</code> on California housing — two stages, each shown as two panels. <strong>Top row:</strong> the 2D [backbone](../math/model.md#backbone-and-exponential-tilt) product $b_\mathrm{lon}(x)\cdot b_\mathrm{lat}(y)$ (darker blue = larger gate). Stage 1 has a broad, diffuse backbone covering most of the state; Stage 2 concentrates its activity in a tighter coastal band. <strong>Bottom row:</strong> the 2D [partial dependence](../math/partial-dependence.md) $\hat{m}_+ - \hat{m}_-$ showing the signed prediction each stage contributes (warm = positive, cool = negative). A cartopy basemap is overlaid by the example script.</figcaption>
 </figure>
 
 ### `plot_tilt_1d` { #fn-plot-tilt-1d }
@@ -181,6 +202,11 @@ The per-feature, per-stage tilt $d_j(x_j)$ as step curves (layout mirrors
 |------|-------------|
 | `Tilt1DResult` | figure plus the per-feature, per-stage tilt step-curve arrays. |
 
+<figure markdown="span">
+  ![1D tilt curves on California housing](../assets/img/california_tilt_1d.png){ width="100%" }
+  <figcaption markdown="span"><code>plot_tilt_1d</code> on California housing (interpretable model) — per-stage [tilt](../math/model.md#backbone-and-exponential-tilt) $d_j(x_j)$ as step curves (rows = stages, columns = features). Stage 1 tilts are near-zero (order $10^{-16}$) — the first stage operates almost purely through backbone gating with no signed direction; Stage 2 shows substantial tilt variation: Longitude transitions from positive (coastal, lon < −120) to negative (inland), Latitude likewise transitions around lat 37–38, and MedInc flips sign near the median income of ~3–4. Positive tilt pushes $\hat{m}_+$ up via $e^{d_j}$; negative tilt suppresses it.</figcaption>
+</figure>
+
 ### `plot_2d_tilt` { #fn-plot-2d-tilt }
 
 ```python
@@ -201,6 +227,11 @@ The 2D tilt product $d_x(x)\cdot d_y(y)$ per stage.
 | Type | Description |
 |------|-------------|
 | `Tilt2DResult` | figure plus the meshgrid and per-stage 2D tilt-product arrays. |
+
+<figure markdown="span">
+  ![2D tilt evolution on California housing](../assets/img/california_spatial_tilt.png){ width="100%" }
+  <figcaption markdown="span"><code>plot_2d_tilt</code> on California housing (interpretable model) — each panel shows the signed 2D [tilt](../math/model.md#backbone-and-exponential-tilt) product $d_\mathrm{lon}(x)\cdot d_\mathrm{lat}(y)$ for one stage (diverging colormap: warm orange = positive product, cool blue = negative, white = zero; cartopy basemap added by the example). Stage 1 is near-zero everywhere (consistent with its flat Stage 1 tilt curves above). Stage 2 shows a structured quadrant pattern: both positive in the coastal northwest (positive signed correction), negative in the north-inland and south-coastal quadrants (opposite signs on each axis), and positive again in the south-inland corner.</figcaption>
+</figure>
 
 ### `plot_tilt_diagnostics` { #fn-plot-tilt-diagnostics }
 
@@ -223,6 +254,11 @@ density-weighted tilt).
 | Type | Description |
 |------|-------------|
 | `TiltDiagnosticsResult` | figure plus the four diagnostic curve arrays per (feature, stage). |
+
+<figure markdown="span">
+  ![Tilt diagnostics on California housing](../assets/img/california_tilt_diagnostics.png){ width="100%" }
+  <figcaption markdown="span"><code>plot_tilt_diagnostics</code> on California housing (interpretable model) — each row of cells is one (stage, feature) combination; each cell shows four curves: $\tanh d_j$ (pure tilt mapped to $[-1,1]$), $b_j\tanh d_j$ (backbone-weighted tilt), $\tanh d_j^c$ (centred tilt, where $d_j^c = d_j - \bar d_j$ removes the stage-level offset), and $b_j\tanh d_j^c$ (backbone-weighted centred tilt). Stage 1 rows are flat at zero (the tilt is near-zero); Stage 2 rows show the coastal sign transition. Comparing $\tanh d_j$ with $b_j\tanh d_j$ reveals which parts of the feature range the backbone gates on: the gap between the two curves is largest where the backbone is large. See [Backbone–tilt reconstruction](../math/partial-dependence.md#backbonetilt-reconstruction-from-pd) for the definition of $d_j^c$.</figcaption>
+</figure>
 
 ---
 
@@ -251,7 +287,7 @@ stage weights (bar).
 
 <figure markdown="span">
   ![Feature importance panels](../assets/img/california_feature_importance.png){ width="100%" }
-  <figcaption><code>plot_feature_importance</code> on California housing.</figcaption>
+  <figcaption markdown="span"><code>plot_feature_importance</code> on California housing — six panels. <strong>Top-left heatmap:</strong> per-stage backbone importance $\mathrm{Var}[\log b_j]$ (rows = stages, columns = features). <strong>Top-center heatmap:</strong> per-stage tilt importance $\mathrm{Var}[d_j]$. <strong>Top-right bar:</strong> energy-based stage weights (Stage 1 dominates). <strong>Bottom row (bars):</strong> global tilt importance, combined score $I_j = I_j^b + \gamma\,I_j^d$, and global backbone importance. Longitude and Latitude lead in backbone (they gate the spatial stages on/off); Latitude and MedInc lead in tilt (they drive the signed price direction within each active stage). See [Derived diagnostics](../math/partial-dependence.md#derived-diagnostics) for the variance-based importance definitions.</figcaption>
 </figure>
 
 ---
@@ -298,6 +334,7 @@ stages sorted by absolute net contribution.
 | `feature_names` | `Sequence[str]` | _required_ | feature labels |
 | `save_path` | `Path` | _required_ | output path |
 | `top_k_features` | `int` | `3` | features shown per stage row |
+| `header` | `bool` | `True` | prepend a per-point card with the point's feature values, prediction, and sinh sparkline; set `False` to show the three data cards alone |
 
 **Returns**
 
@@ -306,9 +343,13 @@ stages sorted by absolute net contribution.
 | `matplotlib.figure.Figure` | the assembled three-column figure. |
 
 <figure markdown="span">
-  ![Local explanation — coastal](../assets/img/california_local_interp_coastal.png){ width="49%" }
-  ![Local explanation — desert](../assets/img/california_local_interp_desert.png){ width="49%" }
-  <figcaption><code>plot_local_interpretation</code> for a coastal vs. an inland point.</figcaption>
+  ![Local explanation — coastal](../assets/img/california_local_interp_coastal.png){ width="100%" }
+  <figcaption markdown="span"><code>plot_local_interpretation(..., header=False)</code> on the 10-stage blackbox TSL fit — coastal home, San Francisco Bay area (Longitude −122.41, Latitude 37.70, MedInc 2.41, HouseAge 23, TotalRooms 1817, TotalBedrooms 400, Population 1376, Households 382). <strong>Left card:</strong> stage contribution bars summing to the total prediction; Stage 1 dominates (+\$172,967). <strong>Center cards:</strong> per-stage [backbone](../math/model.md#backbone-and-exponential-tilt) share for the top-3 features (Latitude and Longitude hold the largest share, confirming the stage gates on this coastal location). <strong>Right card:</strong> signed tilt $d_j$ waterfall showing each feature's directional contribution. Total prediction: <strong>$173,675</strong>. Computed via [`compute_local_explanation`](#fn-compute-local-explanation).</figcaption>
+</figure>
+
+<figure markdown="span">
+  ![Local explanation — desert](../assets/img/california_local_interp_desert.png){ width="100%" }
+  <figcaption markdown="span"><code>plot_local_interpretation(..., header=False)</code> on the 10-stage blackbox TSL fit — inland (desert) home near Palm Springs (Longitude −116.50, Latitude 33.81, MedInc 2.54, HouseAge 26, TotalRooms 5032, TotalBedrooms 1229, Population 3086, Households 1183), shown for contrast with the coastal point above. Stage 1 again dominates (+\$118,103) but the backbone shares reflect the inland spatial regime: Longitude holds a larger backbone share (this location is at the far-right of the feature range), and the signed tilt bars show a different pattern of directional contributions. Total prediction: <strong>$111,364</strong>, roughly \$62k below the coastal home with similar income.</figcaption>
 </figure>
 
 ---

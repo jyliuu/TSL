@@ -36,7 +36,20 @@ import pandas as pd
 
 from tsl_py import TSL
 from tsl_py.plot import pd_difference_plot, plot_2d_pd, plot_tilt_diagnostics
-from tsl_py.plot._common import PALETTE, PALETTE_CYCLE
+from tsl_py.plot._theme import (
+    airy,
+    axis_label,
+    card_inset,
+    figure_title,
+    flat_background,
+    flat_legend,
+    grid_card_layout,
+    grid_figsize,
+    header,
+    setup_fonts,
+    zero_ref,
+)
+from tsl_py.plot.pd import LINE_CYCLE
 
 FEATURE_NAMES = [
     "year",
@@ -75,8 +88,14 @@ def plot_ebm_pd_hour_workingday(
     fx_min, fx_max = X_df[feat_x_name].min(), X_df[feat_x_name].max()
     x_grid = np.linspace(fx_min, fx_max, num_points)
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    colors = PALETTE_CYCLE
+    disp, mono = setup_fonts()
+    fig = plt.figure(figsize=grid_figsize(1, 1, cell_w_in=6.6, cell_h_in=4.4))
+    fw, fh = fig.get_size_inches()
+    cards = grid_card_layout(fw, fh, 1, 1)
+    bgax = flat_background(fig, cards)
+    figure_title(fig, "EBM / benchmark", "2D partial dependence",
+                 badge="empirical PD")
+    ax = card_inset(fig, cards, (0, 0))
     for idx, y_val in enumerate(sorted(feat_y_values)):
         pd_vals = np.zeros(num_points)
         Xb = X_df.copy()
@@ -85,21 +104,17 @@ def plot_ebm_pd_hour_workingday(
             Xb[feat_x_name] = xv
             pd_vals[i] = float(ebm_model.predict(Xb).mean())
         ax.plot(
-            x_grid, pd_vals, "o-",
-            lw=2.2, ms=4, alpha=0.9,
-            color=colors[idx % len(colors)],
+            x_grid, pd_vals,
+            marker="o", ms=3, lw=2,
+            color=LINE_CYCLE[idx % len(LINE_CYCLE)],
             label=f"{feat_y_name} = {y_val:g}",
         )
-    ax.axhline(0, color=PALETTE["neutral_dark"], ls="--", alpha=0.4)
-    ax.set_xlabel(feat_x_name, fontsize=12)
-    ax.set_ylabel("Partial Dependence", fontsize=12)
-    ax.set_title(f"EBM PD: {feat_x_name} × {feat_y_name}", fontsize=13,
-                 color=PALETTE["neutral_dark"], fontweight="semibold")
-    ax.grid(True, alpha=0.25)
-    ax.legend()
-    for spine in ("top", "right"):
-        ax.spines[spine].set_visible(False)
-    fig.tight_layout()
+    zero_ref(ax)
+    airy(ax, mono)
+    axis_label(ax, mono, xlabel=feat_x_name, ylabel="PD")
+    flat_legend(ax, mono, loc="upper left")
+    header(fig, bgax, cards, (0, 0), "Empirical PD",
+           f"{feat_x_name} × {feat_y_name}", "", disp, mono)
     path = out / f"pd_{feat_x_name}_{feat_y_name}_ebm.pdf"
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
@@ -110,7 +125,7 @@ def main(
     data_root: Path, model_path: Optional[Path], ebm_path: Optional[Path],
     out: Path, refit: bool,
 ) -> None:
-    csv_path = data_root / "bike_sharing" / "42712_Bike_Sharing_Demand.csv"
+    csv_path = data_root / "42712_Bike_Sharing_Demand.csv"
     out.mkdir(parents=True, exist_ok=True)
 
     print(f"Loading Bike Sharing from {csv_path} ...")

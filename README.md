@@ -87,7 +87,7 @@ result = plot_feature_importance(model, X, feature_names=feature_names)
 result.fig.savefig("feature_importance.png")
 ```
 
-<img src="assets/readme/california_feature_importance.png" width="100%" alt="TSL feature importances">
+<img src="docs/docs/assets/img/california_feature_importance.png" width="100%" alt="TSL feature importances">
 
 Per-stage importances aggregated across stages. Geography (Longitude, Latitude)
 dominates, with the second-stage inland correction loaded primarily onto longitude.
@@ -113,11 +113,11 @@ for name, i in [("coastal", 4556), ("desert", 2784)]:
 
 A **coastal** observation (LA-area, predicted ≈ \$293k):
 
-<img src="assets/readme/california_local_interp_coastal.png" width="100%" alt="Local explanation — coastal point">
+<img src="docs/docs/assets/img/california_local_interp_coastal.png" width="100%" alt="Local explanation — coastal point">
 
 A **desert** observation (low-density inland, predicted ≈ \$149k):
 
-<img src="assets/readme/california_local_interp_desert.png" width="100%" alt="Local explanation — desert point">
+<img src="docs/docs/assets/img/california_local_interp_desert.png" width="100%" alt="Local explanation — desert point">
 
 For the desert point, the first stage's spatial gate collapses and the coastal premium
 does not fire; the second stage is active here and supplies the negative correction. This
@@ -140,7 +140,7 @@ result = plot_2d_backbone(
 result.fig.savefig("spatial_backbone.png")
 ```
 
-<img src="assets/readme/california_spatial_backbone.png" width="100%" alt="California spatial backbone and 2D PD per stage">
+<img src="docs/docs/assets/img/california_spatial_backbone.png" width="100%" alt="California spatial backbone and 2D PD per stage">
 
 *Top row:* backbone (magnitude). *Bottom row:* signed 2D partial dependence in USD. The
 first stage fires along the coast, encoding the coastal premium. Because the stage is
@@ -165,12 +165,12 @@ result = plot_first_order_pd(model, X, features=["Latitude", "Longitude"],
 result.fig.savefig("pd.png")
 ```
 
-The figures below overlay TSL (Stage 1) against EBM, XGBoost, and
+The figure below overlays TSL (Stage 1) against EBM, XGBoost, and
 [SepALS](https://github.com/jyliuu/sepals) — produced by
 [`california.py`](tsl-py/examples/california.py), which loads the pretrained comparison
 models.
 
-<img src="assets/readme/california_pd_latitude.png" width="46%" alt="1D PD on Latitude"> <img src="assets/readme/california_pd_longitude.png" width="46%" alt="1D PD on Longitude">
+<img src="docs/docs/assets/img/california_pd_comparison.png" width="100%" alt="1D PD on Latitude and Longitude vs. baselines">
 
 TSL retains the sharp local structure near LA, SF, and the Bay Area that the other models
 smooth away.
