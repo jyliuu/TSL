@@ -2,7 +2,10 @@ use extendr_api::prelude::*;
 use ndarray::{ArrayView1, ArrayView2};
 use tsl::{
     forest::{fit_boosted, params::TSLBoostedParamsBuilder, TSL},
-    grid_tensor::params::{RefinementStrategyParamsBuilder, SplitStrategyParamsBuilder},
+    grid_tensor::{
+        params::{RefinementStrategyParamsBuilder, SplitStrategyParamsBuilder},
+        GridTensor,
+    },
 };
 
 // Fit a boosted TSL model.
@@ -129,8 +132,65 @@ fn tsl_predict(model: ExternalPtr<TSL>, x: ArrayView2<f64>) -> Vec<f64> {
     model.as_ref().predict(x).to_vec()
 }
 
+// Pack each axis of a per-interval-per-axis field into an R list of vectors.
+fn axis_list_f64(axes: &[Vec<f64>]) -> List {
+    List::from_values(axes.iter().map(|axis| axis.clone()))
+}
+
+// Convert one fitted separable component into its two-tensor form: per-axis
+// `splits`, `backbone_values` (b ≥ 0), `tilt_values` (d ∈ ℝ), interval sample
+// `observation_counts`, and the branch scalars `lambda_plus`/`lambda_minus`.
+fn grid_tensor_to_list(grid: &GridTensor) -> List {
+    let counts = List::from_values(
+        grid.observation_counts
+            .iter()
+            .map(|axis| axis.iter().map(|&c| c as i32).collect::<Vec<i32>>()),
+    );
+    list!(
+        splits = axis_list_f64(&grid.splits),
+        backbone_values = axis_list_f64(&grid.backbone_values),
+        tilt_values = axis_list_f64(&grid.tilt_values),
+        observation_counts = counts,
+        lambda_plus = grid.lambda_plus,
+        lambda_minus = grid.lambda_minus,
+        scaling = grid.scaling
+    )
+}
+
+// Extract the fitted structure of a boosted model: one entry per stage, each
+// with its OLS scalings, the indices of the bagged trees kept after similarity
+// filtering, the aggregated `combined_grid_tensor`, and the bag of per-tree
+// `grid_tensors`. Wrapped for R users by `tsl_components()`.
+#[extendr]
+fn tsl_model_structure(model: ExternalPtr<TSL>) -> List {
+    let stages: Vec<Robj> = model
+        .as_ref()
+        .get_stage_predictors()
+        .iter()
+        .map(|sp| -> Robj {
+            let grid_tensors =
+                List::from_values(sp.get_grid_tensors().iter().map(grid_tensor_to_list));
+            // 1-based indices for R; empty when no similarity filtering was applied.
+            let candidate_indices: Vec<i32> = sp
+                .get_candidate_indices()
+                .map(|idx| idx.iter().map(|&i| i as i32 + 1).collect())
+                .unwrap_or_default();
+            list!(
+                scaling_plus = sp.scaling_plus.unwrap_or(f64::NAN),
+                scaling_minus = sp.scaling_minus.unwrap_or(f64::NAN),
+                candidate_indices = candidate_indices,
+                combined_grid_tensor = grid_tensor_to_list(sp.get_primary_grid_tensor()),
+                grid_tensors = grid_tensors
+            )
+            .into()
+        })
+        .collect();
+    List::from_values(stages)
+}
+
 extendr_module! {
     mod tslr;
     fn tsl_fit;
     fn tsl_predict;
+    fn tsl_model_structure;
 }

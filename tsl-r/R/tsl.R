@@ -132,3 +132,40 @@ print.tsl <- function(x, ...) {
   cat("  training error: ", format(x$err, digits = 6), "\n", sep = "")
   invisible(x)
 }
+
+#' Extract the fitted components of a TSL model
+#'
+#' A fitted TSL model is a sum of boosting stages; each stage aggregates a
+#' bag of rank-1 separable components (grid tensors). This returns that
+#' structure in two-tensor form so the glass-box pieces can be inspected.
+#'
+#' Each grid tensor stores, per feature, the interval `splits` and the
+#' `backbone_values` (the non-negative magnitude \eqn{b \ge 0}) and
+#' `tilt_values` (the signed direction \eqn{d \in \mathbb{R}}) on each
+#' interval, together with the branch scalars \eqn{\lambda_+, \lambda_- \ge 0}.
+#' The component's prediction is the ordered difference
+#' \eqn{\lambda_+ \prod_j b_j e^{d_j} - \lambda_- \prod_j b_j e^{-d_j}}.
+#'
+#' @param object A fitted model of class `"tsl"` from [tsl()].
+#'
+#' @return A list with one element per stage. Each stage is a list with:
+#'   \describe{
+#'     \item{`scaling_plus`, `scaling_minus`}{the stage's OLS coefficients on
+#'       the \eqn{+} and \eqn{-} branches (the only place scaling is applied).}
+#'     \item{`candidate_indices`}{1-based indices of the bagged trees kept
+#'       after similarity filtering (empty if none was applied).}
+#'     \item{`combined_grid_tensor`}{the aggregated representative component.}
+#'     \item{`grid_tensors`}{the bag of per-tree components.}
+#'   }
+#'   Each grid tensor is itself a list of per-feature `splits`,
+#'   `backbone_values`, `tilt_values`, and `observation_counts`, plus the
+#'   scalars `lambda_plus`, `lambda_minus`, and the legacy `scaling`.
+#'
+#' @seealso [tsl()]
+#' @export
+tsl_components <- function(object) {
+  if (!inherits(object, "tsl")) {
+    stop("`object` must be a fitted model of class \"tsl\".", call. = FALSE)
+  }
+  tsl_model_structure(object$ptr)
+}

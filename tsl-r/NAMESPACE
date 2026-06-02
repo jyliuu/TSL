@@ -3,4 +3,5 @@
 S3method(predict,tsl)
 S3method(print,tsl)
 export(tsl)
+export(tsl_components)
 useDynLib(tslr, .registration = TRUE)

@@ -9,4 +9,6 @@ tsl_fit <- function(x, y, epochs, decay, n_trees, n_iter, split_try, colsample_b
 
 tsl_predict <- function(model, x) .Call(wrap__tsl_predict, model, x)
 
+tsl_model_structure <- function(model) .Call(wrap__tsl_model_structure, model)
+
 # nolint end

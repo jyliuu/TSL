@@ -4,6 +4,9 @@
   crate via extendr.
 * `tsl(x, y, ...)` fits a boosted TSL model; `predict()` and `print()` S3
   methods are provided. Hyperparameters mirror the Python `TSLRegressor`.
+* `tsl_components()` extracts the fitted glass-box structure: per stage, the
+  OLS scalings and the aggregated and per-tree grid tensors in two-tensor form
+  (per-feature backbone, tilt, splits, and the branch scalars).
 * Installs from GitHub via `pak::pak("jyliuu/TSL/tsl-r")` /
   `remotes::install_github("jyliuu/TSL", subdir = "tsl-r")`. The core is pure
   Rust, so no system numerical libraries are required.
@@ -15,5 +18,6 @@
   into `src/rust/vendor.tar.xz` (including the `tsl_rust` git dependency) and
   build-time tuning.
 * Windows and macOS CI are not yet exercised (CI covers Linux).
-* Interpretability (partial dependence, ICE, feature importance) and model
-  serialisation are not yet exposed.
+* Higher-level interpretability (partial dependence, ICE, feature importance)
+  and model serialisation are not yet exposed, though `tsl_components()` already
+  gives access to the raw fitted components.
