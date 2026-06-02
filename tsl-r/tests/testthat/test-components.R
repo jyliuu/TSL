@@ -147,3 +147,77 @@ test_that("predictions reconstruct from the extracted components", {
   expect_equal(reconstruct(comp, x_eval), predict(fit, x_eval),
                tolerance = 1e-8)
 })
+
+test_that("each per-tree grid obeys the l2_identify gauge", {
+  # The combined grid is gauge-exact only for a single tree, but every per-tree
+  # component is l2-identified at fit time, so the gauge holds for any n_trees.
+  d <- make_data()
+  fit <- tsl(d$x, d$y, epochs = 4L, n_trees = 4L, seed = 13L, verbosity = 0L)
+  comp <- tsl_components(fit)
+
+  for (stage in comp) {
+    for (g in stage$grid_tensors) {
+      for (j in seq_along(g$backbone_values)) {
+        w <- g$observation_counts[[j]]
+        b <- g$backbone_values[[j]]
+        tilt <- g$tilt_values[[j]]
+        wsum <- sum(w)
+        expect_equal(sum(w * b^2) / wsum, 1, tolerance = 1e-6)
+        expect_equal(sum(w * tilt) / wsum, 0, tolerance = 1e-6)
+      }
+    }
+  }
+})
+
+test_that("candidate_indices list every tree in the bag", {
+  d <- make_data()
+  fit <- tsl(d$x, d$y, epochs = 3L, n_trees = 6L, seed = 7L, verbosity = 0L)
+  comp <- tsl_components(fit)
+  for (stage in comp) {
+    expect_equal(sort(stage$candidate_indices), 1:6)
+  }
+})
+
+test_that("observation counts partition the training rows per axis", {
+  d <- make_data()
+  fit <- tsl(d$x, d$y, epochs = 3L, n_trees = 3L, seed = 21L, verbosity = 0L)
+  comp <- tsl_components(fit)
+  for (stage in comp) {
+    for (g in c(list(stage$combined_grid_tensor), stage$grid_tensors)) {
+      for (j in seq_along(g$observation_counts)) {
+        expect_equal(sum(g$observation_counts[[j]]), nrow(d$x))
+      }
+    }
+  }
+})
+
+test_that("similarity trimming still yields a valid model", {
+  # similarity_threshold > 0 trims the bag when aggregating the combined grid;
+  # the resulting model must still predict finitely and keep the invariants.
+  d <- make_data()
+  fit <- tsl(d$x, d$y, epochs = 4L, n_trees = 6L, seed = 31L,
+             similarity_threshold = 0.7, verbosity = 0L)
+
+  te <- make_data(n = 40, seed = 8)
+  expect_true(all(is.finite(predict(fit, te$x))))
+
+  for (stage in tsl_components(fit)) {
+    g <- stage$combined_grid_tensor
+    expect_gte(g$lambda_plus, 0)
+    expect_gte(g$lambda_minus, 0)
+    for (j in seq_along(g$backbone_values)) {
+      expect_true(all(g$backbone_values[[j]] >= 0))
+      expect_true(all(is.finite(g$backbone_values[[j]])))
+      expect_true(all(is.finite(g$tilt_values[[j]])))
+    }
+  }
+})
+
+test_that("the extracted structure is deterministic for a fixed seed", {
+  d <- make_data()
+  fit_args <- list(d$x, d$y, epochs = 3L, n_trees = 3L, seed = 55L,
+                   verbosity = 0L)
+  c1 <- tsl_components(do.call(tsl, fit_args))
+  c2 <- tsl_components(do.call(tsl, fit_args))
+  expect_identical(c1, c2)
+})
