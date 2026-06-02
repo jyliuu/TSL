@@ -71,6 +71,12 @@ tsl <- function(x, y,
   x <- as.matrix(x)
   storage.mode(x) <- "double"
   y <- as.numeric(y)
+  if (!all(is.finite(x))) {
+    stop("`x` must not contain NA, NaN, or infinite values.", call. = FALSE)
+  }
+  if (!all(is.finite(y))) {
+    stop("`y` must not contain NA, NaN, or infinite values.", call. = FALSE)
+  }
   if (nrow(x) != length(y)) {
     stop("`x` must have one row per element of `y` (got ", nrow(x),
          " rows and ", length(y), " responses).", call. = FALSE)
@@ -117,6 +123,10 @@ tsl <- function(x, y,
 predict.tsl <- function(object, newdata, ...) {
   x <- as.matrix(newdata)
   storage.mode(x) <- "double"
+  if (!all(is.finite(x))) {
+    stop("`newdata` must not contain NA, NaN, or infinite values.",
+         call. = FALSE)
+  }
   if (ncol(x) != object$n_features) {
     stop("`newdata` has ", ncol(x), " columns but the model was fit on ",
          object$n_features, " features.", call. = FALSE)
