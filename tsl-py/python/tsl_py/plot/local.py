@@ -358,15 +358,21 @@ def plot_local_interpretation(
             ax_net.spines[spine].set_linewidth(0.9)
         ax_net.tick_params(length=0)
 
-        # Outline-chip final-prediction tick at x = total; drop any default tick
-        # that would visually collide with the chip label.
+        # Outline-chip final-prediction tick at x = total; drop the ticks
+        # immediately flanking it so the wide chip never overlaps a neighbour.
         default_ticks = list(ax_net.get_xticks())
-        view_span = x_hi - x_lo
-        collision_margin = view_span * 0.14
-        ticks = [t for t in default_ticks if abs(t - total) > collision_margin]
-        ticks = sorted(ticks + [total])
+        chip_str = prediction_format(total)
+        below = [t for t in default_ticks if t < total - 1e-9]
+        above = [t for t in default_ticks if t > total + 1e-9]
+        drop = set()
+        if below:
+            drop.add(max(below))
+        if above:
+            drop.add(min(above))
+        ticks = sorted([t for t in default_ticks
+                        if t not in drop and abs(t - total) > 1e-9] + [total])
         labels = [
-            (prediction_format(total) if abs(t - total) < 1e-9 else f"{t:,.0f}")
+            (chip_str if abs(t - total) < 1e-9 else f"{t:,.0f}")
             for t in ticks
         ]
         ax_net.set_xticks(ticks)
@@ -375,6 +381,7 @@ def plot_local_interpretation(
             if abs(tick - total) < 1e-9:
                 lab.set_color(T["ink"])
                 lab.set_fontweight("bold")
+                lab.set_zorder(6)
                 lab.set_bbox(dict(boxstyle="round,pad=0.4", fc="white",
                                   ec=T["ink"], lw=0.9))
                 lab.set_clip_on(False)
@@ -397,22 +404,56 @@ def plot_local_interpretation(
         ax_bb.spines["bottom"].set_color(T["faint"])
         ax_bb.spines["bottom"].set_linewidth(0.9)
 
-        def _bb_segment(r, left, pct, rgba, label):
-            """Solid backbone segment with a white hairline at its right edge
-            and in-bar percentage + axis name, coloured for readability."""
+        bb_plot_w_in = ax_bb.get_position().width * fig.get_size_inches()[0]
+
+        def _text_w_in(s, fs):
+            return len(s) * 0.62 * fs / 72
+
+        def _ellipsize(s, fs, max_w_in):
+            """``s`` clipped to ``max_w_in`` inches: the whole string if it fits,
+            else its longest prefix plus an ellipsis (down to just ``…``)."""
+            if max_w_in <= 0:
+                return ""
+            if _text_w_in(s, fs) <= max_w_in:
+                return s
+            for k in range(len(s) - 1, 0, -1):
+                if _text_w_in(s[:k] + "…", fs) <= max_w_in:
+                    return s[:k] + "…"
+            return "…" if _text_w_in("…", fs) <= max_w_in else ""
+
+        def _bb_segment(r, left, pct, rgba, label, show_name=True):
+            """Solid backbone segment with a white right-edge hairline. A named
+            segment shows its axis name clipped with an ellipsis to fit, the
+            percentage beneath it; the "Other" tail (``show_name=False``) and any
+            segment too thin to keep a few name letters carry just the
+            percentage."""
             rbar_h(ax_bb, left, pct, r, bar_h, rgba, r_disp=3, z=2)
             ax_bb.plot([left + pct, left + pct],
                        [r - bar_h / 2, r + bar_h / 2],
                        color="white", lw=0.8, zorder=3)
-            if pct >= 0.06:
-                txt_c = _text_on(rgba)
-                ax_bb.text(left + pct / 2, r + 0.13, label,
-                           ha="center", va="center", fontsize=8.5,
-                           family=disp, color=txt_c, fontweight="semibold",
+            inner_w = pct * bb_plot_w_in - 0.06
+            txt_c = _text_on(rgba)
+            pct_str = f"{pct * 100:.0f}%"
+            pct_fits = _text_w_in(pct_str, 8.5) <= inner_w
+            name = _ellipsize(label, 8.5, inner_w) if show_name else ""
+            # a clipped name needs a few real letters to read; otherwise the
+            # segment just carries its percentage.
+            if name.endswith("…") and len(name) - 1 < 3:
+                name = ""
+            if name and pct_fits:
+                ax_bb.text(left + pct / 2, r + 0.13, name, ha="center",
+                           va="center", fontsize=8.5, family=disp, color=txt_c,
+                           fontweight="semibold", zorder=4)
+                ax_bb.text(left + pct / 2, r - 0.10, pct_str, ha="center",
+                           va="center", fontsize=8.5, family=mono, color=txt_c,
                            zorder=4)
-                ax_bb.text(left + pct / 2, r - 0.10, f"{pct * 100:.0f}%",
-                           ha="center", va="center", fontsize=8.5,
-                           family=mono, color=txt_c, zorder=4)
+            elif name:
+                ax_bb.text(left + pct / 2, r, name, ha="center", va="center",
+                           fontsize=8.5, family=disp, color=txt_c,
+                           fontweight="semibold", zorder=4)
+            elif pct_fits:
+                ax_bb.text(left + pct / 2, r, pct_str, ha="center", va="center",
+                           fontsize=8.5, family=mono, color=txt_c, zorder=4)
 
         for r, s_idx in enumerate(order):
             # Backbone share uses only the per-feature backbones (j=1..p). The
@@ -441,7 +482,8 @@ def plot_local_interpretation(
                 _bb_segment(r, left, pct, rgba, axis_labels[j])
                 left += pct
             if tail_pct > 1e-6:
-                _bb_segment(r, left, tail_pct, mix(color_other, 0.0), "Other")
+                _bb_segment(r, left, tail_pct, mix(color_other, 0.0), "Other",
+                            show_name=False)
         card_header(fig, bgax, cards, (panel_idx, col_bb), title,
                     "Backbone share", "", disp, mono)
 
