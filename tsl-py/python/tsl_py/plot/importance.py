@@ -265,28 +265,34 @@ def plot_feature_importance(
     tile_grid(ax_bb, backbone_per_stage.T, flat_backbone_cmap(),
               names, stage_labels, disp, mono, card=cards["backbone_heat"],
               show_values=True)
-    header(fig, bgax, cards, "backbone_heat", "01 · per stage · unsigned",
+    header(fig, bgax, cards, "backbone_heat",
+           "01 · variance of log-backbone over the data",
            "Backbone importance", "", disp, mono)
 
     ax_tt = card_axes(fig, cards, "tilt_heat", pad_t_in=1.24, pad_l=0.048)
     tile_grid(ax_tt, tilt_per_stage.T, flat_tilt_cmap(),
               names, stage_labels, disp, mono, card=cards["tilt_heat"],
               show_values=True)
-    header(fig, bgax, cards, "tilt_heat", "02 · per stage · signed",
+    header(fig, bgax, cards, "tilt_heat",
+           "02 · variance of the tilt over the data",
            "Tilt importance", "", disp, mono)
 
     ax_stage = _vbar_panel(fig, bgax, cards, "stage_bar", stage_labels, stage_weights,
                            TOKENS["greys"][2], disp, mono,
-                           "03 · energy-based", "Stage weights", "")
+                           "03 · each stage's share of prediction energy",
+                           "Stage weights", "")
     ax_ttbar = _bar_panel(fig, bgax, cards, "tilt_bar", names, global_tilt,
                           TOKENS["pos"], disp, mono,
-                          "04 · aggregated", "Tilt, global", "")
+                          "04 · tilt variance, energy-weighted over stages",
+                          "Tilt, global", "")
     ax_combar = _bar_panel(fig, bgax, cards, "combined_bar", names, combined,
                            TOKENS["neg"], disp, mono,
-                           f"05 · backbone + {gamma:g}·tilt", "Combined importance", "")
+                           f"05 · backbone + {gamma:g} × tilt importance",
+                           "Combined importance", "")
     ax_bbbar = _bar_panel(fig, bgax, cards, "backbone_bar", names, global_backbone,
                           TOKENS["accent"], disp, mono,
-                          "06 · aggregated", "Backbone, global", "")
+                          "06 · backbone variance, energy-weighted over stages",
+                          "Backbone, global", "")
 
     axes = np.array([ax_bb, ax_tt, ax_bbbar, ax_ttbar, ax_combar, ax_stage])
     return FeatureImportanceResult(
