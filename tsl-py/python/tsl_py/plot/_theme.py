@@ -167,7 +167,8 @@ def card_axes(fig, cards, key, pad_l=0.030, pad_r=0.024, pad_t_in=1.05, pad_b_in
 # text never changes, so its spacing must not scale with the figure.
 _HDR_KICK_IN = 0.38     # card top → kicker baseline
 _HDR_TITLE_IN = 0.31    # kicker → title baseline
-_HDR_DIV_IN = 0.18      # title → divider
+_HDR_DESC_IN = 0.24     # title → description baseline
+_HDR_DIV_IN = 0.18      # title (or description) → divider
 
 
 def _pill_behind(fig, bgax, txt, *, fill, edge, pad_x_in=0.06, pad_y_in=0.045,
@@ -234,33 +235,42 @@ def _constant_pills(fig, bgax, x_right, y, items, mono, disp, *,
 
 
 def header(fig, bgax, cards, key, kicker, title, fn, disp, mono, fn_color=None,
-           fn_pill=False, fn_pills=None):
-    """Card header: mono kicker (left), a right-aligned tag, display title, and a
-    hairline divider underneath. The tag is either ``fn`` (accent text, or a
-    pale-indigo chip when ``fn_pill``) or ``fn_pills`` — a list of
-    ``(label, value, colour)`` rendered as colour-keyed chips for a signed pair.
-    Vertical spacing is fixed in inches so it does not stretch as the figure
-    grows."""
+           fn_pill=False, fn_pills=None, description=None):
+    """Card header: mono kicker (left), a right-aligned tag, display title, an
+    optional muted description line, and a hairline divider underneath. The tag is
+    either ``fn`` (accent text, or a pale-indigo chip when ``fn_pill``) or
+    ``fn_pills`` — a list of ``(label, value, colour)`` rendered as colour-keyed
+    chips for a signed pair. An empty ``kicker`` lets the title rise into the
+    kicker's slot (used when the card needs a sentence-case ``description``
+    instead of a tag). Vertical spacing is fixed in inches so it does not stretch
+    as the figure grows."""
     T = TOKENS
     fh = fig.get_size_inches()[1]
     x0, y0, w, h = cards[key]
     top = y0 + h
-    y_kick = top - _HDR_KICK_IN / fh
-    y_title = top - (_HDR_KICK_IN + _HDR_TITLE_IN) / fh
-    y_div = top - (_HDR_KICK_IN + _HDR_TITLE_IN + _HDR_DIV_IN) / fh
-    fig.text(x0 + 0.028, y_kick, kicker.upper(), family=mono,
-             fontsize=7.5, color=T["muted"])
-    if fn_pills:
-        _constant_pills(fig, bgax, x0 + w - 0.028, y_kick, fn_pills, mono, disp)
-    elif fn:
-        color = fn_color or (T["ink"] if fn_pill else T["accent"])
-        txt = fig.text(x0 + w - 0.028, y_kick, fn, family=mono, fontsize=7.5,
-                       color=color, ha="right", zorder=5)
-        if fn_pill:
-            _pill_behind(fig, bgax, txt, fill=mix(T["accent"], 0.92),
-                         edge=mix(T["accent"], 0.55))
-    fig.text(x0 + 0.028, y_title, title, family=disp, fontsize=12.5,
+    cur = _HDR_KICK_IN
+    if kicker:
+        y_kick = top - cur / fh
+        fig.text(x0 + 0.028, y_kick, kicker.upper(), family=mono,
+                 fontsize=7.5, color=T["muted"])
+        if fn_pills:
+            _constant_pills(fig, bgax, x0 + w - 0.028, y_kick, fn_pills, mono, disp)
+        elif fn:
+            color = fn_color or (T["ink"] if fn_pill else T["accent"])
+            txt = fig.text(x0 + w - 0.028, y_kick, fn, family=mono, fontsize=7.5,
+                           color=color, ha="right", zorder=5)
+            if fn_pill:
+                _pill_behind(fig, bgax, txt, fill=mix(T["accent"], 0.92),
+                             edge=mix(T["accent"], 0.55))
+        cur += _HDR_TITLE_IN
+    fig.text(x0 + 0.028, top - cur / fh, title, family=disp, fontsize=12.5,
              color=T["ink"], weight="semibold")
+    if description:
+        cur += _HDR_DESC_IN
+        fig.text(x0 + 0.028, top - cur / fh, description, family=disp,
+                 fontsize=8.5, color=T["muted"])
+    cur += _HDR_DIV_IN
+    y_div = top - cur / fh
     bgax.plot([x0 + 0.028, x0 + w - 0.028], [y_div] * 2,
               color=T["divider"], lw=0.9, zorder=2)
 

@@ -245,10 +245,11 @@ def plot_local_interpretation(
     The constant intercept axis (b_0, d_0) is treated as axis j=0 and is
     eligible to appear in the backbone and tilt cards.
 
-    When ``header`` is true, the figure carries a title block and each row gains
-    a leading "Local point" card with the point's feature values, its
-    prediction, and a sinh sparkline. When false, only the three data cards are
-    drawn (the local point is still named in each card's kicker).
+    The figure carries a "Local explanation" title block. When ``header`` is
+    true, each row also gains a leading "Local point" card with the point's
+    feature values, its prediction, and a sinh sparkline. For a single point the
+    title names it and each card subtitles what it shows; with several points the
+    title stays generic and each row's kicker names its point.
     """
     plt = _require_matplotlib()
     disp, mono = setup_fonts()
@@ -276,7 +277,7 @@ def plot_local_interpretation(
         width_ratios = [1.0, 1.4, 1.5]
         col_vals, col_net, col_bb, col_tilt = None, 0, 1, 2
         cell_w_in = 4.9
-        margin_top_in = 0.55
+        margin_top_in = 1.2      # room for the figure title block
 
     # Each row holds up to ``max_stages`` bars at a fixed pitch, plus the card's
     # header band and bottom axis margin — so taller figures add room per row,
@@ -290,9 +291,22 @@ def plot_local_interpretation(
                              margin_top_in=margin_top_in,
                              width_ratios=width_ratios)
     bgax = flat_background(fig, cards)
-    if header:
-        figure_title(fig, "TSL / diagnostics", "Local interpretation",
-                     badge="plot_local_interpretation()", badge_color=T["accent"])
+    # One local point per call names it in the title; several keep the generic
+    # heading and let each row's kicker carry its point name.
+    single_panel = n_panels == 1
+    title_text = "Local explanation"
+    if single_panel:
+        title_text += f"  ·  {titles[0]}"
+    figure_title(fig, "TSL / diagnostics", title_text,
+                 badge="plot_local_interpretation()", badge_color=T["accent"])
+
+    # With a single point, the figure title already names it, so each card drops
+    # the repeated point kicker for a one-line description of what it shows.
+    card_descriptions = {
+        col_net: "Stage effects, summing to the prediction.",
+        col_bb: "Each feature's share of the magnitude gate.",
+        col_tilt: "Which way each feature tilts the prediction.",
+    } if single_panel else {}
 
     bar_h = 0.62
 
@@ -300,6 +314,7 @@ def plot_local_interpretation(
         stage_contribs = np.asarray(expl.stage_contributions)
         n_stages = len(stage_contribs)
         order = np.argsort(-np.abs(stage_contribs))
+        card_kicker = "" if single_panel else title
 
         if header:
             _draw_local_point_card(
@@ -386,8 +401,9 @@ def plot_local_interpretation(
                                   ec=T["ink"], lw=0.9))
                 lab.set_clip_on(False)
         ax_net.axvline(total, color=T["ink"], lw=1.0, linestyle=":", zorder=1)
-        card_header(fig, bgax, cards, (panel_idx, col_net), title,
-                    "Stage contribution", "", disp, mono)
+        card_header(fig, bgax, cards, (panel_idx, col_net), card_kicker,
+                    "Stage contribution", "", disp, mono,
+                    description=card_descriptions.get(col_net))
 
         # ---- Backbone share (unsigned, stacked segments) -------------------
         ax_bb = card_inset(fig, cards, (panel_idx, col_bb), pad_l_in=0.34,
@@ -484,8 +500,9 @@ def plot_local_interpretation(
             if tail_pct > 1e-6:
                 _bb_segment(r, left, tail_pct, mix(color_other, 0.0), "Other",
                             show_name=False)
-        card_header(fig, bgax, cards, (panel_idx, col_bb), title,
-                    "Backbone share", "", disp, mono)
+        card_header(fig, bgax, cards, (panel_idx, col_bb), card_kicker,
+                    "Backbone share", "", disp, mono,
+                    description=card_descriptions.get(col_bb))
 
         # ---- Signed tilt per axis ------------------------------------------
         # Build per-row top-k tilt selections, then choose a global scale from
@@ -565,8 +582,9 @@ def plot_local_interpretation(
                               edgecolor="none"),
                     zorder=4,
                 )
-        card_header(fig, bgax, cards, (panel_idx, col_tilt), title,
-                    "Signed tilt", "", disp, mono)
+        card_header(fig, bgax, cards, (panel_idx, col_tilt), card_kicker,
+                    "Signed tilt", "", disp, mono,
+                    description=card_descriptions.get(col_tilt))
 
     fig.savefig(save_path, bbox_inches="tight")
     _logger.info("wrote %s", save_path)
