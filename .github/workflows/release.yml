@@ -3,12 +3,10 @@ name: Release
 # Build and publish the tensorsl distribution to PyPI. Triggered by a `vX.Y.Z`
 # tag, which scripts/release.sh creates after bumping the version and changelog.
 # A maintainer-pushed tag is the only trigger; `workflow_dispatch` builds the
-# sdist for inspection but never publishes.
+# artifacts for inspection but never publishes.
 #
-# This ships an sdist only: `pip install tensorsl` builds from source, which
-# needs just a Rust toolchain — the core is pure Rust with no system-library
-# dependencies. Prebuilt wheels are deferred until a multi-platform build matrix
-# is worth the upkeep. The sdist proves the tag -> PyPI path end to end.
+# The build is pure Rust (nalgebra, no system BLAS), so the wheels are
+# self-contained: one abi3 wheel per platform covers Python 3.9+.
 on:
   push:
     tags: ["v*"]
@@ -19,47 +17,57 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build sdist
+  wheels:
+    name: Wheel ${{ matrix.platform.os }}-${{ matrix.platform.target }}
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { runner: ubuntu-latest,  target: x86_64,  os: linux }
+          - { runner: ubuntu-latest,  target: aarch64, os: linux }
+          # Both macOS wheels build on the arm64 runner (plentiful); the x86_64
+          # one cross-compiles, avoiding the scarce/queued Intel runners.
+          - { runner: macos-14,       target: x86_64,  os: macos }
+          - { runner: macos-14,       target: aarch64, os: macos }
+          - { runner: windows-latest, target: x64,     os: windows }
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist -m tsl-py/Cargo.toml
+          target: ${{ matrix.platform.target }}
+          manylinux: auto
+          sccache: "true"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.platform.os }}-${{ matrix.platform.target }}
+          path: dist/
+
+  sdist:
+    name: sdist
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.x"
-
       - name: Build sdist
-        run: |
-          python -m pip install --upgrade pip maturin
-          maturin sdist -m tsl-py/Cargo.toml --out dist
-
-      # Guard against a forgotten bump: the built version must equal the tag.
-      - name: Check version matches tag
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          # sdist is <normalized-name>-<version>.tar.gz; strip the name prefix.
-          built="$(basename dist/*.tar.gz .tar.gz | sed -E 's/^[^-]+-//')"
-          echo "tag=$tag built=$built"
-          [ "$tag" = "$built" ] || { echo "::error::tag $tag != built $built"; exit 1; }
-
-      # Build the package from the sdist to prove it installs and imports.
-      - name: Smoke test sdist
-        run: |
-          pip install dist/*.tar.gz
-          python -c "import tsl_py; from tsl_py import TSLRegressor; print('import OK')"
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist -m tsl-py/Cargo.toml
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dist
+          name: dist-sdist
           path: dist/
 
   publish:
     name: Publish to PyPI
-    needs: build
+    needs: [wheels, sdist]
     # Publish only for real tags, never for manual dispatch builds.
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
@@ -70,8 +78,18 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: dist
-          path: dist/
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      # Guard against a forgotten bump: the built version must equal the tag.
+      - name: Check version matches tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          # sdist is <normalized-name>-<version>.tar.gz; strip the name prefix.
+          built="$(basename dist/*.tar.gz .tar.gz | sed -E 's/^[^-]+-//')"
+          echo "tag=$tag built=$built"
+          [ "$tag" = "$built" ] || { echo "::error::tag $tag != built $built"; exit 1; }
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
