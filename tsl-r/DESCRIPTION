@@ -14,8 +14,15 @@ Roxygen: list(markdown = TRUE, load = "source")
 RoxygenNote: 7.3.3
 Config/rextendr/version: 0.5.0
 SystemRequirements: Cargo (Rust's package manager), rustc >= 1.80.0
+Imports:
+    ggplot2,
+    scales
 Suggests:
+    knitr,
+    patchwork,
+    rmarkdown,
     testthat (>= 3.0.0)
+VignetteBuilder: knitr
 Config/testthat/edition: 3
 Depends: 
     R (>= 4.2)
