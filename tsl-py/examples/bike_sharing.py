@@ -110,7 +110,7 @@ def main(
     data_root: Path, model_path: Optional[Path], ebm_path: Optional[Path],
     out: Path, refit: bool,
 ) -> None:
-    csv_path = data_root / "bike_sharing" / "42712_Bike_Sharing_Demand.csv"
+    csv_path = data_root / "42712_Bike_Sharing_Demand.csv"
     out.mkdir(parents=True, exist_ok=True)
 
     print(f"Loading Bike Sharing from {csv_path} ...")

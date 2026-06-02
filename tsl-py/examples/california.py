@@ -685,7 +685,7 @@ def plot_pd_comparison(
 
 
 def main(data_root: Path, model_dir: Optional[Path], out: Path, variant: str, refit: bool) -> None:
-    csv_path = data_root / "california" / "44977_california_housing.csv"
+    csv_path = data_root / "44977_california_housing.csv"
     out.mkdir(parents=True, exist_ok=True)
 
     print(f"Loading California housing from {csv_path} ...")
