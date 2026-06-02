@@ -1,0 +1,211 @@
+---
+title: "California housing: reading the glass box with tslr's plots"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{California housing: reading the glass box with tslr's plots}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE, comment = "#>",
+  fig.width = 9, fig.height = 5, dpi = 110, fig.retina = 1,
+  warning = FALSE, message = FALSE
+)
+
+# Locate the California housing CSV. Override with the TSL_CALIFORNIA_CSV
+# environment variable; otherwise search upward from the working directory for
+# `data/housing_full.csv` (present in the source repository).
+find_california <- function() {
+  env <- Sys.getenv("TSL_CALIFORNIA_CSV", "")
+  if (nzchar(env) && file.exists(env)) return(env)
+  dir <- normalizePath(getwd(), mustWork = FALSE)
+  repeat {
+    cand <- file.path(dir, "data", "housing_full.csv")
+    if (file.exists(cand)) return(cand)
+    parent <- dirname(dir)
+    if (identical(parent, dir)) break
+    dir <- parent
+  }
+  ""
+}
+
+csv_path <- find_california()
+have_data <- nzchar(csv_path)
+
+# The figure chunks need the dataset; gate them in one place so a standalone
+# build (no data file) degrades to prose only.
+knitr::opts_chunk$set(eval = have_data)
+```
+
+```{r note, eval = TRUE, echo = FALSE, results = "asis"}
+if (!have_data) {
+  cat("> **Note.** This vignette renders its figures from the California housing",
+      "dataset (`data/housing_full.csv`). The data file was not found, so the",
+      "figures are skipped here; the prose and code still show how each one is",
+      "built. Point `TSL_CALIFORNIA_CSV` at the CSV to render them.\n")
+}
+```
+
+TSL is a *glass box*: a fitted model is a sum of boosting **stages**, and every
+stage factorises into per-feature univariate pieces. Because of that separability
+`tslr` can reconstruct -- exactly, not by sampling -- partial dependence, spatial
+effects, tilt, feature importance, and per-point explanations straight from the
+fitted model. This vignette walks through those built-in plotting functions on the
+classic California housing data; each renders with [ggplot2](https://ggplot2.tidyverse.org/)
+in a flat, hairline style and returns an ordinary `ggplot` object you can extend or
+`ggsave()`.
+
+```{r libs}
+library(tslr)
+library(ggplot2)
+```
+
+## Data and model
+
+The data are the eight standard California housing predictors with the median
+house value (in units of \$100,000) as the response. Longitude and latitude let
+us draw the model's spatial structure on the California map.
+
+```{r data}
+raw <- as.matrix(utils::read.csv(csv_path, header = FALSE))
+feature_names <- c("MedInc", "HouseAge", "AveRooms", "AveBedrms",
+                   "Population", "AveOccup", "Latitude", "Longitude")
+X <- raw[, 1:8]
+colnames(X) <- feature_names
+y <- raw[, 9]                      # median house value, in $100k
+```
+
+```{r fit}
+model <- tsl(X, y, epochs = 5L, n_trees = 12L, n_iter = 25L, split_try = 16L,
+             colsample_bytree = 1.0, seed = 0L, verbosity = 0L)
+pred <- predict(model, X)
+cat(sprintf("stages = %d   train RMSE = %.3f ($100k)\n",
+            length(tsl_components(model)), sqrt(mean((pred - y)^2))))
+```
+
+`tsl()` keeps a copy of the training matrix on the fitted object, so the plotting
+functions below need no further data -- they marginalise over it automatically.
+Every function also accepts an explicit `X` if you want to integrate over a
+different background.
+
+## Partial dependence
+
+`plot_first_order_pd()` shows, per stage, the positive branch (orange), the
+negative branch (blue), and their net (the solid line) -- the marginal effect of
+each feature with everything else integrated over the data.
+
+```{r pd1d, fig.width = 11, fig.height = 9}
+plot_first_order_pd(model, features = c("Latitude", "Longitude", "MedInc"),
+                    show_data_density = TRUE)
+```
+
+`pd_difference_plot()` adds the backbone overlay and makes TSL's signature visible:
+a large positive branch and a large negative branch that mostly cancel, leaving a
+small net effect.
+
+```{r pddiff, fig.width = 11, fig.height = 9}
+pd_difference_plot(model, features = c("Latitude", "Longitude", "MedInc"))
+```
+
+## Spatial structure on the California map
+
+`plot_2d_backbone()` draws, per stage, the backbone product `b_lon * b_lat`
+(where the stage is "switched on") above the signed 2D partial dependence (the
+location effect on price).
+
+```{r backbone, fig.width = 12, fig.height = 8}
+plot_2d_backbone(model, feature_x = "Longitude", feature_y = "Latitude",
+                 stages = 1:3)
+```
+
+Every plot is an ordinary ggplot built from a tidy data frame, so you can drop to
+the **compute layer** ([`tsl_pd_2d()`], [`tsl_backbone_2d()`], ...) and build a
+custom figure. Here we put the stage-1 signed surface on the actual California
+map, overlaying a faint scatter of the observations that traces the coast and
+Central Valley.
+
+```{r map, fig.width = 7, fig.height = 6}
+surf <- tsl_pd_2d(model, feature_x = "Longitude", feature_y = "Latitude",
+                  grid_points = 90L, stages = 1L)
+pts <- as.data.frame(X[sample(nrow(X), 3000), c("Longitude", "Latitude")])
+names(pts) <- c("lon", "lat")
+
+ggplot(surf, aes(x, y, fill = value)) +
+  geom_tile() +
+  geom_point(data = pts, aes(lon, lat), inherit.aes = FALSE,
+             colour = "#18181B", alpha = 0.05, size = 0.12) +
+  scale_fill_tsl_diverging(name = "2D PD",
+                           limits = max(abs(surf$value)) * c(-1, 1)) +
+  coord_quickmap(expand = FALSE) +
+  labs(title = "Stage 1 location effect", x = "Longitude", y = "Latitude") +
+  theme_flat()
+```
+
+The tilt -- the directional part of each stage -- has its own 2D view.
+
+```{r tilt2d, fig.width = 12, fig.height = 4.6}
+plot_2d_tilt(model, feature_x = "Longitude", feature_y = "Latitude",
+             stages = 1:3)
+```
+
+## Tilt curves and diagnostics
+
+`plot_tilt_1d()` draws the per-feature tilt `d_j(x)` by stage; stage 1 carries
+almost no tilt (it is the magnitude stage) and later stages add the signed
+corrections.
+
+```{r tilt1d, fig.width = 11, fig.height = 9}
+plot_tilt_1d(model, features = c("Latitude", "Longitude", "MedInc"))
+```
+
+`plot_tilt_diagnostics()` expands one feature into four views -- the raw tilt
+squashed by `tanh`, the same weighted by the backbone, and both again after
+centring -- so you can see where a tilt actually moves the prediction.
+
+```{r tiltdiag, fig.width = 12, fig.height = 7}
+plot_tilt_diagnostics(model, features = "Latitude")
+```
+
+## Feature importance
+
+`plot_feature_importance()` is a six-panel dashboard: per-stage backbone and tilt
+heatmaps, the stage weights, and the aggregated global bars (this one uses
+**patchwork** to compose the panels).
+
+```{r importance, fig.width = 14, fig.height = 8}
+plot_feature_importance(model)
+```
+
+## Local explanations
+
+`plot_local_interpretation()` decomposes individual predictions. A coastal house
+and an inland desert house attribute their very different values to different
+stages, backbone shares, and tilts.
+
+```{r local, fig.width = 13, fig.height = 7}
+coastal <- which.min(abs(X[, "Longitude"] - (-118.24)) +
+                       abs(X[, "Latitude"] - 34.05))   # Los Angeles
+desert  <- which.min(abs(X[, "Longitude"] - (-116.0)) +
+                       abs(X[, "Latitude"] - 34.7))     # Mojave
+
+plot_local_interpretation(model, list(X[coastal, ], X[desert, ]),
+                          titles = c("Coastal", "Desert"))
+```
+
+## ICE curves
+
+Finally, `plot_ice()` shows individual conditional expectation curves -- one per
+sampled house -- with the partial-dependence mean overlaid.
+
+```{r ice, fig.width = 7, fig.height = 4.5}
+plot_ice(model, feature = "MedInc", n_ice = 60L)
+```
+
+Every figure here was produced by a single `tslr` function reading the fitted
+model. Because TSL is separable, all of them -- partial dependence, spatial
+structure, tilt, importance, and local attributions -- are exact read-outs of the
+glass box rather than post-hoc approximations. Each returns a `ggplot` (or
+patchwork) object; reach for the `tsl_*()` compute functions when you want the
+underlying numbers or a bespoke figure.
