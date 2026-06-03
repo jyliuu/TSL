@@ -94,8 +94,9 @@ from tsl_py.plot._theme import (
 )
 from tsl_py.plot.pd import LINE_CYCLE
 
-# PD-computation helpers are shared with the standalone example script.
+# PD-computation helpers are shared with the standalone example scripts.
 from california import _load_xgb, _standard_pd_1d, _tsl_stage1_pd_1d
+from synthetic import build_combined_pd1_x1, make_dataset, _ice_1d
 
 CA_MARGIN = 0.5   # degrees of padding around the data extent
 
@@ -468,5 +469,42 @@ try:
     print(f"  wrote california_local_interp_desert.png")
 finally:
     _local.grid_figsize = _orig_grid_figsize
+
+# ── 13 & 14. synthetic masked-interaction PD figures ──────────────────────────
+# The PD-cancellation example ($Y = x_1^2 x_2 (1 + x_3) + \varepsilon$): the signed
+# 1D PD of x1 is near zero for every model, yet the backbone recovers its quadratic
+# effect. Rendered at the docs width from the same pretrained models the standalone
+# synthetic.py example uses, so the docs PNGs match its PDFs.
+print("synthetic masked-interaction figures …")
+SYN_MODELS    = REPO / "tsl-py" / "examples" / "models" / "synthetic"
+SYN_FEATURES  = ["x1", "x2", "x3"]
+Xs, _         = make_dataset(n=4000, seed=0)
+model_syn     = TSL.load(str(SYN_MODELS / "mpf_model.bin"))
+n_stages_syn  = len(model_syn.stage_predictors)
+
+# pd_difference_plot — PD± per (stage, feature) with the √(C₊·C₋)·bⱼ backbone overlay.
+r = tplot.pd_difference_plot(
+    model_syn, Xs, feature_names=SYN_FEATURES, grid_points=200,
+    show_data_density="rug",
+    figsize=_tfig(n_stages_syn, len(SYN_FEATURES), cell_h_in=3.7),
+)
+_save(r.fig, "synthetic_pd_difference.png")
+
+# 1D PD overlay for x1 — TSL vs EBM vs XGBoost, all near zero (PD cancellation).
+x1_grid      = np.linspace(Xs[:, 0].min(), Xs[:, 0].max(), 200)
+X_grid       = np.tile(Xs.mean(axis=0), (x1_grid.size, 1))
+X_grid[:, 0] = x1_grid
+_, pd_vals   = model_syn.compute_first_order_partial_dependence_functions(X_grid, Xs)[0]
+pd_tsl       = (pd_vals[:, ::2] + pd_vals[:, 1::2]).sum(axis=1)
+
+_ebm_syn = joblib.load(SYN_MODELS / "ebm_model.pkl")
+_xgb_syn = _load_xgb(SYN_MODELS / "xgb_model.json")
+pd_ebm   = _ice_1d(_ebm_syn.predict, Xs, 0, x1_grid, n_ice=200, seed=0).mean(axis=0)
+pd_xgb   = _ice_1d(_xgb_syn.predict, Xs, 0, x1_grid, n_ice=200, seed=0).mean(axis=0)
+_save(
+    build_combined_pd1_x1(x1_grid, pd_tsl, pd_ebm, pd_xgb,
+                          figsize=_tfig(1, 1, cell_h_in=6.0)),
+    "synthetic_pd_x1_all_models.png",
+)
 
 print("\nDone.  All figures in", OUT)
