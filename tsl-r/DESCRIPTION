@@ -2,7 +2,7 @@ Package: tensorsl
 Title: R Bindings for Tensor Separation Learning
 Version: 0.1.0
 Authors@R:
-    person("Jinyang", "Liu", email = "jinyang.liu.jl@gmail.com", role = c("aut", "cre", "cph"))
+    person("Jinyang", "Liu", email = "jl@math.ku.dk", role = c("aut", "cre", "cph"))
 Description: R bindings for TSL (Tensor Separation Learning), a glass-box
     regression model implemented in Rust. Provides a simple fit/predict
     interface backed by the high-performance 'tsl' Rust crate.

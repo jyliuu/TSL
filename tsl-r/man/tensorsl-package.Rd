@@ -17,7 +17,7 @@ Useful links:
 
 }
 \author{
-\strong{Maintainer}: Jinyang Liu \email{jinyang.liu.jl@gmail.com} [copyright holder]
+\strong{Maintainer}: Jinyang Liu \email{jl@math.ku.dk} [copyright holder]
 
 }
 \keyword{internal}
