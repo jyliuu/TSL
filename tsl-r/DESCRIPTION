@@ -1,6 +1,8 @@
 Package: tensorsl
 Title: R Bindings for Tensor Separation Learning
-Version: 0.1.0
+Version: 0.2.0
+Author: Jinyang Liu [aut, cph]
+Maintainer: Jinyang Liu <jl@math.ku.dk>
 Authors@R:
     person("Jinyang", "Liu", email = "jl@math.ku.dk", role = c("aut", "cre", "cph"))
 Description: R bindings for TSL (Tensor Separation Learning), a glass-box
