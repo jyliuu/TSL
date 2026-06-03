@@ -13,13 +13,16 @@ plot_epoch_components(object, epoch)
 }
 \value{
 A ggplot object. The assembled data frame is attached as the
-\code{"tsl_data"} attribute.
+\code{"tsl_data"} attribute; the combined component is attached as
+\code{"tsl_combined"}.
 }
 \description{
 Draws the raw univariate step components of every tree in a stage's bag, one
-facet per feature and one coloured step per tree. As in
-\code{\link[=plot_grid_tensor_components]{plot_grid_tensor_components()}} each curve is the per-interval mean factor
-\eqn{b \cosh(d)} over the finite interior intervals.
+facet per feature. Each tree is one connected step of the per-interval mean
+factor \eqn{b \cosh(d)}, coloured along a pale-to-indigo gradient by its total
+scale \eqn{\lambda^+ + \lambda^-}, so the bag reads as a fan rather than a
+tangle of distinct colours. The stage's aligned (combined) grid-tensor
+component is overlaid in ink on top of the bag.
 }
 \examples{
 set.seed(1)
