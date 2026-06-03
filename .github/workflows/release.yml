@@ -91,8 +91,12 @@ jobs:
           echo "tag=$tag built=$built"
           [ "$tag" = "$built" ] || { echo "::error::tag $tag != built $built"; exit 1; }
 
+      # skip-existing keeps a re-pushed or moved tag idempotent: already-uploaded
+      # files are left in place instead of failing the job on a duplicate version.
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
