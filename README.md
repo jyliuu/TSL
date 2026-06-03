@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 ![Rust](https://img.shields.io/badge/rust-2021-orange.svg)
 ![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue.svg)
+![R](https://img.shields.io/badge/R-%E2%89%A54.2-blue.svg)
 
 TSL is a glass-box regression model for learning rich interactions without sacrificing
 interpretability. It represents predictions as a sum of stages, where each stage is a
@@ -203,6 +204,37 @@ fn main() {
     let predictions = model.predict(x.view());
 }
 ```
+
+## R
+
+The `tslr` package ([`tsl-r/`](tsl-r/)) wraps the same Rust core for R through
+[extendr](https://extendr.github.io/), exposing an S3 `fit`/`predict` interface plus a native
+ggplot2 interpretability layer. It compiles the core as a static library at install time, so
+it needs only a Rust toolchain (`rustc >= 1.80`) — the core is pure Rust and links no system
+numerical libraries.
+
+```r
+# tslr lives in the tsl-r/ subdirectory of the repo:
+pak::pak("jyliuu/TSL/tsl-r")
+# or: remotes::install_github("jyliuu/TSL", subdir = "tsl-r")
+
+library(tslr)
+
+set.seed(1)
+x <- matrix(runif(500 * 3, -2, 2), ncol = 3, dimnames = list(NULL, c("a", "b", "c")))
+y <- 2 * x[, 1] - x[, 2] + 0.5 * x[, 3] + rnorm(500, sd = 0.1)
+
+fit <- tsl(x, y, epochs = 20L, seed = 42L)
+preds <- predict(fit, x)
+
+# inspect the glass box and draw the diagnostics
+comp <- tsl_components(fit)
+ggplot2::autoplot(fit, type = "pd")
+```
+
+The hyperparameters mirror the Python `TSLRegressor`, so a fit with the same data and `seed`
+reproduces the Python results. See the [R API documentation](https://jyliuu.github.io/TSL/code/r-api/)
+and the [`tsl-r/` README](tsl-r/README.md).
 
 ## Documentation
 

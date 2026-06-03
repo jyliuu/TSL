@@ -47,6 +47,40 @@ flat hyperparameters; it expects **float64** arrays. See the
 [Python API](../code/python-api.md) and the
 [Hyperparameters](hyperparameters.md) reference.
 
+## Install and fit (R)
+
+The R package **`tslr`** ([R API](../code/r-api.md)) compiles the same Rust core as a static
+library at build time, so it too needs only a Rust toolchain (`rustc >= 1.80`, from
+[rustup](https://rustup.rs)) — no system math libraries. It lives in the `tsl-r/`
+subdirectory, so installers need the subdirectory:
+
+```r
+# pak (owner/repo/subdir):
+pak::pak("jyliuu/TSL/tsl-r")
+
+# remotes / devtools:
+remotes::install_github("jyliuu/TSL", subdir = "tsl-r")
+```
+
+`tsl()` fits a boosted model with the same hyperparameters as the Python `TSLRegressor`, so a
+fit with the same data and `seed` reproduces the Python results:
+
+```r
+library(tslr)
+
+set.seed(1)
+n <- 500
+x <- matrix(runif(n * 3, -2, 2), ncol = 3, dimnames = list(NULL, c("a", "b", "c")))
+y <- 2 * x[, 1] - x[, 2] + 0.5 * x[, 3] + rnorm(n, sd = 0.1)
+
+fit <- tsl(x, y, epochs = 20L, seed = 42L, verbosity = 0L)
+preds <- predict(fit, x)
+```
+
+`tsl_components()` extracts the fitted glass-box structure, and the `plot_*()` /
+`autoplot()` helpers render the interpretability diagnostics in ggplot2. See the
+[R API](../code/r-api.md) reference.
+
 ## Building from a clone (development)
 
 This is a Cargo workspace (root crate `tsl_rust` + member `tsl-py`).
@@ -76,5 +110,6 @@ Linux — exercise that crate through the Python tests, not `cargo test`.
 
 - [The model](../math/model.md) — what TSL actually fits.
 - [Hyperparameters](hyperparameters.md) — every knob, what it does, and where it maps.
+- [Python API](../code/python-api.md) / [R API](../code/r-api.md) — the per-language reference.
 - [Examples](../index.md#examples) — reproduce the paper figures.
 - [Visualization dashboard](visualizing.md) — replay how a model was built with `tslviz`.
