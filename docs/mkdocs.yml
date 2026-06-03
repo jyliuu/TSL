@@ -72,6 +72,7 @@ nav:
   - Guide:
       - Python API: code/python-api.md
       - Plotting API: code/plotting.md
+      - R API: code/r-api.md
       - Hyperparameters: guides/hyperparameters.md
       - Visualization dashboard (WIP): guides/visualizing.md
   - Rust backend:
