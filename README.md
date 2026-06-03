@@ -13,7 +13,17 @@ feature-wise components.
 
 ## Installation
 
-### Python
+### Rust toolchain
+
+TSL's Python and R packages compile the Rust core at install time, so **a working Rust
+toolchain is required first**. Install it with [rustup](https://rustup.rs) if Rust is not
+already on your machine:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+### Install (Python)
 
 The Python package is published on PyPI as **`tensorsl`** and imported as `tsl_py`:
 
@@ -22,17 +32,16 @@ pip install tensorsl
 
 # optional extras
 pip install "tensorsl[plots]"     # matplotlib for tsl_py.plot
-pip install "tensorsl[examples]"  # comparison models and example dependencies
+pip install "tensorsl[examples]"  # EBM, XGBoost, SepALS for comparisons
 ```
 
-Source builds use [maturin](https://www.maturin.rs/) to compile the Rust extension, so install
-a Rust toolchain from [rustup.rs](https://rustup.rs) if your platform does not have a wheel.
+Source builds compile the Rust extension at install time, so the Rust toolchain above is
+required.
 
-### R
+### Install (R)
 
-The R connector package is also named **`tensorsl`**. It is not on CRAN; install it from the
-`tsl-r/` subdirectory of this repository. The R package compiles the same Rust core as a
-static library at install time, so it needs a Rust toolchain (`rustc >= 1.80`).
+The R package **`tensorsl`** lives in the `tsl-r/` subdirectory of this repository. Install
+it from the repository root with either `pak` or `remotes`:
 
 ```r
 # pak (owner/repo/subdir):
@@ -40,6 +49,45 @@ pak::pak("jyliuu/TSL/tsl-r")
 
 # remotes / devtools:
 remotes::install_github("jyliuu/TSL", subdir = "tsl-r")
+```
+
+The R build compiles the same Rust core at install time, so it uses the Rust toolchain from
+above.
+
+## Development install
+
+This is a Cargo workspace (root crate `tsl_rust` + member `tsl-py`).
+
+**Rust core** — always pass `--release` (the tests run numerical workloads; debug is far too
+slow):
+
+```sh
+cargo build --release
+cargo test -p tsl_rust --release                 # full core test suite
+cargo test -p tsl_rust --release test_name        # a single test by name
+```
+
+**Python wrapper** — `maturin develop` builds the Rust extension and installs it into a
+Python virtualenv. Point it at the project's venv by setting `VIRTUAL_ENV` (and invoking
+that venv's `maturin`):
+
+```sh
+# from tsl-py/
+VIRTUAL_ENV=/path/to/.venv /path/to/.venv/bin/maturin develop
+/path/to/.venv/bin/python -m pytest python/tests/
+```
+
+**R package** — for local iteration against the working-tree core, add an untracked
+`tsl-r/src/rust/.cargo/config.toml` with:
+
+```toml
+paths = ["../../.."]
+```
+
+Then install from the `tsl-r/` directory:
+
+```r
+devtools::install_local("tsl-r")
 ```
 
 ## Usage
@@ -110,10 +158,15 @@ the dollar contribution, the share of each feature in that stage's magnitude, an
 signed direction of each feature.
 
 ```python
+import numpy as np
 from tsl_py.plot import compute_local_explanation, plot_local_interpretation
 
-# a coastal (LA-area) block and a low-density inland (desert) block
-for name, i in [("coastal", 4556), ("desert", 2784)]:
+lat, lon = feature_names.index("Latitude"), feature_names.index("Longitude")
+# the blocks nearest two reference locations: the SF Bay (coastal) and Palm Springs (desert)
+coastal = int(np.argmin(np.abs(X[:, lat] - 37.7) + np.abs(X[:, lon] + 122.4)))
+desert = int(np.argmin(np.abs(X[:, lat] - 33.8) + np.abs(X[:, lon] + 116.5)))
+
+for name, i in [("coastal", coastal), ("desert", desert)]:
     expl = compute_local_explanation(model, X[i])
     plot_local_interpretation(
         explanations=[expl], points=[X[i]], titles=[name.title()],
@@ -121,17 +174,19 @@ for name, i in [("coastal", 4556), ("desert", 2784)]:
     )
 ```
 
-A **coastal** observation (LA-area, predicted ≈ \$293k):
+A **coastal** observation (San Francisco Bay area, predicted ≈ \$174k):
 
 <img src="docs/docs/assets/img/california_local_interp_coastal.png" width="100%" alt="Local explanation — coastal point">
 
-A **desert** observation (low-density inland, predicted ≈ \$149k):
+A **desert** observation (low-density inland near Palm Springs, predicted ≈ \$111k):
 
 <img src="docs/docs/assets/img/california_local_interp_desert.png" width="100%" alt="Local explanation — desert point">
 
-For the desert point, the first stage's spatial gate collapses and the coastal premium
-does not fire; the second stage is active here and supplies the negative correction. This
-is the local view of the global division of labour between the two stages.
+At the coastal point Stage 1 alone supplies almost the entire prediction — the coastal
+premium — and later stages add only small corrections. At the desert point Stage 1 still
+leads but is weaker: the spatial gate is less active inland, and Longitude and Latitude
+contribute a negative tilt rather than the coastal premium. This is the local view of how
+the stages divide the spatial structure between them.
 
 ### Spatial structure
 

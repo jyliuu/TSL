@@ -120,15 +120,65 @@ The Python layer builds several interpretation primitives on top of the PD math:
 - **ICE curves** — `compute_ice_curves` traces individual conditional expectations
   (per-observation analogues of PD), scaled by `scaling_plus`/`scaling_minus`.
 - **First-order PD per feature** — `compute_first_order_partial_dependence_functions`.
-- **Feature importance** — `compute_per_stage_feature_importance` reports
-  $\mathrm{Var}[\log b_j]$ (backbone) and $\mathrm{Var}[d_j]$ (tilt) per stage;
-  `compute_aggregated_feature_importance` and `compute_combined_feature_importance` roll
-  these up across stages weighted by stage energy.
+- **Feature importance** — variance-based backbone and tilt importance per stage, rolled
+  up across stages by an energy weight into a combined score $I_j$
+  ([defined below](#feature-importance)).
 
 <figure markdown="span">
   ![ICE curves on x1 for TSL](../assets/img/ice_x1_tsl.png){ width="80%" }
   <figcaption markdown="span">Individual conditional expectation (ICE) curves on California housing for MedInc — each faint line traces one sampled observation's predicted price as MedInc varies while all other features are held fixed. The bold line is the average PD curve. The tight, upward-trending band shows that MedInc has a consistent positive direction across observations: every home benefits from higher income, but homes in high-value locations start from a higher baseline (vertical spread). ICE is the per-observation analogue of PD; see [`plot_ice`](../code/plotting.md#fn-plot-ice) for the API.</figcaption>
 </figure>
+
+### Feature importance
+
+Feature importance reads off the [backbone–tilt](model.md#backbone-and-exponential-tilt)
+decomposition: a feature matters to a stage to the extent that its backbone (the magnitude
+gate) or its tilt (the signed direction) *varies* across the data. Evaluate the per-feature
+factors on the training sample $\{x^{(i)}\}_{i=1}^n$ and take their empirical variances. For
+stage $\ell$ and feature $j$,
+
+$$
+I_j^{b,(\ell)} = \mathrm{Var}_n\!\bigl[\log b_j^{(\ell)}(X_j)\bigr],
+\qquad
+I_j^{d,(\ell)} = \mathrm{Var}_n\!\bigl[d_j^{(\ell)}(X_j)\bigr],
+$$
+
+writing $\mathrm{Var}_n[g] = \tfrac1n\sum_{i}\bigl(g(x_j^{(i)}) - \tfrac1n\sum_{i'} g(x_j^{(i')})\bigr)^2$
+for the empirical variance over the sample. The backbone variance is taken on the log scale
+because the backbone enters the stage [multiplicatively](model.md#the-sinh-form); under the
+[normalization gauge](model.md#normalization-gauge-fixing)
+$\mathbb{E}[\log b_j^{(\ell)}] = \mathbb{E}[d_j^{(\ell)}] = 0$, so both are second moments
+about zero. A feature whose backbone and tilt are flat across the sample contributes nothing
+to that stage and scores zero.
+
+Stages are then weighted by how much they actually move the prediction — their **energy**,
+the mean-squared stage contribution:
+
+$$
+\omega_\ell = \frac{E_\ell}{\sum_{k=1}^{R} E_k},
+\qquad
+E_\ell = \bigl\lVert \hat{m}^{(\ell)} \bigr\rVert_n^2 = \frac1n\sum_{i=1}^n \hat{m}^{(\ell)}\!\bigl(x^{(i)}\bigr)^2,
+$$
+
+where $\hat{m}^{(\ell)} = \hat{m}_+^{(\ell)} - \hat{m}_-^{(\ell)}$ is the stage's signed
+contribution to $\hat{m}$ (the per-stage OLS scalings `scaling_plus`/`scaling_minus` are
+folded in; see [StagePredictor](../code/stage-predictor.md)). The per-stage importances
+aggregate to global scores, and a single combined score folds the two channels together
+with a tilt weight $\gamma \ge 0$ (default $1$):
+
+$$
+I_j^b = \sum_{\ell=1}^{R} \omega_\ell\, I_j^{b,(\ell)},
+\qquad
+I_j^d = \sum_{\ell=1}^{R} \omega_\ell\, I_j^{d,(\ell)},
+\qquad
+I_j = I_j^b + \gamma\, I_j^d.
+$$
+
+`compute_per_stage_feature_importance` returns the per-stage grids
+$I_j^{b,(\ell)}, I_j^{d,(\ell)}$, `compute_aggregated_feature_importance` returns the global
+$I_j^b, I_j^d$ together with the weights $\omega_\ell$, and
+`compute_combined_feature_importance` returns $I_j$ — all rendered by
+[`plot_feature_importance`](../code/plotting.md#fn-plot-feature-importance).
 
 All of these are plotted by the `tsl_py.plot` helpers — see the
 [Plotting reference](../code/plotting.md).
