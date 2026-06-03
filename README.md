@@ -362,11 +362,11 @@ backbones **multiply** and the per-feature tilts **add**, so the whole estimator
 equivalently a sum of backbones times an odd function of the tilt:
 
 $$
-\begin{aligned}
-b^{(\ell)}(\mathbf{x}) &= b_0^{(\ell)} \prod_{j=1}^{p} b_j^{(\ell)}(x_j) \;>\; 0, \\
-d^{(\ell)}(\mathbf{x}) &= d_0^{(\ell)} + \sum_{j=1}^{p} d_j^{(\ell)}(x_j) \;\in\; \mathbb{R}, \\
-\hat{m}(\mathbf{x}) &= 2 \sum_{\ell=1}^{R} b^{(\ell)}(\mathbf{x})\, \sinh\!\bigl(d^{(\ell)}(\mathbf{x})\bigr).
-\end{aligned}
+b^{(\ell)}(\mathbf{x}) = b_0^{(\ell)} \prod_{j=1}^{p} b_j^{(\ell)}(x_j) > 0, \qquad d^{(\ell)}(\mathbf{x}) = d_0^{(\ell)} + \sum_{j=1}^{p} d_j^{(\ell)}(x_j) \in \mathbb{R},
+$$
+
+$$
+\hat{m}(\mathbf{x}) = 2 \sum_{\ell=1}^{R} b^{(\ell)}(\mathbf{x}) \sinh(d^{(\ell)}(\mathbf{x})).
 $$
 
 The backbone $b^{(\ell)}(\mathbf{x}) > 0$ is the stage's **magnitude**, and acts as an
