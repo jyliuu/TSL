@@ -20,6 +20,22 @@ knitr::opts_chunk$set(
 find_california <- function() {
   env <- Sys.getenv("TSL_CALIFORNIA_CSV", "")
   if (nzchar(env) && file.exists(env)) return(env)
+  # Try relative to vignette location first (for R CMD check)
+  vignette_dir <- tryCatch(
+    normalizePath(dirname(knitr::current_input()), mustWork = FALSE),
+    error = function(e) NA_character_
+  )
+  if (!is.na(vignette_dir)) {
+    dir <- vignette_dir
+    repeat {
+      parent <- dirname(dir)
+      if (identical(parent, dir)) break
+      cand <- file.path(parent, "data", "housing_full.csv")
+      if (file.exists(cand)) return(cand)
+      dir <- parent
+    }
+  }
+  # Fall back to searching from working directory
   dir <- normalizePath(getwd(), mustWork = FALSE)
   repeat {
     cand <- file.path(dir, "data", "housing_full.csv")
@@ -68,7 +84,7 @@ The data are the eight standard California housing predictors with the median
 house value (in units of \$100,000) as the response. Longitude and latitude let
 us draw the model's spatial structure on the California map.
 
-```{r data}
+```{r data, eval = have_data}
 raw <- as.matrix(utils::read.csv(csv_path, header = FALSE))
 feature_names <- c("MedInc", "HouseAge", "AveRooms", "AveBedrms",
                    "Population", "AveOccup", "Latitude", "Longitude")
@@ -77,7 +93,7 @@ colnames(X) <- feature_names
 y <- raw[, 9]                      # median house value, in $100k
 ```
 
-```{r fit}
+```{r fit, eval = have_data}
 model <- tsl(X, y, epochs = 5L, n_trees = 12L, n_iter = 25L, split_try = 16L,
              colsample_bytree = 1.0, seed = 0L, verbosity = 0L)
 pred <- predict(model, X)
@@ -98,7 +114,7 @@ argument, forwarding the extra parameters to the dispatched function -- handy fo
 quick, interactive exploration. The rest of this vignette calls the underlying
 functions directly, but any of them can be drawn this way:
 
-```{r autoplot, fig.width = 10, fig.height = 5}
+```{r autoplot, eval = have_data, fig.width = 10, fig.height = 5}
 ggplot2::autoplot(model, type = "pd", features = "MedInc", stages = 1:2)
 ```
 
@@ -109,7 +125,7 @@ curve) and the negative branch `PD-` (blue curve); the shaded gap between them i
 their net -- the marginal effect of each feature with everything else integrated
 over the data.
 
-```{r pd1d, fig.width = 11, fig.height = 9}
+```{r pd1d, eval = have_data, fig.width = 11, fig.height = 9}
 plot_first_order_pd(model, features = c("Latitude", "Longitude", "MedInc"),
                     show_data_density = TRUE)
 ```
@@ -118,7 +134,7 @@ plot_first_order_pd(model, features = c("Latitude", "Longitude", "MedInc"),
 a large `PD+` curve and a large `PD-` curve that track each other closely, so the
 shaded gap between them -- the net effect -- stays small.
 
-```{r pddiff, fig.width = 11, fig.height = 9}
+```{r pddiff, eval = have_data, fig.width = 11, fig.height = 9}
 pd_difference_plot(model, features = c("Latitude", "Longitude", "MedInc"))
 ```
 
@@ -128,7 +144,7 @@ pd_difference_plot(model, features = c("Latitude", "Longitude", "MedInc"))
 (where the stage is "switched on") above the signed 2D partial dependence (the
 location effect on price).
 
-```{r backbone, fig.width = 12, fig.height = 8}
+```{r backbone, eval = have_data, fig.width = 12, fig.height = 8}
 plot_2d_backbone(model, feature_x = "Longitude", feature_y = "Latitude",
                  stages = 1:3)
 ```
@@ -137,7 +153,7 @@ For just the signed surface -- the location effect itself, without the backbone
 gate above it -- `plot_2d_pd()` draws the per-stage 2D partial dependence on the
 diverging ramp, each stage rescaled to its own range.
 
-```{r pd2d, fig.width = 12, fig.height = 4.6}
+```{r pd2d, eval = have_data, fig.width = 12, fig.height = 4.6}
 plot_2d_pd(model, feature_x = "Longitude", feature_y = "Latitude",
            stages = 1:3)
 ```
@@ -148,7 +164,7 @@ custom figure. Here we put the stage-1 signed surface on the actual California
 map, overlaying a faint scatter of the observations that traces the coast and
 Central Valley.
 
-```{r map, fig.width = 7, fig.height = 6}
+```{r map, eval = have_data, fig.width = 7, fig.height = 6}
 surf <- tsl_pd_2d(model, feature_x = "Longitude", feature_y = "Latitude",
                   grid_points = 90L, stages = 1L)
 pts <- as.data.frame(X[sample(nrow(X), 3000), c("Longitude", "Latitude")])
@@ -167,7 +183,7 @@ ggplot(surf, aes(x, y, fill = value)) +
 
 The tilt -- the directional part of each stage -- has its own 2D view.
 
-```{r tilt2d, fig.width = 12, fig.height = 4.6}
+```{r tilt2d, eval = have_data, fig.width = 12, fig.height = 4.6}
 plot_2d_tilt(model, feature_x = "Longitude", feature_y = "Latitude",
              stages = 1:3)
 ```
@@ -178,7 +194,7 @@ plot_2d_tilt(model, feature_x = "Longitude", feature_y = "Latitude",
 almost no tilt (it is the magnitude stage) and later stages add the signed
 corrections.
 
-```{r tilt1d, fig.width = 11, fig.height = 9}
+```{r tilt1d, eval = have_data, fig.width = 11, fig.height = 9}
 plot_tilt_1d(model, features = c("Latitude", "Longitude", "MedInc"))
 ```
 
@@ -186,7 +202,7 @@ plot_tilt_1d(model, features = c("Latitude", "Longitude", "MedInc"))
 squashed by `tanh`, the same weighted by the backbone, and both again after
 centring -- so you can see where a tilt actually moves the prediction.
 
-```{r tiltdiag, fig.width = 12, fig.height = 7}
+```{r tiltdiag, eval = have_data, fig.width = 12, fig.height = 7}
 plot_tilt_diagnostics(model, features = "Latitude")
 ```
 
@@ -198,14 +214,14 @@ pieces: each feature's mean factor `b * cosh(d)`, drawn as a piecewise-constant
 step over the finite interior intervals. Passing a single `axis` follows one
 feature -- here `MedInc` -- as its shape is rebuilt across the five stages.
 
-```{r combcomp, fig.width = 12, fig.height = 7}
+```{r combcomp, eval = have_data, fig.width = 12, fig.height = 7}
 plot_combined_grid_tensors(model, axis = match("MedInc", feature_names))
 ```
 
 To inspect one stage on its own, hand `plot_grid_tensor_components()` that stage's
 combined grid tensor; here stage 1's `HouseAge` component.
 
-```{r gtcomp, fig.width = 9, fig.height = 5}
+```{r gtcomp, eval = have_data, fig.width = 9, fig.height = 5}
 plot_grid_tensor_components(
   tsl_components(model)[[1]]$combined_grid_tensor,
   axis = match("HouseAge", feature_names),
@@ -219,7 +235,7 @@ feature, each tree a step shaded pale-to-indigo by its total scale
 `lambda+ + lambda-`, with the aligned (combined) component overlaid in ink --
 showing how closely the ensemble agrees and where the average settles.
 
-```{r epochcomp, fig.width = 12, fig.height = 7}
+```{r epochcomp, eval = have_data, fig.width = 12, fig.height = 7}
 plot_epoch_components(model, epoch = 1L)
 ```
 
@@ -229,7 +245,7 @@ plot_epoch_components(model, epoch = 1L)
 heatmaps, the stage weights, and the aggregated global bars (this one uses
 **patchwork** to compose the panels).
 
-```{r importance, fig.width = 14, fig.height = 8}
+```{r importance, eval = have_data, fig.width = 14, fig.height = 8}
 plot_feature_importance(model)
 ```
 
@@ -241,7 +257,7 @@ feature's share of the magnitude gate (the backbone), and the signed tilt that
 steers it. A coastal house and an inland desert house reach their very different
 values through different stages, backbone shares, and tilts.
 
-```{r local, fig.width = 13, fig.height = 9}
+```{r local, eval = have_data, fig.width = 13, fig.height = 9}
 coastal <- which.min(abs(X[, "Longitude"] - (-118.24)) +
                        abs(X[, "Latitude"] - 34.05))   # Los Angeles
 desert  <- which.min(abs(X[, "Longitude"] - (-116.0)) +
@@ -256,7 +272,7 @@ plot_local_interpretation(model, list(X[coastal, ], X[desert, ]),
 Finally, `plot_ice()` shows individual conditional expectation curves -- one per
 sampled house -- with the partial-dependence mean overlaid.
 
-```{r ice, fig.width = 7, fig.height = 4.5}
+```{r ice, eval = have_data, fig.width = 7, fig.height = 4.5}
 plot_ice(model, feature = "MedInc", n_ice = 60L)
 ```
 
