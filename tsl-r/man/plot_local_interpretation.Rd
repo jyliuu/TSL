@@ -12,11 +12,11 @@ plot_local_interpretation(object, points, titles = NULL, top_k_features = 3L)
 \item{points}{A single numeric vector of length \code{n_features}, a list of such
 vectors, or a matrix with one point per row.}
 
-\item{titles}{Per-point panel titles. Defaults to \code{"Point 1"}, \code{"Point 2"}, ...}
+\item{titles}{Per-point titles. Defaults to \code{"Point 1"}, \code{"Point 2"}, ...
+A single point names the figure title; several points tag each row.}
 
-\item{top_k_features}{Number of features to keep in the backbone-share and
-signed-tilt panels (the remainder are lumped into \code{"Other"} for the
-backbone share).}
+\item{top_k_features}{Number of tilt axes kept per stage in the signed-tilt
+panel.}
 }
 \value{
 A patchwork object (or a list of ggplots if patchwork is not
@@ -24,12 +24,29 @@ installed). The per-point \code{\link[=tsl_local]{tsl_local()}} results are atta
 \code{"tsl_data"} attribute (see \code{\link[=tsl_plot_data]{tsl_plot_data()}}).
 }
 \description{
-Composes a per-point decomposition of one or more TSL predictions. Each query
-point becomes a row of three panels: a stage-contribution view (the positive
-branch in orange, the negative branch in blue, and the net contribution as a
-dark point, with stages ordered by absolute net effect); a backbone-share bar
-chart (each feature's share of \verb{|log b_j|} summed over stages); and a
-signed-tilt bar chart (each feature's total tilt, coloured by sign).
+Composes a per-point "backbone x tilt" decomposition of one or more TSL
+predictions. Each query point becomes a row of three panels that share one
+stage ordering (by absolute net contribution, descending, largest at the
+top):
+}
+\details{
+\itemize{
+\item \strong{Stage contribution} — a signed waterfall over stages: each bar runs from
+the running cumulative to the next, orange for a positive net effect and
+blue for a negative one, with the cumulative landing on the prediction
+(marked by a dotted line and a boxed value). A signed value label sits at
+each bar's tip.
+\item \strong{Backbone share} — one percent-stacked bar per stage giving each feature's
+share of \verb{|log b_j(x_j)|}. The intercept is excluded here: it carries the
+absolute scale and would dominate the gate. Segments run darkest-to-pale in
+indigo with a grey \code{"Other"} tail.
+\item \strong{Signed tilt} — per stage, the signed local effect \code{d_j} of the
+top-\code{top_k_features} axes (the constant intercept axis \code{d_0} included),
+orange when positive and blue when negative. The value scale comes from the
+feature tilts only, so a one-sided stage whose intercept absorbs the whole
+\verb{log(lam_+/lam_-)} does not flatten the rest; an off-scale intercept is
+clipped to the edge with a bold label.
+}
 }
 \examples{
 set.seed(1)
