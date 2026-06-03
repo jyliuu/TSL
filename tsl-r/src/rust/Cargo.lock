@@ -452,6 +452,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tensorsl"
+version = "0.1.0"
+dependencies = [
+ "extendr-api",
+ "ndarray",
+ "tsl_rust",
+]
+
+[[package]]
 name = "tsl_rust"
 version = "0.1.1"
 source = "git+https://github.com/jyliuu/TSL?branch=main#15317eb4e2ac1c407658be8413dfeb06d1a9ecd4"
@@ -466,15 +475,6 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "tslr"
-version = "0.1.0"
-dependencies = [
- "extendr-api",
- "ndarray",
- "tsl_rust",
 ]
 
 [[package]]

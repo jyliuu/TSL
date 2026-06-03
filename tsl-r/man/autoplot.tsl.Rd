@@ -24,7 +24,7 @@
 A ggplot object (or a patchwork object for the composite types).
 }
 \description{
-A convenience wrapper dispatching to the \code{tslr} \verb{plot_*()} functions by
+A convenience wrapper dispatching to the \code{tensorsl} \verb{plot_*()} functions by
 \code{type}. Extra arguments are forwarded to the underlying function (e.g.
 \code{feature_x}/\code{feature_y} for the 2D plots, \code{feature} for \code{"ice"}, \code{points}
 for \code{"local"}).

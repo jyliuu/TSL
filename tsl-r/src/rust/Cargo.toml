@@ -1,5 +1,5 @@
 [package]
-name = 'tslr'
+name = 'tensorsl'
 publish = false
 version = '0.1.0'
 edition = '2021'
@@ -8,7 +8,7 @@ license = 'MIT'
 
 [lib]
 crate-type = [ 'rlib', 'staticlib' ]
-name = 'tslr'
+name = 'tensorsl'
 
 [[bin]]
 name = 'document'

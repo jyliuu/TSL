@@ -1,4 +1,4 @@
 library(testthat)
-library(tslr)
+library(tensorsl)
 
-test_check("tslr")
+test_check("tensorsl")

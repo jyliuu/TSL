@@ -1,17 +1,17 @@
-# tslr
+# tensorsl
 
 R bindings for **TSL** (Tensor Separation Learning), a glass-box regression
-model implemented in Rust. `tslr` wraps the high-performance [`tsl`](https://github.com/jyliuu/TSL)
+model implemented in Rust. `tensorsl` wraps the high-performance [`tsl`](https://github.com/jyliuu/TSL)
 Rust crate through [extendr](https://extendr.github.io/), exposing a small
 `fit`/`predict` interface that mirrors the Python `TSLRegressor`.
 
 ## Installation
 
-`tslr` compiles a Rust static library at build time. The core is pure Rust and
+`tensorsl` compiles a Rust static library at build time. The core is pure Rust and
 links no system numerical libraries, so the only prerequisite is a Rust
 toolchain (`rustc >= 1.80`); install it from [rustup.rs](https://rustup.rs).
 
-`tslr` lives in the `tsl-r/` subdirectory of the [TSL repo](https://github.com/jyliuu/TSL),
+`tensorsl` lives in the `tsl-r/` subdirectory of the [TSL repo](https://github.com/jyliuu/TSL),
 so installers need to be told the subdirectory:
 
 ```r
@@ -28,7 +28,7 @@ cargo fetches during the build — no separate checkout of the core is required.
 ## Usage
 
 ```r
-library(tslr)
+library(tensorsl)
 
 set.seed(1)
 n <- 500

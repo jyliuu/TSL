@@ -1,15 +1,15 @@
 ---
-title: "Getting started with tslr"
+title: "Getting started with tensorsl"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Getting started with tslr}
+  %\VignetteIndexEntry{Getting started with tensorsl}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
-library(tslr)
+library(tensorsl)
 ```
 
 ## What is TSL

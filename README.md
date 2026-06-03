@@ -207,18 +207,18 @@ fn main() {
 
 ## R
 
-The `tslr` package ([`tsl-r/`](tsl-r/)) wraps the same Rust core for R through
+The `tensorsl` package ([`tsl-r/`](tsl-r/)) wraps the same Rust core for R through
 [extendr](https://extendr.github.io/), exposing an S3 `fit`/`predict` interface plus a native
 ggplot2 interpretability layer. It compiles the core as a static library at install time, so
 it needs only a Rust toolchain (`rustc >= 1.80`) — the core is pure Rust and links no system
 numerical libraries.
 
 ```r
-# tslr lives in the tsl-r/ subdirectory of the repo:
+# tensorsl lives in the tsl-r/ subdirectory of the repo:
 pak::pak("jyliuu/TSL/tsl-r")
 # or: remotes::install_github("jyliuu/TSL", subdir = "tsl-r")
 
-library(tslr)
+library(tensorsl)
 
 set.seed(1)
 x <- matrix(runif(500 * 3, -2, 2), ncol = 3, dimnames = list(NULL, c("a", "b", "c")))

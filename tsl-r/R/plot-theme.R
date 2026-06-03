@@ -1,4 +1,4 @@
-# Flat visual theme for the tslr plotting layer: white ground, hairline borders,
+# Flat visual theme for the tensorsl plotting layer: white ground, hairline borders,
 # a faint grid, monospace tick labels, and the indigo / blue-orange palette used
 # by the Python `tsl_py.plot` diagnostics. The look is driven by a single token
 # list and three colour ramps so it re-skins from one place.
@@ -22,7 +22,7 @@
 .tsl_cycle <- c("#4F46E5", "#F97316", "#2563EB", "#0D9488", "#9333EA",
                 "#D97706", "#8A8A93", "#A8A8B0")
 
-#' Flat ggplot2 theme for tslr diagnostics
+#' Flat ggplot2 theme for tensorsl diagnostics
 #'
 #' A minimal theme matching the `tsl_py.plot` "flat" aesthetic: white panels,
 #' hairline borders, a faint grid, and muted monospace axis labels. Pair it with

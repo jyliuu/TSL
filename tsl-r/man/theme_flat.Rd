@@ -2,7 +2,7 @@
 % Please edit documentation in R/plot-theme.R
 \name{theme_flat}
 \alias{theme_flat}
-\title{Flat ggplot2 theme for tslr diagnostics}
+\title{Flat ggplot2 theme for tensorsl diagnostics}
 \usage{
 theme_flat(base_size = 11)
 }

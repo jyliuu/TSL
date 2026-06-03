@@ -1,6 +1,6 @@
-# R API (`tslr`)
+# R API (`tensorsl`)
 
-`tsl-r/` (R package **`tslr`**) wraps the Rust core through
+`tsl-r/` (R package **`tensorsl`**) wraps the Rust core through
 [extendr](https://extendr.github.io/), the R analogue of [`tsl-py`](python-api.md). It
 exposes a small S3 `fit`/`predict` interface whose hyperparameters mirror the Python
 [`TSLRegressor`](python-api.md#cls-tslregressor) — a model fit in R with the same data and
@@ -8,7 +8,7 @@ exposes a small S3 `fit`/`predict` interface whose hyperparameters mirror the Py
 interpretability layer.
 
 ```r
-library(tslr)
+library(tensorsl)
 ```
 
 The package has three layers:
@@ -513,7 +513,7 @@ and the indigo / blue–orange palette — is exported for custom figures.
 theme_flat(base_size = 11) -> theme
 ```
 
-The minimal ggplot2 theme behind every `tslr` diagnostic, composable with `+`. Pair it with
+The minimal ggplot2 theme behind every `tensorsl` diagnostic, composable with `+`. Pair it with
 the `scale_*_tsl()` family for the matching colour ramps.
 
 ### `scale_*_tsl()` { #fn-scale-tsl }
@@ -532,7 +532,7 @@ squishes values outside its symmetric `limits` to the ends.
 
 ## Installation & development
 
-`tslr` lives in the `tsl-r/` subdirectory of the repo and compiles the Rust core as a static
+`tensorsl` lives in the `tsl-r/` subdirectory of the repo and compiles the Rust core as a static
 library at build time. The core is pure Rust and links no system numerical libraries, so the
 only prerequisite is a Rust toolchain (`rustc >= 1.80`, from [rustup.rs](https://rustup.rs)).
 

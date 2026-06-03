@@ -1,4 +1,4 @@
-Package: tslr
+Package: tensorsl
 Title: R Bindings for Tensor Separation Learning
 Version: 0.1.0
 Authors@R:

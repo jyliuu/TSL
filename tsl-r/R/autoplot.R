@@ -3,7 +3,7 @@
 
 #' Quick diagnostic plot for a fitted TSL model
 #'
-#' A convenience wrapper dispatching to the `tslr` `plot_*()` functions by
+#' A convenience wrapper dispatching to the `tensorsl` `plot_*()` functions by
 #' `type`. Extra arguments are forwarded to the underlying function (e.g.
 #' `feature_x`/`feature_y` for the 2D plots, `feature` for `"ice"`, `points`
 #' for `"local"`).

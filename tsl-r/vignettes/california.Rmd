@@ -1,8 +1,8 @@
 ---
-title: "California housing: reading the glass box with tslr's plots"
+title: "California housing: reading the glass box with tensorsl's plots"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{California housing: reading the glass box with tslr's plots}
+  %\VignetteIndexEntry{California housing: reading the glass box with tensorsl's plots}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -50,7 +50,7 @@ if (!have_data) {
 
 TSL is a *glass box*: a fitted model is a sum of boosting **stages**, and every
 stage factorises into per-feature univariate pieces. Because of that separability
-`tslr` can reconstruct -- exactly, not by sampling -- partial dependence, spatial
+`tensorsl` can reconstruct -- exactly, not by sampling -- partial dependence, spatial
 effects, tilt, feature importance, and per-point explanations straight from the
 fitted model. This vignette walks through those built-in plotting functions on the
 classic California housing data; each renders with [ggplot2](https://ggplot2.tidyverse.org/)
@@ -58,7 +58,7 @@ in a flat, hairline style and returns an ordinary `ggplot` object you can extend
 `ggsave()`.
 
 ```{r libs}
-library(tslr)
+library(tensorsl)
 library(ggplot2)
 ```
 
@@ -260,7 +260,7 @@ sampled house -- with the partial-dependence mean overlaid.
 plot_ice(model, feature = "MedInc", n_ice = 60L)
 ```
 
-Every figure here was produced by a single `tslr` function reading the fitted
+Every figure here was produced by a single `tensorsl` function reading the fitted
 model. Because TSL is separable, all of them -- partial dependence, spatial
 structure, tilt, raw step components, importance, and local attributions -- are
 exact read-outs of the glass box rather than post-hoc approximations. Each returns

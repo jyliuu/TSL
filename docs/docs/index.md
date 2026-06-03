@@ -87,7 +87,7 @@ The model is a three-level hierarchy, and the `src/` module tree mirrors it exac
 | 3 | `TSL` | the boosted model: a `Vec<StagePredictor>` summed | [TSL](code/forest.md) |
 
 The core is the Rust crate `tsl_rust` (library name `tsl`). `tsl-py/` wraps it for Python
-with a scikit-learn API ([Python API](code/python-api.md)), `tsl-r/` (`tslr`) wraps it for R
+with a scikit-learn API ([Python API](code/python-api.md)), `tsl-r/` (`tensorsl`) wraps it for R
 with an S3 `fit`/`predict` interface and a ggplot2 interpretability layer
 ([R API](code/r-api.md)), and `tsl-split-evolution-dashboard/` (`tslviz`) visualizes how a
 fit was built ([Visualization dashboard](guides/visualizing.md)).

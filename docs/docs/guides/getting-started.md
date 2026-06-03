@@ -49,7 +49,7 @@ flat hyperparameters; it expects **float64** arrays. See the
 
 ## Install and fit (R)
 
-The R package **`tslr`** ([R API](../code/r-api.md)) compiles the same Rust core as a static
+The R package **`tensorsl`** ([R API](../code/r-api.md)) compiles the same Rust core as a static
 library at build time, so it too needs only a Rust toolchain (`rustc >= 1.80`, from
 [rustup](https://rustup.rs)) — no system math libraries. It lives in the `tsl-r/`
 subdirectory, so installers need the subdirectory:
@@ -66,7 +66,7 @@ remotes::install_github("jyliuu/TSL", subdir = "tsl-r")
 fit with the same data and `seed` reproduces the Python results:
 
 ```r
-library(tslr)
+library(tensorsl)
 
 set.seed(1)
 n <- 500

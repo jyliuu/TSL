@@ -1,4 +1,4 @@
-# tslr 0.1.0
+# tensorsl 0.1.0
 
 * First release: R bindings for the `tsl` (Tensor Separation Learning) Rust
   crate via extendr.

@@ -189,7 +189,7 @@ fn tsl_model_structure(model: ExternalPtr<TSL>) -> List {
 }
 
 extendr_module! {
-    mod tslr;
+    mod tensorsl;
     fn tsl_fit;
     fn tsl_predict;
     fn tsl_model_structure;

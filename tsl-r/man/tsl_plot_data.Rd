@@ -2,12 +2,12 @@
 % Please edit documentation in R/compute.R
 \name{tsl_plot_data}
 \alias{tsl_plot_data}
-\title{Recover the data behind a tslr plot}
+\title{Recover the data behind a tensorsl plot}
 \usage{
 tsl_plot_data(p)
 }
 \arguments{
-\item{p}{A ggplot returned by a \code{tslr} \verb{plot_*()} function.}
+\item{p}{A ggplot returned by a \code{tensorsl} \verb{plot_*()} function.}
 }
 \value{
 The attached data (a data frame or list), or \code{NULL} if absent.

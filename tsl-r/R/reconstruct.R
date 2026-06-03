@@ -1,4 +1,4 @@
-# Internal reconstruction engine. Every interpretability quantity tslr exposes
+# Internal reconstruction engine. Every interpretability quantity tensorsl exposes
 # is derived in pure R from the fitted components (tsl_components()), exploiting
 # TSL's separability. This file owns the piecewise-interval lookup and the
 # per-stage product math so the formula lives in exactly one place.

@@ -1,10 +1,10 @@
 TARGET_DIR = ./rust/target
 LIBDIR = $(TARGET_DIR)/@LIBDIR@
-STATLIB = $(LIBDIR)/libtslr.a
+STATLIB = $(LIBDIR)/libtensorsl.a
 
 # The Rust static library bundles the TSL core. The core is pure Rust and links
 # no system numerical libraries, so the package needs only the staticlib itself.
-PKG_LIBS = -L$(LIBDIR) -ltslr
+PKG_LIBS = -L$(LIBDIR) -ltensorsl
 
 all: $(SHLIB) rust_clean
 

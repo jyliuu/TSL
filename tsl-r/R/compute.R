@@ -496,12 +496,12 @@ tsl_local <- function(object, x) {
 # Accessor
 # ---------------------------------------------------------------------------
 
-#' Recover the data behind a tslr plot
+#' Recover the data behind a tensorsl plot
 #'
 #' The `plot_*()` functions attach the data frame they were built from as an
 #' attribute; this returns it so the plot can be rebuilt or extended.
 #'
-#' @param p A ggplot returned by a `tslr` `plot_*()` function.
+#' @param p A ggplot returned by a `tensorsl` `plot_*()` function.
 #' @return The attached data (a data frame or list), or `NULL` if absent.
 #' @export
 tsl_plot_data <- function(p) attr(p, "tsl_data", exact = TRUE)
