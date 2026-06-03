@@ -1,4 +1,4 @@
-"""Flat visual theme for the tsl_py.plot diagnostics.
+"""Flat visual theme for the tensorsl.plot diagnostics.
 
 Solid material colours, hairline borders, a faint dot-grid, monospace labels,
 and a ``plot_…()`` tag on each card. The whole look is driven by the ``TOKENS``

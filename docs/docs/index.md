@@ -5,7 +5,7 @@ structure directly off one-dimensional plots — with no post-hoc surrogate. A f
 is a small sum of *stages*, each a separable product of per-feature curves, so every
 feature's effect is recoverable **exactly** from a partial-dependence curve.
 
-Everything below is produced by TSL itself (via the `tsl_py.plot` helpers) — these figures
+Everything below is produced by TSL itself (via the `tensorsl.plot` helpers) — these figures
 *are* the model, not an approximation of it.
 
 ## What TSL shows you
@@ -54,7 +54,7 @@ Everything below is produced by TSL itself (via the `tsl_py.plot` helpers) — t
 
 The figures above come from runnable scripts in
 [`tsl-py/examples/`](https://github.com/jyliuu/TSL/tree/main/tsl-py/examples), which
-reproduce the paper's plots via the `tsl_py.plot` helpers:
+reproduce the paper's plots via the `tensorsl.plot` helpers:
 
 ```bash
 python tsl-py/examples/california.py

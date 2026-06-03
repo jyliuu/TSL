@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from tsl_py import TSL
+from tensorsl import TSL
 
 
 def generate_test_data(n_samples=500, n_features=3, random_state=42):

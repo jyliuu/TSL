@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from tsl_py import TSL, GridTensor
+from tensorsl import TSL, GridTensor
 
 
 def gen_data(n=5000, seed=1):

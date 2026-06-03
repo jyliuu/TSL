@@ -47,8 +47,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import Normalize
 
-from tsl_py import TSL
-from tsl_py.plot._theme import (
+from tensorsl import TSL
+from tensorsl.plot._theme import (
     TOKENS,
     airy,
     axis_label,

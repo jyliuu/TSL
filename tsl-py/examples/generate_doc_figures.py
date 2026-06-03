@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate tsl_py.plot docs figures at a consistent scale.
+"""Generate tensorsl.plot docs figures at a consistent scale.
 
 The theme uses fixed-pt fonts with inch-based margins, so text size on
 screen scales with figure width.  This script forces every figure to
@@ -21,10 +21,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tsl-py" / "python"))
 
-import tsl_py.plot as tplot
-import tsl_py.plot._theme as _theme
-import tsl_py.plot.local as _local
-from tsl_py import TSL
+import tensorsl.plot as tplot
+import tensorsl.plot._theme as _theme
+import tensorsl.plot.local as _local
+from tensorsl import TSL
 
 # ── config ────────────────────────────────────────────────────────────────────
 
@@ -87,12 +87,12 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import matplotlib.colors as mcolors
 
-from tsl_py.plot._theme import (
+from tensorsl.plot._theme import (
     TOKENS, airy, axis_label, card_colorbar, card_inset, figure_title,
     flat_background, flat_backbone_cmap, flat_diverging_cmap, flat_legend,
     grid_card_layout, header, setup_fonts, zero_ref,
 )
-from tsl_py.plot.pd import LINE_CYCLE
+from tensorsl.plot.pd import LINE_CYCLE
 
 # PD-computation helpers are shared with the standalone example scripts.
 from california import _load_xgb, _standard_pd_1d, _tsl_stage1_pd_1d
@@ -425,7 +425,7 @@ _save(r.fig, "california_feature_importance.png")
 # ── 11 & 12. plot_local_interpretation ───────────────────────────────────────
 print("plot_local_interpretation …")
 
-from tsl_py.plot import compute_local_explanation, plot_local_interpretation
+from tensorsl.plot import compute_local_explanation, plot_local_interpretation
 
 # Coastal point — San Francisco Bay area (lat ≈ 37.7, lon ≈ −122.4)
 coastal_idx = int(np.argmin(

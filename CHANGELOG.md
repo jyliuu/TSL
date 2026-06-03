@@ -4,6 +4,17 @@ All notable changes to TSL are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com) and the project adheres to
 [Semantic Versioning](https://semver.org).
 
+## [0.3.0] - 2026-06-03
+
+### Documentation
+
+- Align README and docs with the code, link the docs site (#24)
+
+### Refactor
+
+- **tsl-py:** Rename import package `tsl_py` to `tensorsl` — the import name now
+  matches the `tensorsl` PyPI distribution; `import tsl_py` no longer works
+
 ## [0.2.0] - 2026-06-03
 
 - Add R wrapper `tensorsl` with S3 interface and ggplot2 interpretability layer

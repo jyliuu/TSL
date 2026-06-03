@@ -37,7 +37,7 @@ except ImportError:
 
     _SKLEARN_AVAILABLE = False
 
-from tsl_py._tsl_py import TSL
+from tensorsl._tensorsl import TSL
 
 
 class TSLRegressor(BaseEstimator, RegressorMixin):

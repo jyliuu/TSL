@@ -31,7 +31,7 @@ build-backend = "maturin"
 
 [tool.maturin]
 python-source = "python"
-module-name = "tsl_py._tsl_py"
+module-name = "tensorsl._tensorsl"
 features = ["use-rayon", "pyo3/extension-module"]
 
 [project.optional-dependencies]

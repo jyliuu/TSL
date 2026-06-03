@@ -29,13 +29,13 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 ### Install (Python)
 
-The Python package is published on PyPI as **`tensorsl`** and imported as `tsl_py`:
+The Python package is published on PyPI as **`tensorsl`** and imported under the same name:
 
 ```sh
 pip install tensorsl
 
 # optional extras
-pip install "tensorsl[plots]"     # matplotlib for tsl_py.plot
+pip install "tensorsl[plots]"     # matplotlib for tensorsl.plot
 pip install "tensorsl[examples]"  # EBM, XGBoost, SepALS for comparisons
 ```
 
@@ -99,7 +99,7 @@ devtools::install_local("tsl-r")
 ```python
 import numpy as np
 from sklearn.model_selection import train_test_split
-from tsl_py.sklearn import TSLRegressor
+from tensorsl.sklearn import TSLRegressor
 
 # Toy problem with a separable structure
 rng = np.random.default_rng(0)
@@ -134,7 +134,7 @@ cat(sprintf("Train R^2: %.4f\n", 1 - var(y - preds) / var(y)))
 The figures below are produced by the scripts in
 [`tsl-py/examples/`](tsl-py/examples/), fitting on the OpenML California housing dataset
 (target: median home value, USD). The snippets show the core
-[`tsl_py.plot`](tsl-py/python/tsl_py/plot/) calls; the example scripts add paper styling
+[`tensorsl.plot`](tsl-py/python/tensorsl/plot/) calls; the example scripts add paper styling
 (a cartopy basemap for the spatial plots, and pretrained EBM/XGBoost models for the
 comparison). Every plotting helper returns the figure **and** the underlying arrays, so
 you can save it directly or rebuild a custom visualization.
@@ -143,7 +143,7 @@ First, fit a model:
 
 ```python
 from sklearn.datasets import fetch_california_housing
-from tsl_py import TSL
+from tensorsl import TSL
 
 data = fetch_california_housing()
 X = data.data
@@ -157,7 +157,7 @@ model, _ = TSL.fit(X, y, epochs=5, n_trees=16, n_iter=30, split_try=16, seed=0)
 ### Feature importance
 
 ```python
-from tsl_py.plot import plot_feature_importance
+from tensorsl.plot import plot_feature_importance
 
 result = plot_feature_importance(model, X, feature_names=feature_names)
 result.fig.savefig("feature_importance.png")
@@ -177,7 +177,7 @@ signed direction of each feature.
 
 ```python
 import numpy as np
-from tsl_py.plot import compute_local_explanation, plot_local_interpretation
+from tensorsl.plot import compute_local_explanation, plot_local_interpretation
 
 lat, lon = feature_names.index("Latitude"), feature_names.index("Longitude")
 # the blocks nearest two reference locations: the SF Bay (coastal) and Palm Springs (desert)
@@ -214,7 +214,7 @@ that product — the stage's **backbone** — acts as a spatial gate: where the 
 near zero, the stage is silent.
 
 ```python
-from tsl_py.plot import plot_2d_backbone
+from tensorsl.plot import plot_2d_backbone
 
 result = plot_2d_backbone(
     model, X, "Longitude", "Latitude",
@@ -241,7 +241,7 @@ averages over the other and smooths localized peaks away. You can pull TSL's own
 partial dependence with:
 
 ```python
-from tsl_py.plot import plot_first_order_pd
+from tensorsl.plot import plot_first_order_pd
 
 result = plot_first_order_pd(model, X, features=["Latitude", "Longitude"],
                              feature_names=feature_names)
@@ -319,7 +319,7 @@ and the [`tsl-r/` README](tsl-r/README.md).
 Full reference documentation is hosted at **[jyliuu.github.io/TSL](https://jyliuu.github.io/TSL/)**:
 
 - **[Getting started](https://jyliuu.github.io/TSL/guides/getting-started/)** — install, fit, and inspect a model end to end.
-- **[Python API](https://jyliuu.github.io/TSL/code/python-api/)** & **[Plotting API](https://jyliuu.github.io/TSL/code/plotting/)** — the `TSLRegressor` and `tsl_py.plot` reference.
+- **[Python API](https://jyliuu.github.io/TSL/code/python-api/)** & **[Plotting API](https://jyliuu.github.io/TSL/code/plotting/)** — the `TSLRegressor` and `tensorsl.plot` reference.
 - **[R API](https://jyliuu.github.io/TSL/code/r-api/)** — the `tensorsl` S3 interface and ggplot2 layer.
 - **[Hyperparameters](https://jyliuu.github.io/TSL/guides/hyperparameters/)** — every fit parameter, explained.
 - **[Under the hood](https://jyliuu.github.io/TSL/math/)** — the model, fitting, bagging, and partial-dependence math.

@@ -3,14 +3,14 @@
 `tsl-py/` wraps the Rust core for Python via PyO3/maturin. The package exposes:
 
 ```python
-from tsl_py import TSL, GridTensor, StagePredictor, FitResult, TSLRegressor
+from tensorsl import TSL, GridTensor, StagePredictor, FitResult, TSLRegressor
 ```
 
 - **`TSLRegressor`** — the scikit-learn estimator and **main entry point** for most users.
 - **`TSL`** — the raw PyO3 binding to the boosted model, with the interpretation methods.
 - **`GridTensor`**, **`StagePredictor`**, **`FitResult`** — the lower-level pieces.
 
-Diagnostics/plotting live in `tsl_py.plot`, documented on the [Plotting reference](plotting.md)
+Diagnostics/plotting live in `tensorsl.plot`, documented on the [Plotting reference](plotting.md)
 page.
 
 !!! note "Array contract"

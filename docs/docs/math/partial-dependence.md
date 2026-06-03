@@ -180,5 +180,5 @@ $I_j^b, I_j^d$ together with the weights $\omega_\ell$, and
 `compute_combined_feature_importance` returns $I_j$ — all rendered by
 [`plot_feature_importance`](../code/plotting.md#fn-plot-feature-importance).
 
-All of these are plotted by the `tsl_py.plot` helpers — see the
+All of these are plotted by the `tensorsl.plot` helpers — see the
 [Plotting reference](../code/plotting.md).

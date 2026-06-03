@@ -51,8 +51,8 @@ There is a single source-of-truth version: `[workspace.package].version` in the 
 dynamic version (so `pyproject.toml` carries no version of its own), and the R connector
 package (`tslr`, in `tsl-r/`) is kept in step by `scripts/sync-version.py`. They cannot drift.
 
-The Python package is distributed on PyPI as **`tensorsl`** but imported as `tsl_py` — the
-install name and the import name differ on purpose.
+The Python package is distributed on PyPI as **`tensorsl`** and imported under the same
+name: `import tensorsl`.
 
 To cut a release, from a clean `main`:
 

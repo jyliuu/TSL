@@ -5,8 +5,8 @@ import tempfile
 
 import numpy as np
 import pytest
-from tsl_py import TSL
-from tsl_py.sklearn import TSLRegressor
+from tensorsl import TSL
+from tensorsl.sklearn import TSLRegressor
 
 
 def generate_test_data(n_samples=100, n_features=2, random_state=4):

@@ -1,4 +1,4 @@
-"""Smoke tests for tsl_py.plot — verify each public function runs end-to-end
+"""Smoke tests for tensorsl.plot — verify each public function runs end-to-end
 on a small fitted model and returns sensible array shapes.
 """
 
@@ -9,8 +9,8 @@ matplotlib = pytest.importorskip("matplotlib")
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from tsl_py import TSL  # noqa: E402
-from tsl_py.plot import (  # noqa: E402
+from tensorsl import TSL  # noqa: E402
+from tensorsl.plot import (  # noqa: E402
     compute_local_explanation,
     pd_difference_plot,
     plot_2d_backbone,
@@ -125,7 +125,7 @@ def test_pd_difference_plot_component(fitted_2stage):
 
     # sign(m_+ - m_-) == sign(d_j) where d_j is the intrinsic stage tilt.
     # Use the helper that powers the backbone overlay.
-    from tsl_py.plot._common import _stage_backbone_tilt
+    from tensorsl.plot._common import _stage_backbone_tilt
 
     n_stages = res.f_plus.shape[2]
     for j, feat_idx in enumerate(res.feature_indices):

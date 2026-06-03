@@ -1,7 +1,7 @@
 """Test marginal expectation computation."""
 
 import numpy as np
-from tsl_py import TSL
+from tensorsl import TSL
 
 
 def test_marginal_expectation_equals_averaged_predictions():

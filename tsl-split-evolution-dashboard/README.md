@@ -68,7 +68,7 @@ In Python, pass `visualdb_path` to the fit; the dashboard reads from the same
 file:
 
 ```python
-from tsl_py.sklearn import TSLRegressor
+from tensorsl.sklearn import TSLRegressor
 
 model = TSLRegressor(
     epochs=5, n_trees=20, n_iter=120,

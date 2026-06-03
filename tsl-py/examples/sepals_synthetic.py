@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from synthetic import make_dataset
-from tsl_py.plot._theme import (
+from tensorsl.plot._theme import (
     TOKENS,
     airy,
     axis_label,

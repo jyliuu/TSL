@@ -65,9 +65,9 @@ don't change anything a doc page asserts.
 | `src/logging.rs`, `src/logging/**`, `grid_tensor/logging_helpers.rs` | `docs/docs/code/logging.md` |
 | any `params.rs` builder / `src/forest/params.rs` (hyperparameters) | `docs/docs/guides/hyperparameters.md` **and** the parameter tables in `code/python-api.md` |
 | `tsl-py/src/lib.rs` (PyO3 bindings: `TSL`, `GridTensor`, `StagePredictor`, `FitResult`) | `docs/docs/code/python-api.md` |
-| `tsl-py/python/tsl_py/sklearn.py` (`TSLRegressor`) | `docs/docs/code/python-api.md` |
-| `tsl-py/python/tsl_py/__init__.py` (public exports) | `docs/docs/code/python-api.md` (the import line + symbol list) |
-| `tsl-py/python/tsl_py/plot/**` | `docs/docs/code/plotting.md` |
+| `tsl-py/python/tensorsl/sklearn.py` (`TSLRegressor`) | `docs/docs/code/python-api.md` |
+| `tsl-py/python/tensorsl/__init__.py` (public exports) | `docs/docs/code/python-api.md` (the import line + symbol list) |
+| `tsl-py/python/tensorsl/plot/**` | `docs/docs/code/plotting.md` |
 | partial dependence (`compute_partial_dependence_function`) | `code/python-api.md`, `math/partial-dependence.md` |
 | `tsl-py/examples/**` | `docs/docs/guides/getting-started.md`, `docs/docs/index.md` |
 | `tsl-split-evolution-dashboard/**` (`tslviz`) | `docs/docs/guides/visualizing.md`, `code/logging.md` |

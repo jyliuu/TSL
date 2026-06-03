@@ -1,10 +1,10 @@
-# Plotting (`tsl_py.plot`)
+# Plotting (`tensorsl.plot`)
 
-`tsl_py.plot` holds the diagnostic plots. It is **lazy-imported** (it needs `matplotlib`,
-installed via the `[plots]` extra) so importing `tsl_py` stays light.
+`tensorsl.plot` holds the diagnostic plots. It is **lazy-imported** (it needs `matplotlib`,
+installed via the `[plots]` extra) so importing `tensorsl` stays light.
 
 ```python
-import tsl_py.plot as tplot
+import tensorsl.plot as tplot
 ```
 
 !!! tip "Figure **and** data"
