@@ -37,10 +37,10 @@ A ggplot object. The data frame from \code{\link[=tsl_pd]{tsl_pd()}} is attached
 \code{"tsl_data"} attribute (see \code{\link[=tsl_plot_data]{tsl_plot_data()}}).
 }
 \description{
-Same faceted grid as \code{\link[=plot_first_order_pd]{plot_first_order_pd()}} -- positive branch (orange),
-negative branch (blue), net effect (solid line) -- emphasising the signed
-difference between the branches, with the per-feature backbone optionally
-overlaid.
+Same faceted grid as \code{\link[=plot_first_order_pd]{plot_first_order_pd()}}: the positive branch as the curve
+\verb{PD+} (orange) and the negative branch as \verb{PD-} (blue), with the signed gap
+between them shaded -- that gap is the stage's net contribution \verb{PD+ - PD-}.
+The per-feature backbone is optionally overlaid as a dotted line.
 }
 \examples{
 set.seed(1)

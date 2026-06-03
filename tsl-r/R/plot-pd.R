@@ -18,9 +18,11 @@
 #' Plot first-order partial dependence
 #'
 #' Draws the per-stage, per-feature first-order partial dependence as a faceted
-#' grid: the positive branch `pos` (orange area), the negative branch `neg`
-#' (blue area), and their net effect `net` (solid line). Because TSL is
-#' separable this decomposition is exact, not a sampled approximation.
+#' grid: the positive branch as the curve `PD+` (orange) and the negative branch
+#' as the curve `PD-` (blue), both on the positive scale, with the gap between
+#' them shaded -- orange where `PD+ >= PD-`, blue elsewhere. That signed gap is
+#' the net effect `PD+ - PD-`. Because TSL is separable this decomposition is
+#' exact, not a sampled approximation.
 #'
 #' @param object A fitted model of class `"tsl"` from [tsl()].
 #' @param X Background design matrix to marginalise over. Defaults to the
@@ -53,13 +55,13 @@ plot_first_order_pd <- function(object, X = NULL, features = NULL,
   p <- ggplot(df) +
     facet_grid(stage ~ feature, scales = "free") +
     .tsl_zero_ref() +
-    geom_area(aes(x, pos), fill = .tsl_tokens$pos, alpha = 0.5) +
-    geom_area(aes(x, neg), fill = .tsl_tokens$neg, alpha = 0.5) +
-    geom_line(aes(x, net), colour = .tsl_tokens$ink, linewidth = 1) +
+    .tsl_signed_diff_fill() +
+    geom_line(aes(x, pos), colour = .tsl_tokens$pos, linewidth = 1) +
+    geom_line(aes(x, -neg), colour = .tsl_tokens$neg, linewidth = 1) +
     labs(
       title = "First-order partial dependence",
-      subtitle = paste0("positive branch (orange) and negative branch (blue); ",
-                        "net = solid line"),
+      subtitle = paste0("PD+ (orange) and PD- (blue) branches; the shaded gap ",
+                        "between the curves is the net effect"),
       x = NULL, y = "PD"
     ) +
     theme_flat()
@@ -79,10 +81,10 @@ plot_first_order_pd <- function(object, X = NULL, features = NULL,
 
 #' Plot the partial-dependence difference
 #'
-#' Same faceted grid as [plot_first_order_pd()] -- positive branch (orange),
-#' negative branch (blue), net effect (solid line) -- emphasising the signed
-#' difference between the branches, with the per-feature backbone optionally
-#' overlaid.
+#' Same faceted grid as [plot_first_order_pd()]: the positive branch as the curve
+#' `PD+` (orange) and the negative branch as `PD-` (blue), with the signed gap
+#' between them shaded -- that gap is the stage's net contribution `PD+ - PD-`.
+#' The per-feature backbone is optionally overlaid as a dotted line.
 #'
 #' @inheritParams plot_first_order_pd
 #' @param show_backbone_overlay If `TRUE` (default), overlay the
@@ -107,13 +109,13 @@ pd_difference_plot <- function(object, X = NULL, features = NULL,
   p <- ggplot(df) +
     facet_grid(stage ~ feature, scales = "free") +
     .tsl_zero_ref() +
-    geom_area(aes(x, pos), fill = .tsl_tokens$pos, alpha = 0.5) +
-    geom_area(aes(x, neg), fill = .tsl_tokens$neg, alpha = 0.5) +
-    geom_line(aes(x, net), colour = .tsl_tokens$ink, linewidth = 1) +
+    .tsl_signed_diff_fill() +
+    geom_line(aes(x, pos), colour = .tsl_tokens$pos, linewidth = 1) +
+    geom_line(aes(x, -neg), colour = .tsl_tokens$neg, linewidth = 1) +
     labs(
       title = "Partial-dependence difference",
-      subtitle = paste0("positive branch (orange) and negative branch (blue); ",
-                        "net = solid line"),
+      subtitle = paste0("PD+ (orange) and PD- (blue); the shaded gap between ",
+                        "the curves is the signed contribution"),
       x = NULL, y = "PD"
     ) +
     theme_flat()

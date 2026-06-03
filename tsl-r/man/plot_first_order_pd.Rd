@@ -38,9 +38,11 @@ A ggplot object. The data frame from \code{\link[=tsl_pd]{tsl_pd()}} is attached
 }
 \description{
 Draws the per-stage, per-feature first-order partial dependence as a faceted
-grid: the positive branch \code{pos} (orange area), the negative branch \code{neg}
-(blue area), and their net effect \code{net} (solid line). Because TSL is
-separable this decomposition is exact, not a sampled approximation.
+grid: the positive branch as the curve \verb{PD+} (orange) and the negative branch
+as the curve \verb{PD-} (blue), both on the positive scale, with the gap between
+them shaded -- orange where \verb{PD+ >= PD-}, blue elsewhere. That signed gap is
+the net effect \verb{PD+ - PD-}. Because TSL is separable this decomposition is
+exact, not a sampled approximation.
 }
 \examples{
 set.seed(1)
