@@ -59,8 +59,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from tsl_py import TSL
-from tsl_py.plot import (
+from tensorsl import TSL
+from tensorsl.plot import (
     LocalExplanation,
     compute_local_explanation,
     pd_difference_plot,
@@ -71,9 +71,9 @@ from tsl_py.plot import (
     plot_tilt_1d,
     plot_tilt_diagnostics,
 )
-from tsl_py.plot._common import PALETTE
-from tsl_py.plot.pd import LINE_CYCLE
-from tsl_py.plot._theme import (
+from tensorsl.plot._common import PALETTE
+from tensorsl.plot.pd import LINE_CYCLE
+from tensorsl.plot._theme import (
     TOKENS,
     airy,
     axis_label,
@@ -910,7 +910,7 @@ def main(data_root: Path, model_dir: Optional[Path], out: Path, variant: str, re
                 except ImportError:
                     print(
                         "  sepals not installed; skipping Sepals PD line "
-                        "(install with `pip install tsl-py[examples]` or "
+                        "(install with `pip install tensorsl[examples]` or "
                         "`pip install -e /path/to/sepals`)"
                     )
                 else:

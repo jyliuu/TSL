@@ -1,4 +1,4 @@
-"""Shared helpers for tsl_py.plot. Internal — not part of the public API."""
+"""Shared helpers for tensorsl.plot. Internal — not part of the public API."""
 
 from __future__ import annotations
 
@@ -95,7 +95,7 @@ def _require_matplotlib():
         import matplotlib.pyplot as plt
     except ImportError as e:
         raise ImportError(
-            "matplotlib is required for tsl_py.plot. Install with: pip install tsl-py[plots]"
+            "matplotlib is required for tensorsl.plot. Install with: pip install tensorsl[plots]"
         ) from e
     return plt
 

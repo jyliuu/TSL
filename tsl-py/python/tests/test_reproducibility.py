@@ -1,5 +1,5 @@
 import numpy as np
-from tsl_py import TSL
+from tensorsl import TSL
 import pytest
 
 

@@ -5,7 +5,7 @@ both the figure/axes and the underlying numerical arrays, so callers can
 either save the figure as-is or rebuild a custom visualization (e.g. cartopy
 overlays) from the returned data. Nothing is saved automatically.
 
-Requires matplotlib. Install with `pip install tsl-py[plots]`.
+Requires matplotlib. Install with `pip install tensorsl[plots]`.
 """
 
 from .backbone import Backbone2DResult, plot_2d_backbone

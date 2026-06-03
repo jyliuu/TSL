@@ -5,7 +5,7 @@ Tensor Separation Learning (TSL) — a glass-box regression model. A fitted mode
 univariate functions. This keeps the model inspectable while still capturing interactions
 between features.
 
-`tensorsl` is the Python package (imported as `tsl_py`): a `fit`/`predict` estimator that
+`tensorsl` is the Python package: a `fit`/`predict` estimator that
 slots into typical ML pipelines, backed by a Rust core.
 
 ## Install
@@ -22,7 +22,7 @@ libraries required).
 
 ```python
 import numpy as np
-from tsl_py import TSLRegressor
+from tensorsl import TSLRegressor
 
 rng = np.random.default_rng(0)
 X = rng.normal(size=(500, 5))

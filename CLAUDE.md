@@ -126,12 +126,12 @@ Parameters use builder types throughout (`params.rs` in each module; the top-lev
 
 ### Python layer (`tsl-py/src/lib.rs`)
 
-PyO3 module `tsl_py._tsl_py` exposes `TSL`, `GridTensor`, `StagePredictor`, `FitResult`.
+PyO3 module `tensorsl._tensorsl` exposes `TSL`, `GridTensor`, `StagePredictor`, `FitResult`.
 `TSL.fit(...)` is a classmethod taking flat hyperparameters (mapped onto the Rust
-builders). `TSLRegressor` (`python/tsl_py/sklearn.py`) is the sklearn-compatible wrapper —
+builders). `TSLRegressor` (`python/tensorsl/sklearn.py`) is the sklearn-compatible wrapper —
 the main user entry point. Partial dependence is computed in Rust
 (`compute_partial_dependence_function`, marginalizing over the empirical joint, not
-assuming feature independence). `tsl_py.plot` (lazy-imported, needs matplotlib) holds the
+assuming feature independence). `tensorsl.plot` (lazy-imported, needs matplotlib) holds the
 diagnostics. `TSL.load(...)` reads the legacy MPF `.bin` format.
 
 ### evo-logging → dashboard

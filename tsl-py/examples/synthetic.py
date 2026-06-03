@@ -42,10 +42,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from tsl_py import TSL
-from tsl_py.plot import pd_difference_plot, plot_2d_pd, plot_ice, plot_tilt_diagnostics
-from tsl_py.plot.pd import LINE_CYCLE
-from tsl_py.plot._theme import (
+from tensorsl import TSL
+from tensorsl.plot import pd_difference_plot, plot_2d_pd, plot_ice, plot_tilt_diagnostics
+from tensorsl.plot.pd import LINE_CYCLE
+from tensorsl.plot._theme import (
     TOKENS,
     airy,
     axis_label,

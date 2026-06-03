@@ -1168,7 +1168,7 @@ impl FitResultPy {
 }
 
 #[pymodule]
-fn _tsl_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _tensorsl(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<GridTensorPy>()?;
     m.add_class::<FitResultPy>()?;
     m.add_class::<StagePredictorPy>()?;

@@ -120,4 +120,4 @@ Only do this while nothing has been accepted by PyPI.
   (optional git deps live in `tsl-py/examples/requirements.txt`).
 - The package `readme` must point at `tsl-py/README.md` (sibling to `pyproject.toml`),
   not `../README.md` — the sdist flattens to its root and a parent path dangles.
-- The Python distribution is **`tensorsl`** on PyPI but imported as **`tsl_py`**.
+- The Python distribution is **`tensorsl`** on PyPI and imported under the same name.

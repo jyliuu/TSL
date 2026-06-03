@@ -21,7 +21,7 @@ The package has three layers:
   fitted components and return **tidy data frames**.
 - **Plot layer** — `plot_*()` functions that render those quantities as ggplots in a flat
   theme, plus the one-verb [`autoplot()`](#meth-autoplot-tsl) entry point. They mirror the
-  Python `tsl_py.plot` helpers; the [Plotting reference](plotting.md) shows the rendered
+  Python `tensorsl.plot` helpers; the [Plotting reference](plotting.md) shows the rendered
   figures.
 
 !!! note "Input contract"

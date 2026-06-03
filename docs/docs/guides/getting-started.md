@@ -27,13 +27,13 @@ cargo test -p tsl_rust --release test_name        # a single test by name
 
 ### Installation
 
-The Python package is published on PyPI as **`tensorsl`** and imported as `tsl_py`:
+The Python package is published on PyPI as **`tensorsl`** and imported under the same name:
 
 ```sh
 pip install tensorsl
 
 # optional extras
-pip install "tensorsl[plots]"     # matplotlib for tsl_py.plot
+pip install "tensorsl[plots]"     # matplotlib for tensorsl.plot
 pip install "tensorsl[examples]"  # EBM, XGBoost, SepALS for comparisons
 ```
 
@@ -47,7 +47,7 @@ required. The core is pure Rust — no system math libraries are required.
 ```python
 import numpy as np
 from sklearn.model_selection import train_test_split
-from tsl_py.sklearn import TSLRegressor
+from tensorsl.sklearn import TSLRegressor
 
 rng = np.random.default_rng(0)
 X = rng.uniform(0.0, 1.0, size=(1000, 2))

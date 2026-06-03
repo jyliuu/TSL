@@ -1,7 +1,7 @@
 # TSL Python — examples
 
 End-to-end scripts that reproduce **every plot from the TSL paper**, using
-the generic plotting helpers in `tsl_py.plot` plus a small amount of
+the generic plotting helpers in `tensorsl.plot` plus a small amount of
 per-dataset custom code (local explanations, paper-style split-panel
 exports, EBM/XGBoost comparison plots).
 

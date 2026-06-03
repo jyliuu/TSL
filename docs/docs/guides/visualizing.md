@@ -15,7 +15,7 @@ Set `visualdb` to a SQLite file when fitting (requires the `evo-logging` feature
 default):
 
 ```python
-from tsl_py.sklearn import TSLRegressor
+from tensorsl.sklearn import TSLRegressor
 
 model = TSLRegressor(epochs=5, n_trees=16, n_iter=30, seed=0, visualdb="run.sqlite")
 model.fit(X, y)
