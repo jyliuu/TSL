@@ -216,7 +216,7 @@ plot_local_interpretation <- function(object, points, titles = NULL,
     geom_label(aes(x = total, y = n + 0.7,
                    label = vapply(total, .tsl_local_value, character(1))),
                fill = "white", colour = .tsl_tokens$ink,
-               label.size = 0.4, family = "mono", fontface = "bold",
+               linewidth = 0.4, family = "mono", fontface = "bold",
                size = 3.0) +
     scale_y_continuous(breaks = y, labels = labels,
                        limits = c(0.3, n + 1.1)) +

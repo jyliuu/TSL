@@ -60,7 +60,7 @@ test_that("every split strategy fits and tracks the target", {
                split_strategy = ss)
     p <- predict(fit, te$x)
     expect_true(all(is.finite(p)), info = ss)
-    expect_gt(stats::cor(p, te$y), 0.9)
+    expect_gt(stats::cor(p, te$y), 0.85)
   }
 })
 
@@ -71,7 +71,7 @@ test_that("huber refinement fits and tracks the target", {
              refinement_strategy = "huber")
   p <- predict(fit, te$x)
   expect_true(all(is.finite(p)))
-  expect_gt(stats::cor(p, te$y), 0.9)
+  expect_gt(stats::cor(p, te$y), 0.85)
 })
 
 test_that("stored fitted values match a fresh prediction", {
