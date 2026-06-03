@@ -142,9 +142,16 @@ def _plot_ice(out: Path, model_name: str, x_grid: np.ndarray, ice: np.ndarray, p
     print(f"  wrote {path}")
 
 
-def _plot_combined_pd1_x1(out: Path, x_grid: np.ndarray, pd_tsl, pd_ebm, pd_xgb) -> None:
+def build_combined_pd1_x1(x_grid: np.ndarray, pd_tsl, pd_ebm, pd_xgb, figsize=None):
+    """Single-card overlay of the 1D PD for x1 across TSL, EBM, and XGBoost.
+
+    Returns the figure so callers can save it at whatever scale/format they
+    need (the example saves a PDF; the docs-figure script saves a wide PNG).
+    """
     disp, mono = setup_fonts()
-    fig = plt.figure(figsize=grid_figsize(1, 1, cell_w_in=5.4, cell_h_in=4.4))
+    if figsize is None:
+        figsize = grid_figsize(1, 1, cell_w_in=5.4, cell_h_in=4.4)
+    fig = plt.figure(figsize=figsize)
     fw, fh = fig.get_size_inches()
     cards = grid_card_layout(fw, fh, 1, 1)
     bgax = flat_background(fig, cards)
@@ -159,6 +166,11 @@ def _plot_combined_pd1_x1(out: Path, x_grid: np.ndarray, pd_tsl, pd_ebm, pd_xgb)
     axis_label(ax, mono, xlabel=r"$x_1$", ylabel=r"$\mathrm{PD}_1(x_1)$")
     flat_legend(ax, mono, loc="upper right")
     header(fig, bgax, cards, (0, 0), r"$x_1$", "Model overlay", "", disp, mono)
+    return fig
+
+
+def _plot_combined_pd1_x1(out: Path, x_grid: np.ndarray, pd_tsl, pd_ebm, pd_xgb) -> None:
+    fig = build_combined_pd1_x1(x_grid, pd_tsl, pd_ebm, pd_xgb)
     path = out / "pd_x1_all_models.pdf"
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)

@@ -1,27 +1,46 @@
 # Getting started
 
-## Install (Python)
+## Rust toolchain
 
-TSL's core is a Rust crate; `tsl-py` builds it as a native extension via maturin during
-`pip install`, so **a working Rust toolchain is required first** (Python ≥ 3.10).
+TSL's Python and R packages compile the Rust core at install time, so **a working Rust
+toolchain is required first**. Install it with [rustup](https://rustup.rs) if Rust is not
+already on your machine:
 
 ```sh
-# 1. install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# 2. install TSL from GitHub (builds the Rust extension at install time)
-pip install "git+https://github.com/jyliuu/TSL.git#subdirectory=tsl-py"
-
-# optional extras:
-pip install "tsl-py[plots] @ git+https://github.com/jyliuu/TSL.git#subdirectory=tsl-py"     # matplotlib + tsl_py.plot
-pip install "tsl-py[examples] @ git+https://github.com/jyliuu/TSL.git#subdirectory=tsl-py"  # EBM, XGBoost, SepALS for comparisons
 ```
 
-The build compiles the Rust extension at install time, so it needs a Rust toolchain
-(install via [rustup](https://rustup.rs)). The core is pure Rust — no system math
-libraries are required.
+### Development
 
-## First fit
+This is a Cargo workspace (root crate `tsl_rust` + member `tsl-py`).
+
+**Rust core** — always pass `--release` (the tests run numerical workloads; debug is far too
+slow):
+
+```sh
+cargo build --release
+cargo test -p tsl_rust --release                 # full core test suite
+cargo test -p tsl_rust --release test_name        # a single test by name
+```
+
+## Python
+
+### Installation
+
+The Python package is published on PyPI as **`tensorsl`** and imported as `tsl_py`:
+
+```sh
+pip install tensorsl
+
+# optional extras
+pip install "tensorsl[plots]"     # matplotlib for tsl_py.plot
+pip install "tensorsl[examples]"  # EBM, XGBoost, SepALS for comparisons
+```
+
+Source builds compile the Rust extension at install time, so the Rust toolchain above is
+required. The core is pure Rust — no system math libraries are required.
+
+### First fit
 
 `TSLRegressor` is a drop-in scikit-learn regressor:
 
@@ -47,12 +66,31 @@ flat hyperparameters; it expects **float64** arrays. See the
 [Python API](../code/python-api.md) and the
 [Hyperparameters](hyperparameters.md) reference.
 
-## Install and fit (R)
+### Development
 
-The R package **`tensorsl`** ([R API](../code/r-api.md)) compiles the same Rust core as a static
-library at build time, so it too needs only a Rust toolchain (`rustc >= 1.80`, from
-[rustup](https://rustup.rs)) — no system math libraries. It lives in the `tsl-r/`
-subdirectory, so installers need the subdirectory:
+**Python wrapper** — `maturin develop` builds the Rust extension and installs it into a
+Python virtualenv. Point it at the project's venv by setting `VIRTUAL_ENV` (and invoking
+that venv's `maturin`):
+
+```sh
+# from tsl-py/
+VIRTUAL_ENV=/path/to/.venv /path/to/.venv/bin/maturin develop
+/path/to/.venv/bin/python -m pytest python/tests/
+```
+
+`tsl-py` builds as a Python **extension module** — a `cdylib` compiled with the
+`extension-module` feature — so the library leaves CPython's symbols to be resolved by
+whatever interpreter imports it. A standalone `cargo test` binary has no interpreter to
+resolve them against and fails to link (notably on Linux), so this crate is exercised
+through `pytest` (which loads the module into a real interpreter), not `cargo test`. The
+Rust core (`tsl_rust`) keeps its own full `cargo test` suite.
+
+## R
+
+### Installation
+
+The R package **`tensorsl`** lives in the `tsl-r/` subdirectory of this repository. Install
+it from the repository root with either `pak` or `remotes`:
 
 ```r
 # pak (owner/repo/subdir):
@@ -62,8 +100,12 @@ pak::pak("jyliuu/TSL/tsl-r")
 remotes::install_github("jyliuu/TSL", subdir = "tsl-r")
 ```
 
-`tsl()` fits a boosted model with the same hyperparameters as the Python `TSLRegressor`, so a
-fit with the same data and `seed` reproduces the Python results:
+The R build compiles the same Rust core at install time, so it uses the Rust toolchain from
+above and does not require system math libraries.
+
+### First fit
+
+`tsl()` is the R entry point for fitting a boosted glass-box model:
 
 ```r
 library(tensorsl)
@@ -77,34 +119,23 @@ fit <- tsl(x, y, epochs = 20L, seed = 42L, verbosity = 0L)
 preds <- predict(fit, x)
 ```
 
-`tsl_components()` extracts the fitted glass-box structure, and the `plot_*()` /
-`autoplot()` helpers render the interpretability diagnostics in ggplot2. See the
-[R API](../code/r-api.md) reference.
+`tsl()` accepts the same hyperparameters as the Python `TSLRegressor`; see the
+[R API](../code/r-api.md) reference for the full interface.
 
-## Building from a clone (development)
+### Development
 
-This is a Cargo workspace (root crate `tsl_rust` + member `tsl-py`).
+For local iteration against the working-tree core, add an untracked
+`tsl-r/src/rust/.cargo/config.toml` with:
 
-**Rust core** — always pass `--release` (the tests run numerical workloads; debug
-is far too slow):
-
-```sh
-cargo build --release
-cargo test -p tsl_rust --release                 # full core test suite
-cargo test -p tsl_rust --release test_name        # a single test by name
+```toml
+paths = ["../../.."]
 ```
 
-**Python wrapper** — maturin cannot auto-detect a Python 3.14, so build against a 3.13 venv
-with `VIRTUAL_ENV` set:
+Then install from the `tsl-r/` directory:
 
-```sh
-# from tsl-py/
-VIRTUAL_ENV=/path/to/.venv /path/to/.venv/bin/maturin develop
-/path/to/.venv/bin/python -m pytest python/tests/
+```r
+devtools::install_local("tsl-r")
 ```
-
-`tsl-py` is an `extension-module` cdylib, so its Rust test harness can't link libpython on
-Linux — exercise that crate through the Python tests, not `cargo test`.
 
 ## Next steps
 
