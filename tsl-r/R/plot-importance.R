@@ -50,27 +50,36 @@ plot_feature_importance <- function(object, X = NULL, gamma = 1) {
   ps$feature <- factor(as.character(ps$feature), levels = feat_levels)
   ps$bscaled <- ave(ps$backbone, ps$stage, FUN = .tsl_scale01)
   ps$tscaled <- ave(ps$tilt, ps$stage, FUN = .tsl_scale01)
+  ps$bb_txt <- .tsl_ramp_text(ps$bscaled, .tsl_ramp_backbone)
+  ps$tilt_txt <- .tsl_ramp_text(ps$tscaled, .tsl_ramp_tilt)
 
   bb_heat <- ggplot(ps) +
     geom_tile(aes(stage, feature, fill = bscaled),
               colour = "white", linewidth = 0.5) +
+    geom_text(aes(stage, feature, label = sprintf("%.2f", bscaled)),
+              colour = ps$bb_txt, family = "mono", size = 2.6) +
     scale_fill_tsl_backbone(name = "rel.") +
+    scale_x_discrete(labels = function(l) sub("^Stage ", "S", l)) +
     labs(title = "Backbone importance",
-         subtitle = "var of log-backbone (scaled)", x = "stage", y = NULL) +
+         subtitle = "var of log-backbone (scaled)", x = NULL, y = NULL) +
     theme_flat() +
     theme(panel.grid = element_blank())
 
   tilt_heat <- ggplot(ps) +
     geom_tile(aes(stage, feature, fill = tscaled),
               colour = "white", linewidth = 0.5) +
+    geom_text(aes(stage, feature, label = sprintf("%.2f", tscaled)),
+              colour = ps$tilt_txt, family = "mono", size = 2.6) +
     scale_fill_tsl_tilt(name = "rel.") +
+    scale_x_discrete(labels = function(l) sub("^Stage ", "S", l)) +
     labs(title = "Tilt importance",
-         subtitle = "var of tilt (scaled)", x = "stage", y = NULL) +
+         subtitle = "var of tilt (scaled)", x = NULL, y = NULL) +
     theme_flat() +
     theme(panel.grid = element_blank())
 
   stage_w <- ggplot(imp$stage_weights) +
     geom_col(aes(stage, weight), fill = .tsl_tokens$greys[3], width = 0.7) +
+    scale_x_discrete(labels = function(l) sub("^Stage ", "S", l)) +
     labs(title = "Stage weights", subtitle = "share of prediction energy",
          x = NULL, y = NULL) +
     theme_flat()
