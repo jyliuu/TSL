@@ -1,6 +1,7 @@
 # TSL — Tensor Separation Learning <img src="tsl-split-evolution-dashboard/frontend/favicon.svg" align="right" width="200" alt="TSL logo" />
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Docs](https://img.shields.io/badge/docs-jyliuu.github.io%2FTSL-blue.svg)](https://jyliuu.github.io/TSL/)
 ![Rust](https://img.shields.io/badge/rust-2021-orange.svg)
 ![Python](https://img.shields.io/badge/python-%E2%89%A53.9-blue.svg)
 ![R](https://img.shields.io/badge/R-%E2%89%A54.2-blue.svg)
@@ -10,6 +11,9 @@ interpretability. It represents predictions as a sum of stages, where each stage
 difference of two separable products of univariate functions. This gives TSL expressive
 interaction structure while keeping the model directly inspectable through its learned
 feature-wise components.
+
+📖 **Documentation:** [jyliuu.github.io/TSL](https://jyliuu.github.io/TSL/) — guides, the Python
+& R API reference, and the under-the-hood math.
 
 ## Installation
 
@@ -109,6 +113,20 @@ model.fit(X_train, y_train)
 
 predictions = model.predict(X_test)
 print(f"Test R^2: {model.score(X_test, y_test):.4f}")
+```
+
+The same toy problem in R — the `tensorsl` package mirrors the Python hyperparameters:
+
+```r
+library(tensorsl)
+
+set.seed(1)
+x <- matrix(runif(1000 * 2), ncol = 2)
+y <- 2 * x[, 2] + x[, 1] - 0.5 * x[, 1] * x[, 2] + 3
+
+fit <- tsl(x, y, epochs = 3L, n_trees = 4L, n_iter = 25L, seed = 1L, verbosity = 0L)
+preds <- predict(fit, x)
+cat(sprintf("Train R^2: %.4f\n", 1 - var(y - preds) / var(y)))
 ```
 
 ## Examples
@@ -298,7 +316,17 @@ and the [`tsl-r/` README](tsl-r/README.md).
 
 ## Documentation
 
-### The model
+Full reference documentation is hosted at **[jyliuu.github.io/TSL](https://jyliuu.github.io/TSL/)**:
+
+- **[Getting started](https://jyliuu.github.io/TSL/guides/getting-started/)** — install, fit, and inspect a model end to end.
+- **[Python API](https://jyliuu.github.io/TSL/code/python-api/)** & **[Plotting API](https://jyliuu.github.io/TSL/code/plotting/)** — the `TSLRegressor` and `tsl_py.plot` reference.
+- **[R API](https://jyliuu.github.io/TSL/code/r-api/)** — the `tensorsl` S3 interface and ggplot2 layer.
+- **[Hyperparameters](https://jyliuu.github.io/TSL/guides/hyperparameters/)** — every fit parameter, explained.
+- **[Under the hood](https://jyliuu.github.io/TSL/math/)** — the model, fitting, bagging, and partial-dependence math.
+
+The rest of this section summarizes the model.
+
+## The model
 
 For inputs $\mathbf{x} = (x\_1, \dots, x\_p)$, a fitted TSL estimator with $R$ stages has
 the form
@@ -308,14 +336,50 @@ $$
 $$
 
 $$
-\hat{m}_{+,j}^{(\ell)}(x_j) \ge 0, \quad \hat{m}_{-,j}^{(\ell)}(x_j) \ge 0, \quad \lambda_{+}^{(\ell)} \ge 0, \quad \lambda_{-}^{(\ell)} \ge 0.
+\hat{m}_{+,j}^{(\ell)}(x_j) > 0, \quad \hat{m}_{-,j}^{(\ell)}(x_j) > 0, \quad \lambda_{+}^{(\ell)} \ge 0, \quad \lambda_{-}^{(\ell)} \ge 0.
 $$
 
-Each stage is a **difference of two non-negative rank-1 products**, scaled by
-non-negative stage coefficients. The positivity constraint removes the sign ambiguity
-that destabilizes unconstrained tensor decompositions, and the ordered difference lets a
-single stage represent signed contributions through cancellation between the two
-products.
+Each stage is a **difference of two strictly positive rank-1 products**, scaled by
+non-negative stage coefficients. Forcing every component function to be *strictly
+positive* — never zero — removes the sign ambiguity that destabilizes unconstrained
+tensor decompositions: each component then unambiguously amplifies or suppresses its
+product, so its value faithfully reflects a directional role. Signed contributions still
+arise, through cancellation between the two products in the ordered difference.
+
+Because both branch factors are strictly positive, each pair
+$(\hat{m}\_{+,j}^{(\ell)}, \hat{m}\_{-,j}^{(\ell)})$ has a unique **backbone / exponential-tilt**
+form: a strictly positive **backbone** $b\_j^{(\ell)}(x\_j) > 0$ carrying their shared
+magnitude (geometric mean) and an unconstrained **tilt** $d\_j^{(\ell)}(x\_j) \in \mathbb{R}$
+carrying their signed imbalance (half-log ratio),
+
+$$
+\hat{m}_{\pm,j}^{(\ell)}(x_j) = b_j^{(\ell)}(x_j)\, e^{\pm d_j^{(\ell)}(x_j)}, \qquad b_j^{(\ell)} = \sqrt{\hat{m}_{+,j}^{(\ell)}\,\hat{m}_{-,j}^{(\ell)}}, \qquad d_j^{(\ell)} = \tfrac{1}{2}\log\frac{\hat{m}_{+,j}^{(\ell)}}{\hat{m}_{-,j}^{(\ell)}}.
+$$
+
+Absorbing the stage scalars the same way — $b\_0^{(\ell)} = \sqrt{\lambda\_+^{(\ell)}\,\lambda\_-^{(\ell)}}$
+and $d\_0^{(\ell)} = \tfrac{1}{2}\log(\lambda\_+^{(\ell)}/\lambda\_-^{(\ell)})$ — the per-feature
+backbones **multiply** and the per-feature tilts **add**, so the whole estimator is
+equivalently a sum of backbones times an odd function of the tilt:
+
+$$
+\begin{aligned}
+b^{(\ell)}(\mathbf{x}) &= b_0^{(\ell)} \prod_{j=1}^{p} b_j^{(\ell)}(x_j) \;>\; 0, \\
+d^{(\ell)}(\mathbf{x}) &= d_0^{(\ell)} + \sum_{j=1}^{p} d_j^{(\ell)}(x_j) \;\in\; \mathbb{R}, \\
+\hat{m}(\mathbf{x}) &= 2 \sum_{\ell=1}^{R} b^{(\ell)}(\mathbf{x})\, \sinh\!\bigl(d^{(\ell)}(\mathbf{x})\bigr).
+\end{aligned}
+$$
+
+The backbone $b^{(\ell)}(\mathbf{x}) > 0$ is the stage's **magnitude**, and acts as an
+activity gate: the per-feature backbones multiply, so a near-zero factor in any feature
+switches the stage off there, while large factors make it active. Being strictly positive
+it never cancels — even where the stage's signed contribution crosses zero, the magnitude
+stays recoverable. The tilt $d^{(\ell)}(\mathbf{x}) \in \mathbb{R}$ is the stage's **signed
+direction**, entering through the strictly increasing odd function $\sinh$: raising the
+tilt always raises the stage contribution, positive tilt leans toward the $(+)$ product
+and negative toward the $(-)$, and zero tilt means the two branches balance (no
+contribution). Since the per-feature tilts simply add, each $d\_j^{(\ell)}$ reads as an
+additive imbalance score. The [Examples](#examples) visualize the backbone and tilt
+directly.
 
 This is the central difference from additive models. GAMs and GA²M decompose $m$ as a sum
 of low-dimensional shape functions $m\_j(x\_j) + \sum\_{j<k} m\_{jk}(x\_j, x\_k) + \cdots$
@@ -323,66 +387,6 @@ and pay for higher-order interactions one term at a time; SHAP and functional AN
 likewise distribute a prediction additively across features. TSL instead captures
 interactions through the *multiplicative* structure of each stage — a single rank-1
 product already binds all $p$ features together.
-
-### Backbone and tilt
-
-The two univariate factors $\hat{m}\_{+,j}^{(\ell)}$ and $\hat{m}\_{-,j}^{(\ell)}$ admit
-an equivalent reparametrization as a **non-negative backbone**
-$b\_j^{(\ell)}(x\_j) \ge 0$ (the geometric-mean magnitude of the two products) and an
-**arbitrary tilt** $d\_j^{(\ell)}(x\_j) \in \mathbb{R}$ (the half-log imbalance between
-them):
-
-$$
-\hat{m}_{+,j}^{(\ell)}(x_j) = b_j^{(\ell)}(x_j)\, e^{d_j^{(\ell)}(x_j)}, \qquad \hat{m}_{-,j}^{(\ell)}(x_j) = b_j^{(\ell)}(x_j)\, e^{-d_j^{(\ell)}(x_j)}.
-$$
-
-The per-feature backbones multiply across features to give a stage's overall magnitude,
-while the per-feature tilts sum to give its signed direction. A backbone factor near zero
-switches the stage off for that feature value; the tilt sum carries the stage's sign. The
-[Examples](#examples) visualize the backbone and tilt directly.
-
-### Partial dependence
-
-The *partial-dependence* (PD) function on a feature subset
-$S \subseteq \\{1,\dots,p\\}$ is the model averaged over the marginal distribution of the
-remaining features:
-
-$$
-\mathrm{PD}_S(\mathbf{x}_S) := \mathbb{E}_{\mathbf{X}_{-S}}\bigl[\hat{m}(\mathbf{x}_S, \mathbf{X}_{-S})\bigr].
-$$
-
-Because each stage is separable, its 2D PD over a feature pair is the product of the
-corresponding 1D factors (up to a scalar), which is what the spatial-backbone figure
-plots. TSL's per-feature PD has no marginalization-induced smoothing, so it retains
-localized peaks that joint-surface models average away.
-
-### Hyperparameters (quick reference)
-
-| Parameter | Role |
-|---|---|
-| `epochs` | Number of TSL stages $R$. |
-| `decay` | Multiplicative decay on per-tree `n_iter` after the first epoch. |
-| `n_trees` | Number of bagged grid tensors per stage. |
-| `n_iter` | Split-iteration budget per grid tensor. |
-| `split_strategy` | `RandomSplit` / `BestSplit` / `TopKSplits`. |
-| `split_try` | Candidate splits per feature (random strategy). |
-| `colsample_bytree` | Feature subsample fraction per grid (random strategy). |
-| `min_interval_samples` | Minimum samples per partition interval. |
-| `min_split_loss` | Minimum error reduction to accept a split / re-split. |
-| `merge_bonus` | Merge regularization; higher discourages merges. |
-| `refinement_strategy` | `L2` / `Huber` with `alpha`, `parent_anchor_strength`. |
-| `identification_strategy` | `L2` / `None`: post-fit component normalization. |
-| `aggregation_method` | `Mean` / `GeometricMean` / `Combined` (bag aggregation). |
-| `optimize_scaling` | Scalar rescaling $s = \langle y, \hat y\rangle / \langle \hat y, \hat y\rangle$. |
-| `similarity_threshold` | Fractional cosine-similarity gate for sign alignment in bagging. |
-| `bagged` | Bootstrap rows per grid tensor. |
-| `seed` | RNG seed. |
-| `log_level` | `off` / `info` / `debug` / `trace`. |
-| `visualdb_path` | SQLite path for the evolution-logging feature. |
-
-See [`tsl-py/examples/`](tsl-py/examples/) for full end-to-end pipelines on the synthetic,
-California housing, and bike-sharing datasets.
-
 ## License
 
 MIT License — see [LICENSE](LICENSE).
