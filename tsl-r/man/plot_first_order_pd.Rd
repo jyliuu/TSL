@@ -11,6 +11,7 @@ plot_first_order_pd(
   grid_points = 200L,
   stages = NULL,
   scale = c("raw", "component"),
+  show_backbone_overlay = TRUE,
   show_data_density = FALSE
 )
 }
@@ -28,6 +29,9 @@ training data retained by \code{\link[=tsl]{tsl()}}.}
 
 \item{scale}{\code{"raw"} (default) plots prediction-scale branches; \code{"component"}
 divides out each stage's constant to show per-feature m-space shapes.}
+
+\item{show_backbone_overlay}{If \code{TRUE} (default), overlay the
+\verb{sqrt(C+ C-) * b} backbone as a dotted line per panel.}
 
 \item{show_data_density}{If \code{TRUE}, add a bottom rug from a sample of the
 background rows showing the marginal data distribution per feature.}
