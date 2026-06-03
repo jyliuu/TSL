@@ -137,7 +137,7 @@ plot_local_interpretation <- function(object, points, titles = NULL,
   }
 
   title_text <- "Local explanation"
-  if (single) title_text <- paste0(title_text, "  ·  ", titles[[1]])
+  if (single) title_text <- paste0(title_text, "  \u00b7  ", titles[[1]])
 
   out <- patchwork::wrap_plots(rows, ncol = 1) +
     patchwork::plot_annotation(

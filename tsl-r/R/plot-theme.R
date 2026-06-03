@@ -157,5 +157,6 @@ utils::globalVariables(c(
   "value", "z", "panel", "ice_id", "pd", "importance", "metric", "weight",
   "share", "tilt", "contribution", "cumulative", "ymin", "ymax", "xmin", "xmax",
   "label", "point", "fpos", "fneg", "axis", "tree", "lo", "hi", "xend", "yend",
-  "feat_label", "combined", "bscaled", "tscaled", "lambda"
+  "feat_label", "combined", "bscaled", "tscaled", "lambda",
+  "mid", "name", "pctlab", "labx", "hjust", "y0", "y1"
 ))
