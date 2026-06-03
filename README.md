@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 ![Rust](https://img.shields.io/badge/rust-2021-orange.svg)
-![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue.svg)
+![Python](https://img.shields.io/badge/python-%E2%89%A53.9-blue.svg)
 ![R](https://img.shields.io/badge/R-%E2%89%A54.2-blue.svg)
 
 TSL is a glass-box regression model for learning rich interactions without sacrificing
@@ -13,24 +13,33 @@ feature-wise components.
 
 ## Installation
 
-TSL's core is a Rust crate; the `tsl-py` Python package is a thin
-[PyO3](https://pyo3.rs/) wrapper that builds the Rust extension via
-[maturin](https://www.maturin.rs/) during `pip install`. **A working Rust toolchain is
-required before installing the Python package.**
+### Python
+
+The Python package is published on PyPI as **`tensorsl`** and imported as `tsl_py`:
 
 ```sh
-# 1. install Rust (https://rustup.rs/)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+pip install tensorsl
 
-# 2. install TSL straight from GitHub (requires Python >= 3.10;
-#    builds the Rust extension at install time)
-pip install "git+https://github.com/jyliuu/TSL.git#subdirectory=tsl-py"
+# optional extras
+pip install "tensorsl[plots]"     # matplotlib for tsl_py.plot
+pip install "tensorsl[examples]"  # comparison models and example dependencies
+```
 
-# optional extras — append the extra name to the same URL:
-# [plots]    adds matplotlib, for the tsl_py.plot helpers used below
-pip install "tsl-py[plots] @ git+https://github.com/jyliuu/TSL.git#subdirectory=tsl-py"
-# [examples] adds interpret (EBM), xgboost, and sepals, for the comparison figures
-pip install "tsl-py[examples] @ git+https://github.com/jyliuu/TSL.git#subdirectory=tsl-py"
+Source builds use [maturin](https://www.maturin.rs/) to compile the Rust extension, so install
+a Rust toolchain from [rustup.rs](https://rustup.rs) if your platform does not have a wheel.
+
+### R
+
+The R connector package is also named **`tensorsl`**. It is not on CRAN; install it from the
+`tsl-r/` subdirectory of this repository. The R package compiles the same Rust core as a
+static library at install time, so it needs a Rust toolchain (`rustc >= 1.80`).
+
+```r
+# pak (owner/repo/subdir):
+pak::pak("jyliuu/TSL/tsl-r")
+
+# remotes / devtools:
+remotes::install_github("jyliuu/TSL", subdir = "tsl-r")
 ```
 
 ## Usage
@@ -209,14 +218,10 @@ fn main() {
 
 The `tensorsl` package ([`tsl-r/`](tsl-r/)) wraps the same Rust core for R through
 [extendr](https://extendr.github.io/), exposing an S3 `fit`/`predict` interface plus a native
-ggplot2 interpretability layer. It compiles the core as a static library at install time, so
-it needs only a Rust toolchain (`rustc >= 1.80`) — the core is pure Rust and links no system
-numerical libraries.
+ggplot2 interpretability layer. Install it from the `tsl-r/` subdirectory:
 
 ```r
-# tensorsl lives in the tsl-r/ subdirectory of the repo:
 pak::pak("jyliuu/TSL/tsl-r")
-# or: remotes::install_github("jyliuu/TSL", subdir = "tsl-r")
 
 library(tensorsl)
 
