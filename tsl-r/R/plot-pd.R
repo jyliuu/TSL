@@ -32,6 +32,8 @@
 #' @param stages Stages to include, as 1-based indices. Default all.
 #' @param scale `"raw"` (default) plots prediction-scale branches; `"component"`
 #'   divides out each stage's constant to show per-feature m-space shapes.
+#' @param show_backbone_overlay If `TRUE` (default), overlay the
+#'   `sqrt(C+ C-) * b` backbone as a dotted line per panel.
 #' @param show_data_density If `TRUE`, add a bottom rug from a sample of the
 #'   background rows showing the marginal data distribution per feature.
 #' @return A ggplot object. The data frame from [tsl_pd()] is attached as the
@@ -48,6 +50,7 @@
 plot_first_order_pd <- function(object, X = NULL, features = NULL,
                                 grid_points = 200L, stages = NULL,
                                 scale = c("raw", "component"),
+                                show_backbone_overlay = TRUE,
                                 show_data_density = FALSE) {
   scale <- match.arg(scale)
   df <- tsl_pd(object, X, features, grid_points, stages, scale)
@@ -56,12 +59,13 @@ plot_first_order_pd <- function(object, X = NULL, features = NULL,
     facet_grid(stage ~ feature, scales = "free") +
     .tsl_zero_ref() +
     .tsl_signed_diff_fill() +
-    geom_line(aes(x, pos), colour = .tsl_tokens$pos, linewidth = 1) +
-    geom_line(aes(x, -neg), colour = .tsl_tokens$neg, linewidth = 1) +
+    .tsl_branch_curves(show_backbone_overlay) +
     labs(
       title = "First-order partial dependence",
-      subtitle = paste0("PD+ (orange) and PD- (blue) branches; the shaded gap ",
-                        "between the curves is the net effect"),
+      subtitle = expression(
+        "gap = net effect (PD+ - PD-); dotted backbone:" ~
+          sqrt(C^"+" ~ C^"-") %.% italic(b)
+      ),
       x = NULL, y = "PD"
     ) +
     theme_flat()
@@ -110,20 +114,13 @@ pd_difference_plot <- function(object, X = NULL, features = NULL,
     facet_grid(stage ~ feature, scales = "free") +
     .tsl_zero_ref() +
     .tsl_signed_diff_fill() +
-    geom_line(aes(x, pos), colour = .tsl_tokens$pos, linewidth = 1) +
-    geom_line(aes(x, -neg), colour = .tsl_tokens$neg, linewidth = 1) +
+    .tsl_branch_curves(show_backbone_overlay) +
     labs(
       title = "Partial-dependence difference",
-      subtitle = paste0("PD+ (orange) and PD- (blue); the shaded gap between ",
-                        "the curves is the signed contribution"),
+      subtitle = "the shaded gap between the curves is the signed contribution",
       x = NULL, y = "PD"
     ) +
     theme_flat()
-
-  if (isTRUE(show_backbone_overlay)) {
-    p <- p + geom_line(aes(x, backbone), colour = .tsl_tokens$ink,
-                       linetype = "dotted", linewidth = 0.6)
-  }
 
   if (isTRUE(show_data_density)) {
     bg <- .tsl_background(object, X)

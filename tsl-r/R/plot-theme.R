@@ -150,6 +150,36 @@ scale_colour_tsl <- function(name = NULL, ...) {
   )
 }
 
+# The PD+ (orange) and PD- (blue) branch curves drawn on the positive scale,
+# with colour and linetype mapped to a shared key so the panels carry a legend.
+# When `backbone` is TRUE the dotted sqrt(C+ C-) * b overlay joins the same
+# legend. Expects `x`, `pos`, `neg`, and (for the overlay) `backbone` columns.
+.tsl_branch_curves <- function(backbone = TRUE) {
+  keys <- c("PD+", "PD-")
+  layers <- list(
+    geom_line(aes(x, pos, colour = "PD+", linetype = "PD+"), linewidth = 1),
+    geom_line(aes(x, -neg, colour = "PD-", linetype = "PD-"), linewidth = 1)
+  )
+  if (isTRUE(backbone)) {
+    keys <- c(keys, "backbone")
+    layers <- c(layers, list(
+      geom_line(aes(x, backbone, colour = "backbone", linetype = "backbone"),
+                linewidth = 0.6)
+    ))
+  }
+  c(layers, list(
+    scale_colour_manual(
+      name = NULL, breaks = keys,
+      values = c("PD+" = .tsl_tokens$pos, "PD-" = .tsl_tokens$neg,
+                 "backbone" = .tsl_tokens$ink)
+    ),
+    scale_linetype_manual(
+      name = NULL, breaks = keys,
+      values = c("PD+" = "solid", "PD-" = "solid", "backbone" = "dotted")
+    )
+  ))
+}
+
 # Column names used inside aes() across the plotting layer; declaring them keeps
 # R CMD check from flagging them as undefined globals (non-standard evaluation).
 utils::globalVariables(c(
