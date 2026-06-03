@@ -71,6 +71,13 @@ which builds platform wheels and an sdist, checks the built version matches the 
 publishes them to PyPI via Trusted Publishing (OIDC — no stored token), then drafts a GitHub
 Release. The build is pure Rust, so the wheels are self-contained.
 
+**Always create the tag on `main`, last.** The `vX.Y.Z` tag must point at a commit that
+lives on `main`. When the version bump goes through a pull request (because `main` is
+protected), wait for it to merge, then `git checkout main && git pull` and tag the merged
+commit — never tag the feature branch. A squash-merge rewrites the branch into a new commit
+on `main`, so a tag created on the branch is orphaned, pointing at a commit that is not on
+`main`. `skip-existing` keeps the publish idempotent if a tag is ever re-pushed or moved.
+
 One-time project setup (already done for the canonical repo): register a PyPI Trusted
 Publisher for project `tensorsl` pointing at this repo's `release.yml` and the `pypi`
 environment, and create that `pypi` environment in the GitHub repo settings.
