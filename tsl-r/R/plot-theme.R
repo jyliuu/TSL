@@ -119,6 +119,37 @@ scale_colour_tsl <- function(name = NULL, ...) {
              linetype = "dashed", linewidth = 0.4)
 }
 
+# Solid blend of a hex colour toward white by `w` (stays fully opaque), mirroring
+# tsl_py.plot._theme.mix; the pale signed-difference fills use it.
+.tsl_mix <- function(hex, w = 0.82) {
+  ch <- grDevices::col2rgb(hex) / 255
+  grDevices::rgb(ch[1] * (1 - w) + w, ch[2] * (1 - w) + w, ch[3] * (1 - w) + w)
+}
+
+# Readable label colour (white or ink) for text sitting on a gradient fill: the
+# scaled value `v` in [0, 1] is mapped through `ramp`, then handed to
+# .tsl_text_on for the per-cell luminance choice. Vectorised over `v`.
+.tsl_ramp_text <- function(v, ramp) {
+  rgbf <- grDevices::colorRamp(ramp)
+  m <- rgbf(pmin(pmax(v, 0), 1))
+  cols <- grDevices::rgb(m[, 1], m[, 2], m[, 3], maxColorValue = 255)
+  vapply(cols, .tsl_text_on, character(1))
+}
+
+# Two pale ribbons shading the signed gap between the PD+ (`pos`) and PD-
+# (`-neg`) curves: the orange (positive) token where PD+ >= PD-, the blue
+# (negative) token elsewhere. Each ribbon collapses to zero height where the
+# branches cross, so the fill flips exactly at the crossing. Mirrors
+# tsl_py.plot._theme.signed_fill; expects `x`, `pos`, `neg` columns.
+.tsl_signed_diff_fill <- function() {
+  list(
+    geom_ribbon(aes(x = x, ymin = -neg, ymax = pmax(pos, -neg)),
+                fill = .tsl_mix(.tsl_tokens$pos)),
+    geom_ribbon(aes(x = x, ymin = pmin(pos, -neg), ymax = -neg),
+                fill = .tsl_mix(.tsl_tokens$neg))
+  )
+}
+
 # Column names used inside aes() across the plotting layer; declaring them keeps
 # R CMD check from flagging them as undefined globals (non-standard evaluation).
 utils::globalVariables(c(
@@ -126,5 +157,5 @@ utils::globalVariables(c(
   "value", "z", "panel", "ice_id", "pd", "importance", "metric", "weight",
   "share", "tilt", "contribution", "cumulative", "ymin", "ymax", "xmin", "xmax",
   "label", "point", "fpos", "fneg", "axis", "tree", "lo", "hi", "xend", "yend",
-  "feat_label", "combined", "bscaled", "tscaled"
+  "feat_label", "combined", "bscaled", "tscaled", "lambda"
 ))
