@@ -26,7 +26,7 @@ once_cell = "1.21.4"
 rusqlite = { version = "0.40", optional = true, features = ["bundled"] }
 time = { version = "0.3", optional = true, features = ["formatting"] }
 bytemuck = { version = "1.25", optional = true }
-nalgebra = "0.33"
+nalgebra = "0.35"
 
 
 [features]
