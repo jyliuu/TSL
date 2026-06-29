@@ -3,4 +3,4 @@
 #   mkdocs serve -f docs/mkdocs.yml          # local preview
 #   mkdocs build --strict -f docs/mkdocs.yml # CI-equivalent build
 mkdocs-material>=9.7.6,<10
-pymdown-extensions>=10.21.3,<11
+pymdown-extensions>=11.0,<12
