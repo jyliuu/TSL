@@ -17,10 +17,11 @@ pub enum RefinementKind {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RefinementStrategyParams {
     pub kind: RefinementKind,
+    /// L2 penalty on the multiplicative log-backbone update.
     pub alpha: f64,
-    /// L2 coupling between u_+ and u_- (objective τ).
+    /// L2 penalty on the multiplicative tilt update.
     pub tilt_tau: f64,
-    /// L1 coupling on (u_+ − u_-) (objective ρ).
+    /// L1 penalty on the multiplicative tilt update.
     pub tilt_rho: f64,
     /// Prior sample size for parent anchoring (tau_0).
     /// Interpreted as "how many samples worth of confidence in the parent".
@@ -83,18 +84,19 @@ impl RefinementStrategyParamsBuilder {
         self
     }
 
+    /// L2 penalty on `β = log(v_b)`, the log-backbone update.
     pub fn alpha(mut self, alpha: f64) -> Self {
         self.alpha = alpha;
         self
     }
 
-    /// L2 coupling between u_+ and u_- (objective τ).
+    /// L2 penalty on `δ = 0.5 log(v_+ / v_-)`, the tilt update.
     pub fn tilt_tau(mut self, tilt_tau: f64) -> Self {
         self.tilt_tau = tilt_tau;
         self
     }
 
-    /// L1 coupling on (u_+ − u_-) (objective ρ).
+    /// L1 penalty on `δ = 0.5 log(v_+ / v_-)`, the tilt update.
     pub fn tilt_rho(mut self, tilt_rho: f64) -> Self {
         self.tilt_rho = tilt_rho;
         self

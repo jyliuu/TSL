@@ -7,14 +7,17 @@
 use std::iter::once;
 
 use crate::grid_tensor::state::{AffectedRange, FittingState, PrefixStats};
-use crate::grid_tensor::two_tensor_solver::{solve_two_tensor, DEFAULT_V_MAX, DEFAULT_V_MIN};
+use crate::grid_tensor::two_tensor_solver::{
+    log_coordinate_penalty, solve_two_tensor, DEFAULT_V_MAX, DEFAULT_V_MIN,
+};
 
 pub enum RefinementStrategy {
     L2Refinement {
+        /// L2 penalty on the log-backbone update.
         alpha: f64,
-        /// Two-tensor L2 coupling between u_+ and u_-.
+        /// L2 penalty on the tilt update.
         tilt_tau: f64,
-        /// Two-tensor L1 coupling on (u_+ - u_-).
+        /// L1 penalty on the tilt update.
         tilt_rho: f64,
         /// Prior sample size for parent anchoring (tau_0).
         /// Interpreted as "how many samples worth of confidence in the parent".
@@ -125,6 +128,13 @@ pub fn l2_update_unanchored(alpha: f64, s_rb: f64, s_bb: f64) -> (f64, f64, f64)
 #[inline]
 pub fn l2_gain_raw(update: f64, s_rb: f64, s_bb: f64) -> f64 {
     2.0 * update * s_rb - s_bb * update * update
+}
+
+#[inline]
+fn backbone_regularized_gain(update: f64, s_rb: f64, s_bb: f64, alpha: f64) -> f64 {
+    let multiplier = 1.0 + update;
+    l2_gain_raw(update, s_rb, s_bb)
+        - log_coordinate_penalty(multiplier, multiplier, alpha, 0.0, 0.0)
 }
 
 #[inline]
@@ -748,14 +758,14 @@ impl RefinementStrategy {
             let right_stats = &state.precomputed_statistics.interval_stats[col][i + 1];
 
             if is_stage1 {
-                // Stage 1 positive-only: use 1D ridge solver
+                // Stage 1 positive-only: use the 1D local log-backbone proposal.
                 // H^L = S_{11}^L, g^L = t_1^L
                 let h_l = left_stats.sum_s11;
                 let g_l = left_stats.sum_t1;
                 let (u_l, _denom_l, _num_l) = l2_update_unanchored(alpha, g_l, h_l);
                 let v_b_l = (1.0 + u_l).clamp(v_min, v_max);
                 let u_l_clamped = v_b_l - 1.0;
-                let gain_l = l2_gain_raw(u_l_clamped, g_l, h_l);
+                let gain_l = backbone_regularized_gain(u_l_clamped, g_l, h_l, alpha);
 
                 // H^R = S_{11}^R, g^R = t_1^R
                 let h_r = right_stats.sum_s11;
@@ -763,7 +773,7 @@ impl RefinementStrategy {
                 let (u_r, _denom_r, _num_r) = l2_update_unanchored(alpha, g_r, h_r);
                 let v_b_r = (1.0 + u_r).clamp(v_min, v_max);
                 let u_r_clamped = v_b_r - 1.0;
-                let gain_r = l2_gain_raw(u_r_clamped, g_r, h_r);
+                let gain_r = backbone_regularized_gain(u_r_clamped, g_r, h_r, alpha);
 
                 // Store updates: (u_plus, u_minus) = (u, 0) for Stage 1
                 state.precomputed_statistics.error_reductions_resplit[col][i] = gain_l + gain_r;
@@ -790,7 +800,6 @@ impl RefinementStrategy {
                     v_min,
                     v_max,
                 );
-
                 // Solve for right side
                 let (u_plus_r, u_minus_r, gain_r) = solve_two_tensor(
                     right_stats.sum_s11,
@@ -804,7 +813,6 @@ impl RefinementStrategy {
                     v_min,
                     v_max,
                 );
-
                 // Store updates as (u_plus, u_minus) pairs for each side
                 // Note: We'll convert to (v_b, delta_d) when applying the split
                 state.precomputed_statistics.error_reductions_resplit[col][i] = gain_l + gain_r;
@@ -1050,7 +1058,7 @@ impl RefinementStrategy {
         // Evaluate a single candidate position given left-side sufficient stats.
         // Closed over the output slices + total stats. Shared between the
         // exact and binned iteration paths.
-        let mut eval_pos = |pos: usize,
+        let eval_pos = |pos: usize,
                             s11_l: f64,
                             s22_l: f64,
                             s12_l: f64,
@@ -1081,12 +1089,12 @@ impl RefinementStrategy {
                 let (u_l, _denom_l, _num_l) = l2_update_unanchored(alpha, g_l, h_l);
                 let v_b_l = (1.0 + u_l).clamp(v_min, v_max);
                 let u_l_clamped = v_b_l - 1.0;
-                let gain_l = l2_gain_raw(u_l_clamped, g_l, h_l);
+                let gain_l = backbone_regularized_gain(u_l_clamped, g_l, h_l, alpha);
 
                 let (u_r, _denom_r, _num_r) = l2_update_unanchored(alpha, g_r, h_r);
                 let v_b_r = (1.0 + u_r).clamp(v_min, v_max);
                 let u_r_clamped = v_b_r - 1.0;
-                let gain_r = l2_gain_raw(u_r_clamped, g_r, h_r);
+                let gain_r = backbone_regularized_gain(u_r_clamped, g_r, h_r, alpha);
 
                 update_left[pos] = (u_l_clamped, 0.0);
                 update_right[pos] = (u_r_clamped, 0.0);

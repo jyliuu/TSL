@@ -658,7 +658,7 @@ mod tests {
     }
 
     #[test]
-    fn test_split_reduces_error_by_correct_amount_ridge() {
+    fn test_split_score_includes_log_backbone_penalty() {
         let (x, y) = setup_data_hardcoded();
         let refinement_strategy = RefinementStrategy::L2Refinement {
             alpha: 0.1,
@@ -681,20 +681,28 @@ mod tests {
         // Calculate old error before split
         let old_error = state.residuals.iter().map(|r| r * r).sum::<f64>();
         let gain = state.precomputed_statistics.error_reductions_split[0][10];
+        let update_left = state.precomputed_statistics.update_pairs_split_left[0][10];
+        let update_right = state.precomputed_statistics.update_pairs_split_right[0][10];
+        let movement_penalty = |update: (f64, f64)| {
+            crate::grid_tensor::two_tensor_solver::log_coordinate_penalty(
+                1.0 + update.0,
+                1.0 + update.1,
+                refinement_strategy.alpha(),
+                refinement_strategy.tilt_tau(),
+                refinement_strategy.tilt_rho(),
+            )
+        };
+        let parameter_penalty = movement_penalty(update_left) + movement_penalty(update_right);
 
         // Apply split using reducer pattern
         let action = FittingAction::ApplySplit {
-            split: {
-                let update_left = state.precomputed_statistics.update_pairs_split_left[0][10];
-                let update_right = state.precomputed_statistics.update_pairs_split_right[0][10];
-                SplitCandidate {
-                    col: 0,
-                    error_reduction: gain,
-                    allowed_interval_idx: 0,
-                    index: 10,
-                    update_left,
-                    update_right,
-                }
+            split: SplitCandidate {
+                col: 0,
+                error_reduction: gain,
+                allowed_interval_idx: 0,
+                index: 10,
+                update_left,
+                update_right,
             },
         };
         state = fitting_reducer(state, action, &refinement_strategy, &split_strategy);
@@ -702,13 +710,13 @@ mod tests {
         // Calculate new error after split
         let new_error = state.residuals.iter().map(|r| r * r).sum::<f64>();
 
-        // With ridge (alpha > 0), the cached "gain" is not the raw SSE reduction; it is a
-        // regularized objective improvement, so it should be <= the SSE improvement.
+        // The cached gain subtracts the exact log-coordinate movement cost.
         let delta_sse = old_error - new_error;
         assert!(
-            delta_sse + 1e-10 >= gain,
-            "Expected SSE improvement >= regularized gain: delta_sse={}, gain={}",
+            (delta_sse - parameter_penalty - gain).abs() < 1e-10,
+            "Expected score to equal SSE improvement minus movement cost: delta_sse={}, penalty={}, gain={}",
             delta_sse,
+            parameter_penalty,
             gain
         );
     }

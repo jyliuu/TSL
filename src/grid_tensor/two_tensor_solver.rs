@@ -1,11 +1,16 @@
 //! Two-Tensor Solver Module
 //!
 //!
-//! Solves for (u_+, u_-) that minimize the per-side penalized least-squares objective:
-//!   L_S(u_+, u_-) = sum w_i (r_tilde - u_+ φ_1 - u_- φ_2)^2
-//!                   + α((u_+)^2 + (u_-)^2)
-//!                   + τ(u_+ - u_-)^2
-//!                   + ρ|u_+ - u_-|
+//! Solves for `(u_+, u_-)`, where `v_± = 1 + u_±`, using the local
+//! quadratic approximation to the per-side log-coordinate objective:
+//!
+//!   L_S = sum w_i (r_tilde - u_+ φ_1 - u_- φ_2)^2
+//!         + α β^2 + τ δ^2 + ρ |δ|,
+//!
+//! with `β = 0.5 log(v_+ v_-)` (log-backbone update) and
+//! `δ = 0.5 log(v_+ / v_-)` (tilt update). Candidate generation uses
+//! `β ≈ (u_+ + u_-)/2` and `δ ≈ (u_+ - u_-)/2`; the returned gain
+//! evaluates the exact log-coordinate penalty after multiplier clamping.
 //!
 //! Where:
 //!   - φ_1 = f_+ * 1_S(i)
@@ -36,8 +41,8 @@ const COND_THRESHOLD: f64 = 1e12;
 /// * `s12` - -Sum of w_i * f_plus[i] * f_minus[i] for side S (note: negative)
 /// * `t1` - Sum of w_i * r_tilde[i] * f_plus[i] for side S
 /// * `t2` - -Sum of w_i * r_tilde[i] * f_minus[i] for side S (note: negative)
-/// * `alpha` - Ridge regularization strength (≥ 0)
-/// * `tau` - L2 tilt coupling strength (≥ 0)
+/// * `alpha` - L2 log-backbone penalty strength (≥ 0)
+/// * `tau` - L2 tilt penalty strength (≥ 0)
 /// * `rho` - L1 tilt penalty strength (≥ 0)
 /// * `v_min` - Minimum multiplier value (typically 0.05)
 /// * `v_max` - Maximum multiplier value (typically 20.0)
@@ -46,7 +51,7 @@ const COND_THRESHOLD: f64 = 1e12;
 /// `(u_plus, u_minus, gain)` where:
 /// - `u_plus` = v_plus - 1 (after clamping)
 /// - `u_minus` = v_minus - 1 (after clamping)
-/// - `gain` = objective decrease (J(0) - J(u)) for candidate scoring
+/// - `gain` = exact penalized objective decrease at the clamped multipliers
 ///
 /// # Panics
 /// Never panics - returns (0.0, 0.0, 0.0) for near-singular or invalid cases
@@ -62,24 +67,25 @@ pub fn solve_two_tensor(
     v_min: f64,
     v_max: f64,
 ) -> (f64, f64, f64) {
-    // Build the 2×2 system matrix A
-    // A = [[S11 + α + τ,  S12 - τ    ],
-    //      [S12 - τ,      S22 + α + τ]]
-    let a11 = s11 + alpha + tau;
-    let a12 = s12 - tau;
+    // The local coordinates are m = (u_+ + u_-)/2 and
+    // t = (u_+ - u_-)/2. Their quadratic penalty contributes
+    // 1/4 [[α+τ, α-τ], [α-τ, α+τ]] to the system.
+    let a11 = s11 + 0.25 * (alpha + tau);
+    let a12 = s12 + 0.25 * (alpha - tau);
     let a21 = a12; // Symmetric
-    let a22 = s22 + alpha + tau;
+    let a22 = s22 + 0.25 * (alpha + tau);
 
     // Right-hand side vector t = [t1, t2]^T
     let t = [t1, t2];
 
     // Solve for u = [u_+, u_-]^T
-    let (u_plus, u_minus) = if rho == 0.0 {
+    let linearized_rho = 0.5 * rho;
+    let (u_plus, u_minus) = if linearized_rho == 0.0 {
         // Case 1: ρ = 0 (pure quadratic)
         solve_rho_zero(a11, a12, a21, a22, t[0], t[1])
     } else {
         // Case 2: ρ > 0 (L1 on tilt difference)
-        solve_rho_positive(a11, a12, a21, a22, t[0], t[1], rho)
+        solve_rho_positive(a11, a12, a21, a22, t[0], t[1], linearized_rho)
     };
 
     // Clamp multipliers to [v_min, v_max]
@@ -90,17 +96,8 @@ pub fn solve_two_tensor(
     let u_plus_clamped = v_plus - 1.0;
     let u_minus_clamped = v_minus - 1.0;
 
-    // Compute gain: J(0) - J(u) = 2 t^T u - u^T A u - ρ|u_+ - u_-|
-    let gain = compute_gain(
-        u_plus_clamped,
-        u_minus_clamped,
-        a11,
-        a12,
-        a22,
-        t[0],
-        t[1],
-        rho,
-    );
+    let gain = data_loss_gain(u_plus_clamped, u_minus_clamped, s11, s22, s12, t1, t2)
+        - log_coordinate_penalty(v_plus, v_minus, alpha, tau, rho);
 
     (u_plus_clamped, u_minus_clamped, gain)
 }
@@ -236,28 +233,38 @@ fn solve_2x2(
     }
 }
 
-/// Compute gain: J(0) - J(u) = 2 t^T u - u^T A u - ρ|u_+ - u_-|
-fn compute_gain(
+/// Return the frozen-weight squared-error decrease produced by an update.
+///
+/// The solver subtracts the exact log-coordinate penalty from this quantity
+/// when it constructs the structural-action score.
+#[allow(clippy::too_many_arguments)]
+pub fn data_loss_gain(
     u_plus: f64,
     u_minus: f64,
-    a11: f64,
-    a12: f64,
-    a22: f64,
+    s11: f64,
+    s22: f64,
+    s12: f64,
     t1: f64,
     t2: f64,
-    rho: f64,
 ) -> f64 {
-    // 2 t^T u = 2 * (t1 * u_plus + t2 * u_minus)
-    let t_dot_u = 2.0 * (t1 * u_plus + t2 * u_minus);
+    2.0 * (t1 * u_plus + t2 * u_minus)
+        - (s11 * u_plus * u_plus + 2.0 * s12 * u_plus * u_minus + s22 * u_minus * u_minus)
+}
 
-    // u^T A u = u_plus^2 * a11 + 2 * u_plus * u_minus * a12 + u_minus^2 * a22
-    let u_au = u_plus * u_plus * a11 + 2.0 * u_plus * u_minus * a12 + u_minus * u_minus * a22;
-
-    // ρ|u_+ - u_-|
-    let rho_term = rho * (u_plus - u_minus).abs();
-
-    // Gain = 2 t^T u - u^T A u - ρ|u_+ - u_-|
-    t_dot_u - u_au - rho_term
+/// Exact penalty on the multiplicative log-backbone and tilt coordinates.
+///
+/// Equal multipliers have zero tilt penalty, while reciprocal multipliers
+/// have zero backbone penalty. The coordinates stay independent at every
+/// multiplier scale rather than only near the no-update point.
+pub fn log_coordinate_penalty(v_plus: f64, v_minus: f64, alpha: f64, tau: f64, rho: f64) -> f64 {
+    if v_plus <= 0.0 || v_minus <= 0.0 {
+        return f64::INFINITY;
+    }
+    let log_plus = v_plus.ln();
+    let log_minus = v_minus.ln();
+    let beta = 0.5 * (log_plus + log_minus);
+    let delta = 0.5 * (log_plus - log_minus);
+    alpha * beta * beta + tau * delta * delta + rho * delta.abs()
 }
 
 /// Convert (v_+, v_-) multipliers to (v_b, Δd) backbone/tilt updates
@@ -292,16 +299,6 @@ mod tests {
 
     #[test]
     fn test_solve_rho_zero_simple() {
-        // Simple case: S11 = 1, S22 = 1, S12 = 0, t1 = 1, t2 = 0
-        // A = [[1 + α + τ, -τ    ],
-        //      [-τ,         1 + α + τ]]
-        // With α = 0.1, τ = 0.01:
-        // A = [[1.11, -0.01],
-        //      [-0.01, 1.11]]
-        // det = 1.11^2 - 0.01^2 = 1.232 - 0.0001 = 1.2319
-        // u_+ = (1.11 * 1 - (-0.01) * 0) / 1.2319 = 1.11 / 1.2319 ≈ 0.900
-        // u_- = (1.11 * 0 - (-0.01) * 1) / 1.2319 = 0.01 / 1.2319 ≈ 0.008
-
         let (u_plus, u_minus, gain) = solve_two_tensor(
             1.0,  // s11
             1.0,  // s22
@@ -318,6 +315,48 @@ mod tests {
         assert!(u_plus > 0.8 && u_plus < 1.0);
         assert!(u_minus.abs() < 0.1);
         assert!(gain > 0.0);
+    }
+
+    #[test]
+    fn returned_gain_includes_exact_log_coordinate_penalty() {
+        let (u_plus, u_minus, penalized_gain) =
+            solve_two_tensor(2.0, 3.0, -0.25, 1.5, -0.5, 0.7, 0.4, 0.2, 0.05, 20.0);
+        let data_gain = data_loss_gain(u_plus, u_minus, 2.0, 3.0, -0.25, 1.5, -0.5);
+        let penalty = log_coordinate_penalty(1.0 + u_plus, 1.0 + u_minus, 0.7, 0.4, 0.2);
+
+        assert!(data_gain.is_finite());
+        assert!((data_gain - penalty - penalized_gain).abs() < 1e-12);
+    }
+
+    #[test]
+    fn backbone_and_tilt_penalties_are_scale_separated() {
+        let tilt_only_at_unit_backbone = log_coordinate_penalty(2.0, 0.5, 0.0, 3.0, 0.0);
+        let same_tilt_at_double_backbone = log_coordinate_penalty(4.0, 1.0, 0.0, 3.0, 0.0);
+        assert!((tilt_only_at_unit_backbone - same_tilt_at_double_backbone).abs() < 1e-12);
+
+        let reciprocal_backbone_penalty = log_coordinate_penalty(2.0, 0.5, 5.0, 0.0, 0.0);
+        let equal_multiplier_tilt_penalty = log_coordinate_penalty(2.0, 2.0, 0.0, 5.0, 1.0);
+        assert!(reciprocal_backbone_penalty.abs() < 1e-12);
+        assert!(equal_multiplier_tilt_penalty.abs() < 1e-12);
+    }
+
+    #[test]
+    fn local_backbone_curvature_does_not_shrink_tilt_direction() {
+        let unpenalized = solve_two_tensor(1.0, 1.0, 0.0, 0.2, -0.2, 0.0, 0.0, 0.0, 0.05, 20.0);
+        let backbone_penalized =
+            solve_two_tensor(1.0, 1.0, 0.0, 0.2, -0.2, 100.0, 0.0, 0.0, 0.05, 20.0);
+
+        assert!((unpenalized.0 - backbone_penalized.0).abs() < 1e-12);
+        assert!((unpenalized.1 - backbone_penalized.1).abs() < 1e-12);
+    }
+
+    #[test]
+    fn local_tilt_curvature_does_not_shrink_backbone_direction() {
+        let unpenalized = solve_two_tensor(1.0, 1.0, 0.0, 0.2, 0.2, 0.0, 0.0, 0.0, 0.05, 20.0);
+        let tilt_penalized = solve_two_tensor(1.0, 1.0, 0.0, 0.2, 0.2, 0.0, 100.0, 0.0, 0.05, 20.0);
+
+        assert!((unpenalized.0 - tilt_penalized.0).abs() < 1e-12);
+        assert!((unpenalized.1 - tilt_penalized.1).abs() < 1e-12);
     }
 
     #[test]
@@ -397,6 +436,15 @@ mod tests {
         // Should produce valid solution
         assert!(u_plus.is_finite());
         assert!(u_minus.is_finite());
+        assert!(gain.is_finite());
+    }
+
+    #[test]
+    fn l1_tilt_penalty_can_select_an_exact_backbone_update() {
+        let (u_plus, u_minus, gain) =
+            solve_two_tensor(1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 10.0, 0.05, 20.0);
+
+        assert!((u_plus - u_minus).abs() < 1e-12);
         assert!(gain.is_finite());
     }
 }
