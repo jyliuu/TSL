@@ -67,15 +67,15 @@ guidance.
 | `decay` | `numeric` | `1.0` | multiply `n_iter` by this after epoch 1 |
 | `split_try` | `integer` | `10` | candidate split positions per feature (`"random"` strategy) |
 | `colsample_bytree` | `numeric` | `0.8` | fraction of features sampled per tree |
-| `alpha` | `numeric` | `0.0` | refinement regularisation strength |
-| `complexity_penalty` | `numeric` | `0.0` | penalty discouraging extra splits |
-| `min_split_loss` | `numeric` | `0.0` | minimum loss reduction to accept a split |
+| `alpha` | `numeric` | `0.0` | $\ell_2$ penalty on the log-backbone update $\beta=\log v_b$ |
+| `complexity_penalty` | `numeric` | `0.0` | fixed-scale boundary cost for unified structural selection (`0.0` disables merges) |
+| `min_split_loss` | `numeric` | `0.0` | minimum objective reduction to accept a structural action |
 | `min_interval_samples` | `integer` | `1` | minimum observations per interval |
 | `refinement_strategy` | `character` | `"l2"` | `"l2"` or `"huber"` |
 | `prior_sample_size` | `numeric` | `0.0` | parent-anchoring strength (advanced; `0.0` = off) |
 | `update_clamp` | `numeric` | `Inf` | update-magnitude cap (advanced; `Inf` = off) |
-| `tilt_tau` | `numeric` | `0.01` | $\ell_2$ coupling between the $u_+$ and $u_-$ tilts |
-| `tilt_rho` | `numeric` | `0.0` | $\ell_1$ coupling on $(u_+ - u_-)$ |
+| `tilt_tau` | `numeric` | `0.01` | $\ell_2$ penalty on the tilt update $\delta=\frac12\log(v_+/v_-)$ |
+| `tilt_rho` | `numeric` | `0.0` | $\ell_1$ penalty on $\delta$; can produce zero tilt updates |
 | `split_strategy` | `character` | `"random"` | `"random"`, `"best_split"`, or `"top_k"` |
 | `top_k` | `integer` | `10` | (for `"top_k"`) candidate pool size |
 | `must_fill_all_k` | `logical` | `TRUE` | (for `"top_k"`) require all $k$ slots |

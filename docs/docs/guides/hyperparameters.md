@@ -37,8 +37,8 @@ The aggregation mode (`Mean` / `GeometricMean` / `Combined`) is set internally; 
 | `split_try` | `10` | candidate split positions sampled per (feature, interval) |
 | `colsample_bytree` | `0.8` | fraction of features sampled per split proposal |
 | `min_interval_samples` | `1` | minimum observations on each side of a split |
-| `min_split_loss` | `0.0` | minimum error reduction to accept a split |
-| `complexity_penalty` | `0.0` | penalty discouraging additional splits |
+| `min_split_loss` | `0.0` | minimum objective reduction to accept any structural action |
+| `complexity_penalty` | `0.0` | fixed-scale boundary cost used by split, resplit, and merge (`0.0` disables merge candidates) |
 | `top_k` | `10` | (for `top_k`) sample from the top-$k$ candidates |
 | `must_fill_all_k` | `True` | (for `top_k`) require all $k$ slots filled |
 
@@ -46,16 +46,24 @@ The aggregation mode (`Mean` / `GeometricMean` / `Combined`) is set internally; 
     `random` (the default) is usually best for speed and generalizes well; `best_split`
     can help on small datasets where exhaustively picking the top split matters.
 
+!!! tip "Tuning structural complexity"
+    A positive finite `complexity_penalty` assigns each boundary a cost fixed from the
+    grid's initial loss scale. Splits pay the cost, resplits leave it unchanged, and merges
+    recover it. Start with a small value such as `0.01`, measure validation error and
+    boundary count, and increase it when a smaller model is worth the extra bias.
+
 ## Refinement solver (per node)
 
 | Param | Default | Meaning |
 |-------|:------:|---------|
 | `refinement_strategy` | `"l2"` | `"l2"` (weights $w_i=1$) or `"huber"` (robust weights) |
-| `alpha` | `0.0` | ridge regularization $\alpha$ on the bin update (raise if overfitting) |
-| `tilt_tau` | `0.01` | $\ell_2$ coupling $\tau$ between the $u_+$ and $u_-$ updates |
-| `tilt_rho` | `0.0` | $\ell_1$ coupling $\rho$ on $(u_+ - u_-)$ |
+| `alpha` | `0.0` | $\ell_2$ penalty $\alpha\beta^2$ on the log-backbone update $\beta=\log v_b$ |
+| `tilt_tau` | `0.01` | $\ell_2$ penalty $\tau\delta^2$ on the tilt update $\delta=\frac12\log(v_+/v_-)$ |
+| `tilt_rho` | `0.0` | $\ell_1$ penalty $\rho|\delta|$; positive values can produce exactly zero tilt updates |
 
-These feed the [closed-form 2×2 solver](../math/fitting.md#the-closed-form-2x2-solver).
+These feed the [closed-form $2\times2$ proposal solver](../math/fitting.md#the-closed-form-2x2-solver),
+which keeps the backbone and tilt directions separate and scores the clamped proposal with
+the exact logarithmic penalties.
 
 ## Advanced / experimental
 
@@ -78,10 +86,11 @@ TSLRegressor(
     n_iter=30,           # enough splits to capture structure
     split_try=16,
     colsample_bytree=0.8,
-    alpha=0.01,          # light ridge
+    alpha=0.01,          # light log-backbone shrinkage
     seed=0,
 )
 ```
 
-Tune `epochs`, `n_iter`, and `n_trees` first; reach for `alpha` (and `min_split_loss`) if
-the model overfits, and `similarity_threshold` if bagged components disagree.
+Tune `epochs`, `n_iter`, and `n_trees` first. Use `alpha` to shrink multiplicative backbone
+changes, `tilt_tau`/`tilt_rho` to shrink tilt changes, `complexity_penalty` for structural
+cost-complexity selection, and `similarity_threshold` if bagged components disagree.

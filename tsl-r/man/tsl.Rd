@@ -50,9 +50,10 @@ predictors with rows = observations and columns = features.}
 
 \item{colsample_bytree}{Fraction of features sampled per tree.}
 
-\item{alpha}{Refinement regularisation strength.}
+\item{alpha}{L2 penalty on the multiplicative log-backbone update.}
 
-\item{complexity_penalty}{Per-split complexity penalty.}
+\item{complexity_penalty}{Cost-complexity strength for unified split, resplit,
+and merge selection; \code{0.0} preserves split/resplit-only fitting.}
 
 \item{min_split_loss}{Minimum loss reduction required to make a split.}
 
@@ -64,7 +65,10 @@ predictors with rows = observations and columns = features.}
 
 \item{update_clamp}{Maximum magnitude of a refinement update.}
 
-\item{tilt_tau, tilt_rho}{Tilt regularisation parameters.}
+\item{tilt_tau}{L2 penalty on the multiplicative tilt update.}
+
+\item{tilt_rho}{L1 penalty on the multiplicative tilt update; positive values
+can produce exact backbone-only updates.}
 
 \item{split_strategy}{Split search, one of \code{"random"}, \code{"best_split"},
 or \code{"top_k"}.}

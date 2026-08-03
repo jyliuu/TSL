@@ -50,8 +50,9 @@ where the feature support $\mathcal{X}\subseteq\mathbb{R}^p$ may be **non-rectan
 | $\tilde{m}_{\pm}^{(\ell)},\ \tilde{m}_{\pm}^{(i)}$ | **unscaled** product $\prod_j \hat{m}_{\pm,j}^{(\ell)}(x_j)$ (per-sample at $\mathbf{x}^{(i)}$); the scaled branch is $\hat{m}_{\pm}^{(\ell)} = \lambda_{\pm}^{(\ell)}\,\tilde{m}_{\pm}^{(\ell)}$ |
 | $w_i$ | stabilizing weight ($=1$ for L2; Huber-dependent otherwise) |
 | $u_\pm^S,\ \hat{u}_\pm^S$ | multiplicative bin update on region $S$, and its delta $u_\pm-1$ |
-| $\alpha$ | ridge regularization on the bin update |
-| $\tau,\rho$ | tilt-coupling regularizers (implementation; see [Fitting](fitting.md)) |
+| $\beta,\delta$ | multiplicative log-backbone and tilt updates, respectively |
+| $\alpha$ | $\ell_2$ penalty on $\beta$ |
+| $\tau,\rho$ | $\ell_2$ and $\ell_1$ penalties on $\delta$; see [Fitting](fitting.md) |
 | $v_{\min},v_{\max}$ | clamp bounds keeping updates positive/stable |
 | $S_{11},S_{22},S_{12},t_1,t_2$ | sufficient statistics of the $2\times2$ split system |
 | $\Delta_S,\ \Delta_{\text{split}}$ | per-region / total error reduction from a split |

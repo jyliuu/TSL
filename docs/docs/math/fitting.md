@@ -1,189 +1,701 @@
 # Fitting
 
-TSL fitting combines **forward stagewise additive modeling** (boosting-style residual
-fitting) with **CART-style partition refinement**. The structure mirrors the code exactly:
+TSL fits a regression function in stages. Each stage asks: **what separable function best
+predicts the residuals left by the current model?**
 
-- the per-stage grid refinement lives in [`GridTensor`](../code/grid-tensor.md);
-- the per-stage bagging + aggregation lives in [`StagePredictor`](../code/stage-predictor.md);
-- the outer boosting loop and coefficient backfit live in [`TSL`](../code/forest.md).
+The answer is built at three levels:
 
-## Forward stagewise additive modeling
+1. one grid repeatedly splits, refits, or merges feature intervals;
+2. one stage combines several randomized grids;
+3. the full model jointly refits the coefficients of every completed branch.
 
-At stage $\ell$ the previous stages are frozen and a new stage predictor
-$\hat{m}^{(\ell)}$ is fit to the **outer residuals**
+This page follows those levels in order. The code has the same hierarchy:
+[`GridTensor`](../code/grid-tensor.md), [`StagePredictor`](../code/stage-predictor.md),
+and [`TSL`](../code/forest.md).
 
-$$
-R_i^{(\ell-1)} \coloneqq y^{(i)} - \sum_{k=1}^{\ell-1}\bigl[\hat{m}_+^{(k)}(\mathbf{x}^{(i)}) - \hat{m}_-^{(k)}(\mathbf{x}^{(i)})\bigr]
-$$
+## What the fit targets
 
-(the empty sum at $\ell=1$ means the first stage is fit directly to $y$). After fitting
-stage $\ell$, **all** stage scalars $\{\lambda_{\pm}^{(k)}\}_{k=1}^{\ell}$ are refit jointly
-by least squares against $y$ (the [backfit](#coefficient-backfitting) below).
-
-Within a stage, the **within-stage residual** is $r_i \coloneqq R_i^{(\ell-1)} - \hat{m}^{(\ell)}(\mathbf{x}^{(i)})$,
-where $\hat{m}^{(\ell)}$ is the current in-progress stage prediction.
-
-!!! note "Implementation note — unscaled products"
-    Pseudocode and code use the **unscaled** per-sample product
-    $\tilde{m}_{\pm}^{(i)} \coloneqq \prod_{j=1}^p \hat{m}_{\pm,j}^{(\ell)}(x_j^{(i)})$, so the
-    full stage prediction is $\lambda_{+}^{(\ell)}\tilde{m}_{+}^{(i)} - \lambda_{-}^{(\ell)}\tilde{m}_{-}^{(i)}$.
-    In the codebase the $\lambda$'s are applied once at the `StagePredictor` level as
-    `scaling_plus`/`scaling_minus`; `GridTensor::predict_unscaled` and
-    `extract_two_tensor_predictions_unscaled` deliberately return unscaled $\tilde{m}_+,\tilde{m}_-$.
-    See the [architecture invariants](../code/architecture.md#two-critical-invariants).
-
-## The grid tensor
-
-A single stage product is fit on a shared adaptive partition. A **grid tensor** is the
-tuple $\mathcal{G} = \bigl(\prod_{j=1}^p \mathcal{I}_j, \{\hat{v}_{\pm,j,I}\}\bigr)$, where
-$\mathcal{I}_j = \{I_{j,1},\dots,I_{j,L_j}\}$ partitions the domain of $x_j$ and
-$\hat{v}_{\pm,j,I}>0$ is the value on interval $I$. Each univariate factor is
-piecewise-constant on its partition:
+Let $(X_i,Y_i)$, $i=1,\ldots,n$, be the training observations, where
+$X_i\in\mathbb R^p$ and $Y_i\in\mathbb R$. Under squared-error loss, the population
+prediction target is
 
 $$
-\hat{m}_{\pm,j}^{(\ell)}(x_j) = \sum_{I\in\mathcal{I}_j^{(\ell)}} \hat{v}_{\pm,j,I}^{(\ell)}\,\mathbbm{1}_I(x_j),
+m^\star(x)=\mathbb E[Y\mid X=x].
 $$
 
-so each $(\pm)$ product is constant on each grid cell $\prod_j I_j$. Unlike CART — which
-splits one leaf rectangle — a grid split partitions **all** intervals along an axis $j$ at
-once, creating $\prod_{k\ne j} L_k$ new cells while preserving separability.
+This is the mean response among observations with features $x$.
 
-## Greedy split scoring
-
-The grid is refined by greedily splitting intervals. A candidate split on axis $j$ at
-threshold $s$ partitions an interval $I=[a,b)$ into $I_L=[a,s)$ and $I_R=[s,b)$. For each
-region $S\in\{L,R\}$ the bin value is rescaled multiplicatively,
-$\hat{v}_{\pm,j,I_S} = \hat{v}_{\pm,j,I}\,u_\pm^S$, and the updates $u_\pm^S$ minimize a
-regularized least-squares objective:
+For a model with $R$ stages and fixed hyperparameters, let
+$\mathcal F_{\mathrm{TSL}}$ be the set of prediction functions that TSL can represent.
+Its members are finite sums
 
 $$
-\mathcal{L}_S(u_+^S, u_-^S) = \sum_{x_j^{(i)}\in I_S} w_i\bigl(R_i^{(\ell-1)} - (u_+^S \tilde{m}_{+}^{(i)} - u_-^S \tilde{m}_{-}^{(i)})\bigr)^2 + \alpha\bigl((u_+^S-1)^2 + (u_-^S-1)^2\bigr),
+m(x)
+=
+\sum_{\ell=1}^R
+\sum_{s\in\{+,-\}}
+\gamma_{\ell,s}h_{\ell,s}(x),
+\qquad
+\gamma_{\ell,s}\in\mathbb R.
 $$
 
-with stabilizing weights $w_i\ge 0$ and ridge strength $\alpha\ge 0$. The split that
-maximizes the total reduction $\Delta_{\text{split}} = \Delta_L + \Delta_R$, where
-$\Delta_S \coloneqq \mathcal{L}_S(1,1) - \mathcal{L}_S(u_+^S,u_-^S)$, is selected.
+Each $h_{\ell,s}$ is a non-negative separable branch of an aggregated stage grid. The two
+branches in a stage share a partition. Their outer coefficients are unconstrained, so
+either branch may have either sign in the final model.
 
-### The closed-form 2x2 solver
-
-It is convenient to work with the **delta** $\hat{u}_\pm = u_\pm - 1$ (so the baseline
-"no update" is $\hat{u}_\pm=0$). The objective becomes
+The best population prediction available in this family is
 
 $$
-\mathcal{L}_S(\hat{u}_+,\hat{u}_-) = \sum_{i\in S} w_i\bigl(r_i - (\hat{u}_+\tilde{m}_{+}^{(i)} - \hat{u}_-\tilde{m}_{-}^{(i)})\bigr)^2 + \alpha(\hat{u}_+^2 + \hat{u}_-^2),
+m^\star_{\mathrm{TSL}}
+\in
+\operatorname*{arg\,min}_{m\in\mathcal F_{\mathrm{TSL}}}
+\mathbb E\left[(Y-m(X))^2\right].
 $$
 
-minimized by a $2\times2$ linear system built from five **sufficient statistics**:
+Fitting is a greedy, randomized estimate of this best-in-family function. The target is
+the prediction function itself. Different stages and factors can represent the same
+function, so normalization chooses a stable stored representation rather than a unique
+scientific decomposition. See
+[Identifiability and stability](model.md#identifiability-and-stability).
+
+### What one stage targets
+
+Suppose stages $1,\ldots,\ell-1$ give the current predictor $\hat m_{\ell-1}$. Stage
+$\ell$ receives the **stage residuals**
+
+$$
+R_i^{(\ell)}=Y_i-\hat m_{\ell-1}(X_i).
+$$
+
+The first stage has $\hat m_0=0$, so $R_i^{(1)}=Y_i$. If we hold the current fitted model
+fixed, the ideal correction for a fresh observation is
+
+$$
+g_\ell^\star(x)
+=
+\mathbb E\left[Y-\hat m_{\ell-1}(X)\mid X=x\right]
+=
+m^\star(x)-\hat m_{\ell-1}(x).
+$$
+
+One stage greedily approximates this correction. After adding it, TSL jointly refits the
+coefficients of all completed branches. The next stage uses the residuals after that
+least-squares refit.
+
+## How one grid represents a correction
+
+A grid has positive and negative branches
+
+$$
+f_+(x)=\lambda_+\prod_{j=1}^p a_{+,j}(x_j),
+\qquad
+f_-(x)=\lambda_-\prod_{j=1}^p a_{-,j}(x_j),
+$$
+
+and predicts
+
+$$
+g(x)=f_+(x)-f_-(x).
+$$
+
+The internal scales satisfy $\lambda_+,\lambda_-\geq0$, and the univariate factors
+$a_{\pm,j}$ are positive step functions. For feature $j$, let
+
+$$
+\mathcal P_j=\{I_{j,1},\ldots,I_{j,L_j}\}
+$$
+
+be a partition of its observed range. The factors are constant on these intervals. The
+number of boundaries in the full partition
+$\mathcal P=(\mathcal P_1,\ldots,\mathcal P_p)$ is
+
+$$
+K(\mathcal P)=\sum_{j=1}^p(L_j-1).
+$$
+
+A split divides one interval and adds one boundary. Because that feature factor is
+multiplied by every other feature factor, the split changes every Cartesian cell
+containing the interval while preserving separability.
+
+The implementation stores each factor pair in
+[backbone and tilt coordinates](model.md#backbone-and-exponential-tilt):
+
+$$
+a_{\pm,j,I}=b_{j,I}e^{\pm d_{j,I}},
+\qquad
+b_{j,I}>0,
+\qquad
+d_{j,I}\in\mathbb R.
+$$
+
+The backbone $b$ controls common magnitude. The tilt $d$ controls the imbalance between
+the two branches.
+
+## Starting one grid
+
+The fit uses either L2 weights or Huber weights. Define
+
+$$
+w(e)
+=
+\begin{cases}
+1, & \text{L2},\\
+1, & \text{Huber and }|e|\leq\kappa,\\
+\kappa/|e|, & \text{Huber and }|e|>\kappa,
+\end{cases}
+\qquad
+\kappa=1.345.
+$$
+
+Every feature starts with one interval, $b=1$, and $d=0$, so the initial grid is
+constant.
+
+If every incoming stage residual is non-negative, grid fitting uses
+**positive-only mode**:
+
+$$
+\lambda_+=1,
+\qquad
+\lambda_-=0,
+\qquad
+d_{j,I}=0.
+$$
+
+Only the positive backbone is updated during fitting. Final normalization gives
+$\lambda_-$ a small positive numerical floor, so the returned negative branch is
+negligible rather than exactly zero.
+
+For mixed-sign stage residuals, let
+
+$$
+w_i^{\mathrm{in}}=w\left(R_i^{(\ell)}\right).
+$$
+
+The initial constant scales are
+
+$$
+\lambda_+
+=
+\max\left(
+\frac{\sum_i w_i^{\mathrm{in}}[R_i^{(\ell)}]_+}{\sum_i w_i^{\mathrm{in}}},
+10^{-10}
+\right),
+\qquad
+\lambda_-
+=
+\max\left(
+\frac{\sum_i w_i^{\mathrm{in}}[-R_i^{(\ell)}]_+}{\sum_i w_i^{\mathrm{in}}},
+10^{-10}
+\right),
+$$
+
+where $[z]_+=\max(z,0)$. The **grid residual** after initialization is
+
+$$
+e_i^{(0)}=R_i^{(\ell)}-g_0(X_i).
+$$
+
+These residuals set the scale of the boundary penalty introduced below.
+
+## How one grid chooses its next action
+
+At step $t$, let $g_t$ be the current grid and define
+
+$$
+e_i^{(t)}=R_i^{(\ell)}-g_t(X_i),
+\qquad
+w_i^{(t)}=w\left(e_i^{(t)}\right).
+$$
+
+TSL holds these weights fixed while comparing all actions at this step. Every candidate
+uses the same weighted squared loss:
+
+$$
+L_t(g)
+=
+\sum_{i=1}^n
+w_i^{(t)}
+\left(R_i^{(\ell)}-g(X_i)\right)^2.
+$$
+
+For Huber fitting, this is a fixed-weight quadratic approximation to Huber loss. After
+accepting an action, TSL recomputes the residuals and weights before the next comparison.
+
+There are three actions:
+
+| Action | Change | Boundary change $\Delta K_a$ |
+|---|---|---:|
+| Split | Divide one interval and fit both children | $+1$ |
+| Boundary refit | Keep a boundary fixed and refit the factors on both sides | $0$ |
+| Merge | Remove a boundary and fit one shared backbone/tilt pair on the union | $-1$ |
+
+Each candidate $a$ receives the score
+
+$$
+\operatorname{score}(a)
+=
+D_a-M_a-C_{\partial}\Delta K_a.
+$$
+
+Here $D_a$ is the reduction in fixed-weight loss, $M_a$ is the factor-update penalty,
+and $C_{\partial}$ is the penalty for one boundary. We derive these terms next.
+
+## Loss reduction and the factor-update penalty
+
+First consider one region affected by an action: either one child of a split or one side
+of a boundary refit. Let $S$ be the indices of the training rows in that region. For this
+derivation, write
+
+$$
+f_{+,i}=f_+(X_i),
+\qquad
+f_{-,i}=f_-(X_i),
+\qquad
+e_i=e_i^{(t)},
+\qquad
+w_i=w_i^{(t)}.
+$$
+
+The candidate multiplies the current branch predictions in $S$ by positive factors
+$v_+$ and $v_-$:
+
+$$
+g_{\mathrm{new}}(X_i)=v_+f_{+,i}-v_-f_{-,i}.
+$$
+
+Let
+
+$$
+u_+=v_+-1,
+\qquad
+u_-=v_--1.
+$$
+
+Write the prediction change for row $i$ as
+
+$$
+\Delta_i
+=
+g_{\mathrm{new}}(X_i)-g_t(X_i)
+=
+u_+f_{+,i}-u_-f_{-,i}.
+$$
+
+### Where $D_S$ comes from
+
+$D_S$ is the loss before the update minus the loss after the update, restricted to rows
+in $S$. The new residual is
+
+$$
+e_{i,\mathrm{new}}
+=
+e_i-\Delta_i.
+$$
+
+Because $e_i^2-(e_i-\Delta_i)^2=2e_i\Delta_i-\Delta_i^2$, the loss reduction is
+
+$$
+D_S(u)
+=
+\sum_{i\in S}w_i
+\left(2e_i\Delta_i-\Delta_i^2\right).
+$$
+
+Substituting $\Delta_i=u_+f_{+,i}-u_-f_{-,i}$ and expanding gives
 
 $$
 \begin{aligned}
-S_{11} &= \sum_{i\in S} w_i\bigl(\tilde{m}_{+}^{(i)}\bigr)^2, &
-S_{22} &= \sum_{i\in S} w_i\bigl(\tilde{m}_{-}^{(i)}\bigr)^2, &
-S_{12} &= -\sum_{i\in S} w_i\,\tilde{m}_{+}^{(i)}\tilde{m}_{-}^{(i)}, \\
-t_1 &= \sum_{i\in S} w_i\,r_i\,\tilde{m}_{+}^{(i)}, &
-t_2 &= -\sum_{i\in S} w_i\,r_i\,\tilde{m}_{-}^{(i)}. & &
+D_S(u)
+={}&
+2u_+\sum_{i\in S}w_ie_if_{+,i}
+-
+2u_-\sum_{i\in S}w_ie_if_{-,i}\\
+&-
+u_+^2\sum_{i\in S}w_if_{+,i}^2
+-
+u_-^2\sum_{i\in S}w_if_{-,i}^2\\
+&+
+2u_+u_-\sum_{i\in S}w_if_{+,i}f_{-,i}.
 \end{aligned}
 $$
 
-!!! note "Implementation note — tilt coupling (τ, ρ)"
-    The solver `solve_two_tensor` (`src/grid_tensor/two_tensor_solver.rs`) optimizes a
-    slightly more general objective than the ridge above, adding two regularizers that
-    couple the two branches:
-    $\;+\,\tau(\hat{u}_+ - \hat{u}_-)^2 + \rho\,|\hat{u}_+ - \hat{u}_-|$. The system matrix is
-    then
-
-    $$
-    A = \begin{pmatrix} S_{11}+\alpha+\tau & S_{12}-\tau \\ S_{12}-\tau & S_{22}+\alpha+\tau \end{pmatrix},
-    \qquad t = \begin{pmatrix} t_1 \\ t_2 \end{pmatrix}.
-    $$
-
-    Setting $\tau=\rho=0$ recovers the ridge form above. With $\rho=0$ the solution is the
-    explicit inverse $\hat{u}=A^{-1}t$; with $\rho>0$ an iterative soft-thresholding step
-    handles the $\ell_1$ term. Defaults keep $\tau$ small and $\rho=0$
-    (see [Hyperparameters](../guides/hyperparameters.md)).
-
-After solving, the updates are **clamped** to preserve positivity and stability:
+The code computes this expression from five sums:
 
 $$
-v_\pm^S = \mathrm{clamp}(1 + \hat{u}_\pm^S, v_{\min}, v_{\max}),
-\qquad \mathrm{clamp}(x,a,b) = \max(a,\min(b,x)).
+\begin{aligned}
+S_{++}&=\sum_{i\in S}w_i f_{+,i}^2,
+&
+S_{--}&=\sum_{i\in S}w_i f_{-,i}^2,
+&
+S_{+-}&=-\sum_{i\in S}w_i f_{+,i}f_{-,i},\\
+t_+&=\sum_{i\in S}w_i e_i f_{+,i},
+&
+t_-&=-\sum_{i\in S}w_i e_i f_{-,i}.
+&&
+\end{aligned}
 $$
 
-Crucially the candidate is scored at the **clamped** update actually applied: writing
-$\tilde{u}_\pm^S = v_\pm^S - 1$,
+The minus signs in $S_{+-}$ and $t_-$ absorb the minus sign in
+$g=f_+-f_-$, which gives the compact form below.
+
+Collecting terms gives
 
 $$
-\Delta_S = \mathcal{L}_S(0,0) - \mathcal{L}_S(\tilde{u}_+^S, \tilde{u}_-^S).
+D_S(u)
+=
+2(t_+u_+ + t_-u_-)
+-
+\left(
+S_{++}u_+^2
++2S_{+-}u_+u_-
++S_{--}u_-^2
+\right).
 $$
 
-The L2 and Huber refinement strategies (`RefinementStrategy::L2` / `Huber`) differ only in
-the weights $w_i$: L2 uses $w_i=1$; Huber uses $w_i=\min(1, c/|r_i|)$ with $c\approx1.345$.
+Thus $D_S>0$ means that the proposed multipliers reduce the fixed-weight loss on $S$
+before penalties.
 
-## Initialization and the positive-only special case
-
-A stage starts with both products constant ($\hat{m}_{\pm,j}=1$ everywhere) and the scalars
-initialized from residual signs. When **all** outer residuals are non-negative
-($R_i\ge0$ for all $i$ — e.g. stage 1 with non-negative targets), TSL uses the simplified
-**positive-only** mode: $\lambda_{-}^{(\ell)}=0$, the $(-)$ product stays at 1, and the
-objective reduces to 1D ridge least squares on the $(+)$ product,
+Write the multipliers as a backbone update $\beta$ and a tilt update $\delta$:
 
 $$
-\hat{u}_+^S = \frac{\sum_{i\in S} w_i\,r_i\,\tilde{m}_{+}^{(i)}}{\sum_{i\in S} w_i\,(\tilde{m}_{+}^{(i)})^2 + \alpha}.
+\beta
+=
+\frac12(\log v_+ + \log v_-),
+\qquad
+\delta
+=
+\frac12(\log v_+ - \log v_-).
 $$
 
-This invariant — positive-only stage 1 produces non-negative predictions with $d_j=0$ — is
-tested in `tests/stage1_positive_only.rs`.
-
-## Candidate sampling, stopping, and binning
-
-- **Sampling.** Two parameters bound the search per iteration:
-  $\texttt{split_try}$ split positions are sampled per (feature, interval) from the
-  *valid* positions (those leaving $\ge\texttt{min_interval_samples}$ on both sides), and
-  $\texttt{colsample}\in[0,1]$ samples a fraction of features. The `SplitStrategy` enum
-  offers `Random` (default), `Best`, and `TopK`.
-- **Stopping.** Refinement stops when `n_iter` iterations are reached, no split exceeds the
-  minimum error-reduction threshold, the `min_interval_samples` constraint would be
-  violated, or no valid split remains.
-- **Histogram binning.** Setting `max_bins` restricts candidate positions to quantile bin
-  edges and replaces per-position prefix sums with per-bin cumulative sums, cutting the
-  per-candidate cost from $O(n)$ to $O(\text{bins})$. See
-  [GridTensor → histogram binning](../code/grid-tensor.md#histogram-binning).
-
-Efficient evaluation relies on **prefix-sum caches** per axis, giving $O(1)$ queries for
-the sufficient statistics of any candidate.
-
-## Bagging
-
-To reduce variance, $n_{\text{grids}}$ grid tensors are fit independently (embarrassingly
-parallel) and aggregated into one stage component. Because an average of products is not a
-product, aggregation works on the per-feature components in the backbone/tilt gauge — see
-the dedicated page on [Bagging & aggregation](bagging-aggregation.md).
-
-## Coefficient backfitting
-
-After stage $\ell$ is fit, all stage scalars are refit by ordinary least squares. Build the
-design matrix $M\in\mathbb{R}^{n\times 2\ell}$ whose columns are the per-stage unscaled
-products,
+Equal multipliers change only the backbone; reciprocal multipliers change only the tilt.
+The update penalty is
 
 $$
-M_{i,k} = \prod_{j=1}^p \hat{m}_{+,j}^{(k)}(x_j^{(i)}), \qquad
-M_{i,\ell+k} = -\prod_{j=1}^p \hat{m}_{-,j}^{(k)}(x_j^{(i)}), \qquad k=1,\dots,\ell,
+M_S(v_+,v_-)
+=
+\alpha\beta^2+\tau\delta^2+\rho|\delta|.
 $$
 
-and solve $\boldsymbol{\lambda} = (M^\top M)^{-1} M^\top \mathbf{y}$ with
-$\boldsymbol{\lambda} = [\lambda_{+}^{(1)},\dots,\lambda_{+}^{(\ell)},\lambda_{-}^{(1)},\dots,\lambda_{-}^{(\ell)}]^\top$.
-This **orthogonal-greedy** refit makes the coefficients jointly optimal given all stages so
-far, improving on frozen-coefficient greedy fitting.
+Here $\alpha$, $\tau$, and $\rho$ correspond to `alpha`, `tilt_tau`, and `tilt_rho`.
+They shrink common log-magnitude changes, shrink tilt changes, and allow an exactly zero
+tilt update, respectively.
 
-!!! note "Implementation note — where the coefficients live"
-    The backfit is solved in `src/forest/fitter.rs` (via `LeastSquaresSvd`) over the
-    $[\tilde{m}_+^{(k)}, -\tilde{m}_-^{(k)}]$ columns of every completed stage. The solved coefficients are
-    stored as `scaling_plus`/`scaling_minus` on each `StagePredictor` rather than mutating
-    the grid's `lambda_plus`/`lambda_minus` — mathematically equivalent, and the reason
-    scaling is applied exactly once at the stage level.
+For a split, both children are measured from their common parent. For a boundary
+refit, each new factor is measured from its current value. In both cases,
 
-## Cost
+$$
+D_a=D_L+D_R,
+\qquad
+M_a=M_L+M_R.
+$$
 
-Total training cost is $\mathcal{O}(R\, n_{\text{grids}}\, T\, n\, p)$ for $R$ stages,
-$n_{\text{grids}}$ bagged grids, $T$ split iterations per grid, $n$ samples, $p$ features.
-Bagged grids are parallel, and histogram binning trades the $n$ factor for the bin count.
+A merge uses a different baseline, described below.
+
+## Why one boundary has a penalty
+
+A boundary makes the grid more flexible. For a positive finite `complexity_penalty`,
+TSL assigns every boundary the fixed penalty
+
+$$
+C_{\partial}
+=
+\lambda_{\mathrm{cc}}\,
+s_0^2\,
+\nu_{\partial}\,
+\log(\max(n,2)),
+$$
+
+where $\lambda_{\mathrm{cc}}$ is the value of `complexity_penalty` and
+
+$$
+w_i^{(0)}=w\left(e_i^{(0)}\right),
+\qquad
+s_0^2
+=
+\frac1n
+\sum_{i=1}^n
+w_i^{(0)}\left(e_i^{(0)}\right)^2.
+$$
+
+Although $C_{\partial}$ has several symbols, it is only a product of four parts:
+
+- $\lambda_{\mathrm{cc}}$ is the user-controlled strength;
+- $s_0^2$ puts the penalty in the same squared-error units as $D_a$;
+- $\nu_{\partial}$ counts the interval parameters added by one boundary;
+- $\log(\max(n,2))$ increases the penalty with sample size.
+
+The parameter count is
+
+$$
+\nu_{\partial}
+=
+\begin{cases}
+1, & \text{positive-only mode},\\
+2, & \text{full two-branch mode}.
+\end{cases}
+$$
+
+A boundary adds one backbone value in positive-only mode, or one backbone and one tilt
+value in the full model.
+
+For Gaussian regression, suppose a boundary adds $\nu_{\partial}$ parameters and reduces
+the residual sum of squares ($\mathrm{RSS}$) by $\Delta_{\mathrm{RSS}}$. A first-order
+BIC calculation favors the boundary when
+
+$$
+\Delta_{\mathrm{RSS}}
+\gtrsim
+\frac{\mathrm{RSS}}{n}\nu_{\partial}\log n.
+$$
+
+TSL replaces $\mathrm{RSS}/n$ with the initialized weighted mean squared residual
+$s_0^2$ and multiplies by `complexity_penalty`. This is a BIC-inspired calibration.
+Because the initialized loss can contain learnable signal and the parameter count omits
+threshold search, shrinkage, normalization, and greedy selection, tune
+`complexity_penalty` on validation data.
+
+## How the three actions use the score
+
+The score for each action is
+
+| Action | Score |
+|---|---:|
+| Split | $D_a-M_a-C_{\partial}$ |
+| Boundary refit | $D_a-M_a$ |
+| Merge | $D_a-M_a+C_{\partial}$ |
+
+The code calls a boundary refit a `resplit`, although the boundary does not move.
+Only the factor values on its two sides are refitted.
+
+The highest-scoring eligible action is accepted only when its score exceeds
+`min_split_loss` and a relative numerical tolerance.
+
+The boundary penalty depends only on the resulting boundary count. Because the update
+penalty depends on the starting factors, two routes to the same partition can receive
+different scores.
+
+## How a merge is fitted
+
+Suppose a boundary on feature $j$ separates intervals $L$ and $R$, with factors
+
+$$
+a_{\pm,L}=b_Le^{\pm d_L},
+\qquad
+a_{\pm,R}=b_Re^{\pm d_R}.
+$$
+
+If the intervals contain $n_L$ and $n_R$ rows, the merge baseline is their
+sample-count-weighted geometric mean:
+
+$$
+a_{\pm,\mathrm{ref}}
+=
+\exp\left(
+\frac{n_L\log a_{\pm,L}+n_R\log a_{\pm,R}}
+{n_L+n_R}
+\right).
+$$
+
+This baseline is symmetric, suits positive factors updated multiplicatively, and equals
+the common factor when both intervals agree.
+
+TSL evaluates both branch predictions at this baseline and applies the same
+two-multiplier calculation used for the other actions. If the fitted one-interval grid is
+$g_{\mathrm{merged}}$, then
+
+$$
+D_{\mathrm{merge}}
+=
+L_t(g_t)-L_t(g_{\mathrm{merged}}).
+$$
+
+The update penalty $M_{\mathrm{merge}}$ measures the change from the geometric baseline
+to the fitted merged factor. The loss reduction accounts for forcing two intervals to
+share one factor. Removing the boundary supplies the separate $+C_{\partial}$ score term.
+
+## How multiplier proposals are computed { #the-closed-form-2x2-solver }
+
+The same two-variable solver proposes multipliers for all three actions. Splits and
+boundary refits use the current branch predictions and residuals. A merge uses the
+predictions and residuals at its geometric baseline.
+
+The exact update penalty is expressed in $\log v_+$ and $\log v_-$ and is not quadratic
+in $u_\pm=v_\pm-1$. Since $v_\pm=1+u_\pm$ and $\log(1+u)\approx u$ near zero, the
+solver uses
+
+$$
+\beta\approx\frac{u_++u_-}{2},
+\qquad
+\delta\approx\frac{u_+-u_-}{2}.
+$$
+
+Using the five regional sums defined above, maximizing the resulting local approximation
+to $D_S-M_S$ when $\rho=0$ gives the linear system
+
+$$
+A
+\begin{pmatrix}u_+\\u_-\end{pmatrix}
+=
+\begin{pmatrix}t_+\\t_-\end{pmatrix},
+$$
+
+where
+
+$$
+A
+=
+\begin{pmatrix}
+S_{++}&S_{+-}\\
+S_{+-}&S_{--}
+\end{pmatrix}
++
+\frac14
+\begin{pmatrix}
+\alpha+\tau&\alpha-\tau\\
+\alpha-\tau&\alpha+\tau
+\end{pmatrix}.
+$$
+
+When $\rho>0$, the solver checks positive, negative, and exactly zero tilt updates and
+keeps the best valid proposal.
+
+The proposed multipliers are limited to
+
+$$
+v_+,v_-\in[0.05,20].
+$$
+
+The action score uses the exact log-coordinate update penalty at this limited proposal.
+When the selected action is applied, the code also enforces
+
+$$
+b\in[10^{-10},10^{10}],
+\qquad
+d\in[-10,10].
+$$
+
+These are absolute safety bounds. If one activates, the applied update can differ from
+the scored proposal.
+
+### Positive-only proposal
+
+In positive-only mode, $f_{-,i}=0$ and the tilt remains zero. The proposal is
+
+$$
+u_+
+=
+\frac{\sum_{i\in S}w_i e_i f_{+,i}}
+{\sum_{i\in S}w_i f_{+,i}^2+\alpha}.
+$$
+
+After limiting the multiplier, its score uses the exact update penalty
+$\alpha\log^2(1+u_+)$.
+
+## Search, boundary budget, and stopping
+
+For each considered feature, `split_try` bounds the number of currently allowed split
+positions examined by the default `Random` strategy. `Best` searches all valid
+positions. `TopK` samples from the highest-scoring positions. Every strategy rejects
+thresholds that violate `min_interval_samples`.
+
+The code calls a grid's boundary count its `fineness`. Because fitting starts with no
+boundaries, it equals $K(\mathcal P)$: a split adds one, a merge removes one, and a
+boundary refit leaves it unchanged. The `n_iter` parameter is the boundary budget.
+
+A positive finite `complexity_penalty` enables merges and the boundary penalty. At the
+boundary budget, further splits are excluded, but eligible merges and boundary
+refits may continue. A merge can free room for a later split.
+
+When `complexity_penalty` is zero, negative, or non-finite, merges are disabled, the
+boundary penalty is zero, and reaching the budget stops the grid fit.
+
+Two guards prevent repeated boundary refits from cycling:
+
+- the boundary touched by the preceding split or refit is skipped;
+- at most five boundary refits may occur consecutively.
+
+A split or merge resets this count. A separate limit stops the full action loop after
+$3\,\texttt{n_iter}$ steps. Fitting also stops when no candidate clears the acceptance
+threshold or no valid candidate remains.
+
+Histogram binning changes which split thresholds are examined, not how they are scored.
+Setting `max_bins` restricts candidates to quantile-bin edges. Prefix sums let the code
+score each threshold in constant time, regardless of the number of rows in the interval.
+See [GridTensor: histogram binning](../code/grid-tensor.md#histogram-binning).
+
+## Combining the randomized grids
+
+Once every grid stops, fitting moves from grid level to stage level. Each grid fit
+receives its own seed and runs in parallel when Rayon is enabled. `Random` and `TopK`
+use the seed during partition search; `Best` searches deterministically. Every grid uses
+all training rows, and rows are not resampled.
+
+Aggregation places every grid on the union of their split points and centers the aligned
+factor coordinates before comparing grid shapes. When `similarity_threshold` requests
+trimming, it computes pairwise component-shape distances, chooses the grid with the
+smallest total distance to the others as the reference, and discards grids farthest from
+it. Otherwise, every grid is retained without computing those distances. Aggregation
+then takes geometric means of the retained positive factors, negative factors, and
+internal scales, and normalizes the aggregated factor coordinates. See
+[Bagging and aggregation](bagging-aggregation.md).
+
+## Refitting all branch coefficients { #coefficient-backfitting }
+
+After aggregation, fitting moves from stage level back to the full model. For stage
+$\ell$, define its two branch columns
+
+$$
+\phi_{\ell,+}(X_i)=f_{\ell,+}(X_i),
+\qquad
+\phi_{\ell,-}(X_i)=-f_{\ell,-}(X_i).
+$$
+
+These columns include the internal scales $\lambda_{\ell,+}$ and $\lambda_{\ell,-}$ but
+exclude the outer OLS branch coefficients. Collect all branch columns through stage
+$\ell$:
+
+$$
+\Phi_\ell
+=
+\begin{pmatrix}
+\phi_{1,+}&\phi_{1,-}&\cdots&\phi_{\ell,+}&\phi_{\ell,-}
+\end{pmatrix}
+\in\mathbb R^{n\times2\ell}.
+$$
+
+The full model solves
+
+$$
+\hat\gamma_\ell
+\in
+\operatorname*{arg\,min}_{\gamma\in\mathbb R^{2\ell}}
+\|Y-\Phi_\ell\gamma\|_2^2.
+$$
+
+The coefficients are unconstrained and may have either sign. There is no added intercept
+column. The SVD drops singular directions below its relative tolerance and returns the
+minimum-norm solution when branch columns are linearly dependent. This joint
+least-squares refit updates every completed branch coefficient before the next stage
+residual is formed.
+
+!!! note "Where the two scales live"
+    `GridTensor.lambda_plus` and `GridTensor.lambda_minus` are positive internal grid
+    scales included in $f_{\ell,+}$ and $f_{\ell,-}$. The unconstrained OLS coefficients
+    are stored separately as `StagePredictor.scaling_plus` and
+    `StagePredictor.scaling_minus`. Prediction applies these outer scalings exactly once;
+    the legacy `GridTensor.scaling` field is ignored in two-tensor mode. See the
+    [architecture invariants](../code/architecture.md#two-critical-invariants).
+
+## Computational cost
+
+For $R$ stages, $B$ randomized grids per stage, at most $T$ grid actions, $n$
+observations, and $p$ features, a rough upper bound for grid search is
+
+$$
+\mathcal O(RBTnp).
+$$
+
+Randomized grids run in parallel. Cached cumulative sums make split-threshold scores
+cheap to evaluate, and histogram binning replaces scans over rows with scans over
+candidate bins. Partition alignment, pairwise grid comparisons during aggregation, and
+the repeated SVD coefficient refits add separate costs outside this bound.

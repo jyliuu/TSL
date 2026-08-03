@@ -26,7 +26,8 @@ stubs in `logging.rs`), so the core has zero logging overhead.
 
 - **`Action`** — `Split` / `Resplit` / `Merge`.
 - **`SplitEvent`** — a split/resplit/merge: column, split value, error reduction, left/right
-  counts, optional per-point residual `Update`s.
+  counts, optional per-point residual `Update`s. Merge counts and residual updates cover
+  exactly the two adjacent intervals represented by the removed boundary.
 - **`CombinedGridSnapshot`** — a per-stage snapshot: epoch, energy, scaling, grid JSON, and
   $\tilde{m}_+/\tilde{m}_-$ arrays.
 - **`EpochScalingSnapshot`** — the scaling coefficients each time they are re-optimized.

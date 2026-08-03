@@ -17,10 +17,11 @@ pub enum RefinementKind {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RefinementStrategyParams {
     pub kind: RefinementKind,
+    /// L2 penalty on the multiplicative log-backbone update.
     pub alpha: f64,
-    /// L2 coupling between u_+ and u_- (objective τ).
+    /// L2 penalty on the multiplicative tilt update.
     pub tilt_tau: f64,
-    /// L1 coupling on (u_+ − u_-) (objective ρ).
+    /// L1 penalty on the multiplicative tilt update.
     pub tilt_rho: f64,
     /// Prior sample size for parent anchoring (tau_0).
     /// Interpreted as "how many samples worth of confidence in the parent".
@@ -83,18 +84,19 @@ impl RefinementStrategyParamsBuilder {
         self
     }
 
+    /// L2 penalty on `β = log(v_b)`, the log-backbone update.
     pub fn alpha(mut self, alpha: f64) -> Self {
         self.alpha = alpha;
         self
     }
 
-    /// L2 coupling between u_+ and u_- (objective τ).
+    /// L2 penalty on `δ = 0.5 log(v_+ / v_-)`, the tilt update.
     pub fn tilt_tau(mut self, tilt_tau: f64) -> Self {
         self.tilt_tau = tilt_tau;
         self
     }
 
-    /// L1 coupling on (u_+ − u_-) (objective ρ).
+    /// L1 penalty on `δ = 0.5 log(v_+ / v_-)`, the tilt update.
     pub fn tilt_rho(mut self, tilt_rho: f64) -> Self {
         self.tilt_rho = tilt_rho;
         self
@@ -267,12 +269,15 @@ impl SplitStrategyParamsBuilder {
         self
     }
 
-    /// Complexity penalty (λ) for the adaptive merge bonus.
+    /// Cost-complexity strength for unified structural action selection.
     ///
-    /// `bonus = λ · MSE · (log(n)/n + 1/harmonic_mean(n_left, n_right))`
+    /// One boundary costs `λ · MSE_0 · d · ln(n)`, where `MSE_0` is the fixed
+    /// initial surrogate loss per observation and `d` is one in positive-only
+    /// mode and two in the full two-tensor model. Splits pay this cost, resplits
+    /// leave it unchanged, and merges recover it.
     ///
-    /// BIC-inspired and scale-invariant. Larger λ encourages simpler trees.
-    /// Default: 0.0. Typical values: 0.5–2.0.
+    /// Positive finite values enable merge candidates, and larger values encourage
+    /// simpler grids. The default `0.0` preserves split/resplit-only fitting.
     pub fn complexity_penalty(mut self, lambda: f64) -> Self {
         self.complexity_penalty = lambda;
         self

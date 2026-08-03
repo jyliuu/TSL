@@ -43,15 +43,15 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
 | `decay` | `float` | `1.0` | multiply `n_iter` by this after epoch 1 |
 | `split_try` | `int` | `10` | candidate split positions per (feature, interval) |
 | `colsample_bytree` | `float` | `0.8` | fraction of features sampled per split |
-| `alpha` | `float` | `0.0` | ridge regularization on the bin update |
-| `complexity_penalty` | `float` | `0.0` | penalty discouraging extra splits |
-| `min_split_loss` | `float` | `0.0` | minimum error reduction to accept a split |
+| `alpha` | `float` | `0.0` | $\ell_2$ penalty on the log-backbone update $\beta=\log v_b$ |
+| `complexity_penalty` | `float` | `0.0` | fixed-scale boundary cost for unified structural selection (`0.0` disables merges) |
+| `min_split_loss` | `float` | `0.0` | minimum objective reduction to accept a structural action |
 | `min_interval_samples` | `int` | `1` | minimum observations either side of a split |
 | `refinement_strategy` | `str` | `"l2"` | `"l2"` or `"huber"` |
 | `prior_sample_size` | `float` | `0.0` | parent-anchoring strength (advanced; `0.0` = off) |
 | `update_clamp` | `float` | `inf` | update-magnitude cap (advanced; `inf` = off) |
-| `tilt_tau` | `float` | `0.01` | $\ell_2$ coupling between $u_+$ and $u_-$ |
-| `tilt_rho` | `float` | `0.0` | $\ell_1$ coupling on $(u_+ - u_-)$ |
+| `tilt_tau` | `float` | `0.01` | $\ell_2$ penalty on the tilt update $\delta=\frac12\log(v_+/v_-)$ |
+| `tilt_rho` | `float` | `0.0` | $\ell_1$ penalty on $\delta$; can produce zero tilt updates |
 | `split_strategy` | `str` | `"random"` | `"random"`, `"best_split"`, or `"top_k"` |
 | `top_k` | `int` | `10` | (for `top_k`) candidate pool size |
 | `must_fill_all_k` | `bool` | `True` | (for `top_k`) require all $k$ slots |
@@ -420,7 +420,7 @@ Fit a single grid tensor (no boosting, no bagging).
 | `n_iter` | `int` | _required_ | split budget |
 | `split_try` | `int` | _required_ | candidate split positions |
 | `colsample_bytree` | `float` | _required_ | fraction of features per split |
-| `complexity_penalty` | `float` | `0.0` | penalty discouraging extra splits |
+| `complexity_penalty` | `float` | `0.0` | fixed-scale boundary cost for unified structural selection (`0.0` disables merges) |
 | `seed` | `int` | `42` | RNG seed |
 
 **Returns**
