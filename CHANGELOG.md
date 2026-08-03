@@ -4,6 +4,12 @@ All notable changes to TSL are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com) and the project adheres to
 [Semantic Versioning](https://semver.org).
 
+## [0.4.0] - 2026-08-03
+
+### Features
+
+- **grid:** Add cost-complexity structural selection (#38)
+
 ## [0.3.0] - 2026-06-03
 
 ### Documentation
@@ -43,4 +49,3 @@ All notable changes to TSL are documented here. The format follows
 - Documentation overhaul (README, CLAUDE.md, CONTRIBUTING) (#4)
 - Enlarge readme logo and example figures (#5)
 - MkDocs documentation site + GitHub Pages deployment (#7)
-
