@@ -46,6 +46,27 @@ Prints two tables — top by self-time and top by inclusive-time — across
 all threads. Pass a substring as the second positional arg to restrict
 to one thread (e.g. `profile_housing`).
 
+## Structural-complexity benchmark
+
+`benchmark_merge.py` measures held-out accuracy, fit time, and the number of
+stored boundaries on a fixed 80/20 split. It emits per-seed JSON followed by a
+self-contained aggregate record. The aggregate includes the full split and model
+configuration, dataset hash, package/runtime versions, Git revision and dirty-tree
+flag, tracked-patch hash and file list, benchmark-script hash, and thread environment.
+Install the local extension in release mode before benchmarking:
+
+```sh
+cd tsl-py
+VIRTUAL_ENV=../.venv ../.venv/bin/maturin develop --release
+cd ..
+RAYON_NUM_THREADS=2 .venv/bin/python scripts/perf/benchmark_merge.py \
+    data/44977_california_housing.csv --name california --complexity-penalty 1
+```
+
+Pass `--complexity-penalty 0` for the split/resplit-only control. Keep the split seed,
+model seeds, workload parameters, and thread count fixed across comparisons;
+the final JSON record preserves those values so the comparison can be audited.
+
 ## Benchmarks (no profiling)
 
 For wall-clock comparisons rather than profiles:
