@@ -41,18 +41,22 @@ $\hat{m}_+ - \hat{m}_- = \lambda_+\prod_j b_j e^{d_j} - \lambda_-\prod_j b_j e^{
 2. initialize the `RefinementStrategy` (precomputes all candidate scores) and the
    `SplitStrategy` (builds allowed intervals);
 3. optionally apply the histogram-binning mask (`max_bins`);
-4. loop until the fineness budget `n_iter` is hit: the strategy **proposes** an action, the
-   **reducer** applies it (mutating the grid, the per-point caches, and the cached
-   statistics);
-5. normalize with [`l2_identify`](#identification) and return the `GridTensor`.
+4. score eligible split, resplit, and merge actions under one fixed-scale cost-complexity
+   objective, then apply the highest positive-gain action through the **reducer**;
+5. at the `n_iter` fineness budget, exclude new splits while leaving resplits and merges
+   eligible; a merge frees capacity for another split;
+6. normalize with [`l2_identify`](#identification) and return the `GridTensor`.
+
+With `complexity_penalty=0.0`, merge statistics are not maintained and fitting retains the
+split/resplit-only budget behavior.
 
 ### `FittingState` (`state.rs`)
 
 The mutable per-grid context threaded through the loop: the in-progress two-tensor grid
 (`backbone_values`, `tilt_values`, `lambda_plus`, `lambda_minus`); per-point caches
-(`f_plus`, `f_minus`, `f`, `r_tilde` = within-stage residuals); which interval each point
-falls in per axis; and a `PrecomputedStatistics` cache of prefix sums and per-interval
-sufficient statistics enabling $O(1)$ candidate scoring. Holds an optional `LoggingState`.
+(`f_plus`, `f_minus`, `f`, `r_tilde` = within-stage residuals); sorted row/rank mappings;
+and a `PrecomputedStatistics` cache of prefix sums and per-interval sufficient statistics
+enabling $O(1)$ split-candidate scoring. Holds an optional `LoggingState`.
 
 ### Actions (`action.rs`) and splitting (`splitting.rs`)
 
@@ -64,31 +68,41 @@ sufficient statistics enabling $O(1)$ candidate scoring. Holds an optional `Logg
 - **`Best`** — greedily take the highest-gain split (better on small data);
 - **`TopK`** — sample from the top-`k` candidates (`must_fill_all_k` controls strictness).
 
-A `SplitCandidate` carries the column, position, error reduction, and the left/right
-$(u_+, u_-)$ updates. `SplitStrategyState` tracks which positions remain valid; after a
-split at position `idx`, the neighborhood is forbidden from further splitting.
+A `SplitCandidate` carries the column, position, parameter-regularized gain, and the
+left/right $(u_+, u_-)$ updates. A `MergeCandidate` identifies the removed boundary and its
+parameter-regularized gain; the absolute merged factors live in the aligned precomputed cache.
+`SplitStrategyState` tracks valid positions and the fixed boundary cost. After a split at
+position `idx`, the neighborhood is forbidden from further splitting.
 
 ### The reducer (`reducer.rs`)
 
 `fitting_reducer` matches on the action and applies it: it inserts the split into the grid,
 updates backbone/tilt on the two new sub-intervals, recomputes the affected per-point caches
-and the prefix-sum/interval statistics, and (under `evo-logging`) emits log events.
+and the prefix-sum/interval statistics, and (under `evo-logging`) emits log events. For a
+merge, it removes one boundary, stores the candidate's absolute factors, and assigns the
+affected branch predictions directly from the other-axis partial products.
 
 ## The two-tensor solver
 
 `solve_two_tensor` (`src/grid_tensor/two_tensor_solver.rs`) is the load-bearing primitive.
-It builds the regularized $2\times2$ system from the five sufficient statistics
-$S_{11}, S_{22}, S_{12}, t_1, t_2$,
+It builds a locally regularized $2\times2$ proposal system from the five sufficient
+statistics $S_{11}, S_{22}, S_{12}, t_1, t_2$,
 
 $$
-A = \begin{pmatrix} S_{11}+\alpha+\tau & S_{12}-\tau \\ S_{12}-\tau & S_{22}+\alpha+\tau \end{pmatrix},
-\qquad t = \begin{pmatrix} t_1 \\ t_2 \end{pmatrix},
+A =
+\begin{pmatrix}S_{11}&S_{12}\\S_{12}&S_{22}\end{pmatrix}
++\frac14
+\begin{pmatrix}\alpha+\tau&\alpha-\tau\\\alpha-\tau&\alpha+\tau\end{pmatrix},
+\qquad t=\begin{pmatrix}t_1\\t_2\end{pmatrix},
 $$
 
-solves $\hat{u}=A^{-1}t$ (or an iterative step when the $\ell_1$ coupling $\rho>0$), clamps
-$v_\pm = \mathrm{clamp}(1+\hat{u}_\pm, v_{\min}, v_{\max})$ to preserve positivity, and
-returns the gain $\mathcal{L}(0,0) - \mathcal{L}(\hat{u})$ used to score the candidate. The
-full derivation is in [Fitting → the closed-form solver](../math/fitting.md#the-closed-form-2x2-solver).
+solves $\hat{u}=A^{-1}t$ (or the three-case subgradient system when $\rho>0$), and clamps
+$v_\pm = \mathrm{clamp}(1+\hat{u}_\pm, v_{\min}, v_{\max})$ to preserve positivity. The
+candidate score subtracts the exact log-coordinate cost
+$\alpha\beta^2+\tau\delta^2+\rho|\delta|$, where
+$\beta=\tfrac12(\log v_++\log v_-)$ and
+$\delta=\tfrac12(\log v_+-\log v_-)$. The full derivation is in
+[Fitting → the closed-form solver](../math/fitting.md#the-closed-form-2x2-solver).
 
 ### Refinement strategies (`refinement.rs`)
 
@@ -97,8 +111,9 @@ full derivation is in [Fitting → the closed-form solver](../math/fitting.md#th
 - **`L2Refinement`** — $w_i = 1$;
 - **`HuberRefinement`** — robust weights $w_i = \min(1, c/|r_i|)$, $c\approx1.345$.
 
-Both expose `alpha`, `tilt_tau` ($\tau$), `tilt_rho` ($\rho$), `prior_sample_size`, and
-`update_clamp`. `initialize` precomputes the error reduction of every candidate position.
+Both expose `alpha` (log-backbone $\ell_2$), `tilt_tau` (tilt $\ell_2$), `tilt_rho` (tilt
+$\ell_1$), `prior_sample_size`, and `update_clamp`. `initialize` precomputes the penalized
+gain of every candidate position.
 
 ## Identification
 
@@ -123,7 +138,8 @@ with little accuracy loss on larger datasets. With `max_bins: None` the exact pa
 ## Parameters (`params.rs`)
 
 `GridTensorParams` bundles `n_iter` (the split budget), a `SplitStrategyParams`
-(`split_try`, `colsample_bytree`, `min_interval_samples`, `min_split_loss`, kind), a
+(`split_try`, `colsample_bytree`, `min_interval_samples`, `min_split_loss`,
+`complexity_penalty`, kind), a
 `RefinementStrategyParams` (`alpha`, `tilt_tau`, `tilt_rho`, …, kind), and `max_bins`. All
 have fluent `…Builder` types. The Python flat hyperparameters map onto these — see
 [Hyperparameters](../guides/hyperparameters.md).
