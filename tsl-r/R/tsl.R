@@ -17,14 +17,17 @@
 #' @param split_try Number of random split candidates (used by the
 #'   `"random"` split strategy).
 #' @param colsample_bytree Fraction of features sampled per tree.
-#' @param alpha Refinement regularisation strength.
-#' @param complexity_penalty Per-split complexity penalty.
+#' @param alpha L2 penalty on the multiplicative log-backbone update.
+#' @param complexity_penalty Cost-complexity strength for unified split, resplit,
+#'   and merge selection; `0.0` preserves split/resplit-only fitting.
 #' @param min_split_loss Minimum loss reduction required to make a split.
 #' @param min_interval_samples Minimum number of samples per interval.
 #' @param refinement_strategy Refinement loss, one of `"l2"` or `"huber"`.
 #' @param prior_sample_size Prior pseudo-count for refinement shrinkage.
 #' @param update_clamp Maximum magnitude of a refinement update.
-#' @param tilt_tau,tilt_rho Tilt regularisation parameters.
+#' @param tilt_tau L2 penalty on the multiplicative tilt update.
+#' @param tilt_rho L1 penalty on the multiplicative tilt update; positive values
+#'   can produce exact backbone-only updates.
 #' @param split_strategy Split search, one of `"random"`, `"best_split"`,
 #'   or `"top_k"`.
 #' @param top_k Number of candidate splits kept by the `"top_k"` strategy.

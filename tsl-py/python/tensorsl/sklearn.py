@@ -58,14 +58,16 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
     colsample_bytree : float, default=0.8
         Subsample ratio of columns when constructing each tree.
     alpha: float, default=0.0
-        Regularization parameter for the L2 norm.
+        L2 penalty on the multiplicative log-backbone update.
     complexity_penalty : float, default=0.0
-        Complexity penalty (lambda) for adaptive merge bonus. This is BIC-inspired and scale-invariant.
-        Larger values encourage simpler models. Typical values: 0.5-2.0. Default: 0.0 (no complexity penalty).
+        Cost-complexity strength for unified split, resplit, and merge selection. One
+        boundary has a fixed initial-loss-scaled cost: splits pay it, resplits leave it
+        unchanged, and merges recover it. Positive finite values enable merge candidates;
+        0.0 preserves split/resplit-only fitting.
     min_interval_samples : int, default=1
         Minimum number of samples in an interval.
     min_split_loss : float, default=0.0
-        Minimum loss reduction required to split a node.
+        Minimum objective reduction required to apply a structural action.
     split_strategy : str, default="random"
         Strategy for selecting split points ("random", "best_split", "top_k").
     refinement_strategy : str, default="l2"
@@ -79,11 +81,11 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         Clamping parameter for refinement updates. Limits magnitude of update multipliers to the range
         [exp(-update_clamp), exp(update_clamp)]. Use float('inf') for no clamping.
     tilt_tau : float, default=0.01
-        Two-tensor L2 coupling between u_+ and u_- (objective τ). Controls the strength
-        of the quadratic penalty on the difference between positive and negative components.
+        L2 penalty on the multiplicative tilt update
+        ``0.5 * log(v_plus / v_minus)``.
     tilt_rho : float, default=0.0
-        Two-tensor L1 coupling on (u_+ - u_-) (objective ρ). When > 0, can drive the tilt
-        exactly to zero on many sides, yielding pure "backbone-only" updates.
+        L1 penalty on the multiplicative tilt update. Positive values can produce
+        exact backbone-only updates.
     top_k : int, default=10
         When `split_strategy == "top_k"`, number of top candidate splits to consider.
     must_fill_all_k : bool, default=True
