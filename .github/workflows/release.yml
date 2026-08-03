@@ -32,7 +32,7 @@ jobs:
           - { runner: macos-14,       target: aarch64, os: macos }
           - { runner: windows-latest, target: x64,     os: windows }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
@@ -52,7 +52,7 @@ jobs:
     name: sdist
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Build sdist
         uses: PyO3/maturin-action@v1
