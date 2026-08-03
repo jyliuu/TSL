@@ -8,7 +8,7 @@ use std::iter::once;
 
 use crate::grid_tensor::state::{AffectedRange, FittingState, PrefixStats};
 use crate::grid_tensor::two_tensor_solver::{
-    log_coordinate_penalty, solve_two_tensor, DEFAULT_V_MAX, DEFAULT_V_MIN,
+    data_loss_gain, log_coordinate_penalty, solve_two_tensor, DEFAULT_V_MAX, DEFAULT_V_MIN,
 };
 
 pub enum RefinementStrategy {
@@ -879,8 +879,6 @@ impl RefinementStrategy {
             return;
         }
 
-        let (partial_plus, partial_minus) =
-            crate::grid_tensor::reducer::compute_partial_products_for_axis(col, state);
         let is_stage1 = state.is_stage1_positive_only();
         let sorted_indices = &state.precomputed_statistics.sorted_indices[col];
 
@@ -912,18 +910,27 @@ impl RefinementStrategy {
             let mut t1 = 0.0;
             let mut t2 = 0.0;
             let mut current_loss = 0.0;
+            let mut reference_loss = 0.0;
 
-            for &row in &sorted_indices[start..end] {
-                let weight = self.weight(state.residuals[row]);
-                let phi_plus = partial_plus[row] * reference.0;
-                let phi_minus = -partial_minus[row] * reference.1;
-                let reference_residual = state.labels[row] - phi_plus - phi_minus;
-                s11 += weight * phi_plus * phi_plus;
-                s22 += weight * phi_minus * phi_minus;
-                s12 += weight * phi_plus * phi_minus;
-                t1 += weight * reference_residual * phi_plus;
-                t2 += weight * reference_residual * phi_minus;
-                current_loss += weight * state.residuals[row] * state.residuals[row];
+            for (range, factors) in [
+                (start..index, left_factors),
+                (index..end, right_factors),
+            ] {
+                for &row in &sorted_indices[range] {
+                    let weight = self.weight(state.residuals[row]);
+                    let partial_plus = state.f_plus[row] / factors.0;
+                    let partial_minus = state.f_minus[row] / factors.1;
+                    let phi_plus = partial_plus * reference.0;
+                    let phi_minus = -partial_minus * reference.1;
+                    let reference_residual = state.labels[row] - phi_plus - phi_minus;
+                    s11 += weight * phi_plus * phi_plus;
+                    s22 += weight * phi_minus * phi_minus;
+                    s12 += weight * phi_plus * phi_minus;
+                    t1 += weight * reference_residual * phi_plus;
+                    t2 += weight * reference_residual * phi_minus;
+                    current_loss += weight * state.residuals[row] * state.residuals[row];
+                    reference_loss += weight * reference_residual * reference_residual;
+                }
             }
 
             let merged_factors = if is_stage1 {
@@ -962,14 +969,13 @@ impl RefinementStrategy {
                 self.tilt_tau(),
                 self.tilt_rho(),
             );
-            let mut merged_loss = 0.0;
-            for &row in &sorted_indices[start..end] {
-                let weight = self.weight(state.residuals[row]);
-                let prediction =
-                    partial_plus[row] * merged_factors.0 - partial_minus[row] * merged_factors.1;
-                let residual = state.labels[row] - prediction;
-                merged_loss += weight * residual * residual;
-            }
+            let u_plus = merged_factors.0 / reference.0 - 1.0;
+            let u_minus = merged_factors.1 / reference.1 - 1.0;
+            // The reference-centered quadratic gives the merged loss without a second row scan.
+            let reference_to_merged_gain = data_loss_gain(
+                u_plus, u_minus, s11, s22, s12, t1, t2,
+            );
+            let merged_loss = reference_loss - reference_to_merged_gain;
 
             let merge_gain = current_loss - merged_loss - parameter_penalty;
             if merge_gain.is_finite()
