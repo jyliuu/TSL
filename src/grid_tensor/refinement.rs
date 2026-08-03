@@ -52,6 +52,26 @@ impl RefinementStrategy {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn huber_error_uses_the_current_irls_quadratic_surrogate() {
+        let strategy = RefinementStrategy::HuberRefinement {
+            alpha: 0.0,
+            c: 1.0,
+            tilt_tau: 0.0,
+            tilt_rho: 0.0,
+            prior_sample_size: 0.0,
+            update_clamp: f64::INFINITY,
+        };
+        let residuals = ndarray::Array1::from_vec(vec![0.5, 2.0, -4.0]);
+
+        assert!((strategy.weighted_squared_error(&residuals) - 6.25).abs() < 1e-12);
+    }
+}
+
 #[inline]
 pub fn prefix_range(prefix: &[f64], start: usize, end: usize) -> f64 {
     if start == 0 {
@@ -146,6 +166,27 @@ pub fn huber_weighting(res: f64, c: f64) -> f64 {
     }
 }
 
+const MIN_BACKBONE: f64 = 1e-10;
+const MAX_BACKBONE: f64 = 1e10;
+const MAX_TILT: f64 = 10.0;
+
+fn canonical_merge_factors(a_plus: f64, a_minus: f64, is_stage1: bool) -> (f64, f64) {
+    if is_stage1 {
+        let backbone = a_plus.clamp(MIN_BACKBONE, MAX_BACKBONE);
+        return (backbone, backbone);
+    }
+
+    let min_axis_factor = MIN_BACKBONE * (-MAX_TILT).exp();
+    let max_axis_factor = MAX_BACKBONE * MAX_TILT.exp();
+    let log_plus = a_plus.clamp(min_axis_factor, max_axis_factor).ln();
+    let log_minus = a_minus.clamp(min_axis_factor, max_axis_factor).ln();
+    let log_backbone =
+        (0.5 * (log_plus + log_minus)).clamp(MIN_BACKBONE.ln(), MAX_BACKBONE.ln());
+    let tilt = (0.5 * (log_plus - log_minus)).clamp(-MAX_TILT, MAX_TILT);
+    let backbone = log_backbone.exp();
+    (backbone * tilt.exp(), backbone * (-tilt).exp())
+}
+
 impl RefinementStrategy {
     pub fn initialize<'a>(&'a self, mut state: FittingState<'a>) -> FittingState<'a> {
         // Check if Stage 1 positive-only mode: all residuals are nonnegative
@@ -199,6 +240,7 @@ impl RefinementStrategy {
             .residuals
             .assign(&(state.labels.to_owned() - state.y_hat.view()));
         state.r_tilde.assign(&state.residuals);
+        state.current_error = state.residuals.iter().map(|r| r * r).sum();
 
         for col in 0..state.p {
             let mut indices = (0..state.n).collect::<Vec<_>>();
@@ -833,194 +875,113 @@ impl RefinementStrategy {
         lo_boundary_idx: usize,
         hi_boundary_idx: usize,
     ) {
-        let boundary_pos = &state.boundaries[col];
-        if boundary_pos.is_empty() {
+        if state.boundaries[col].is_empty() {
             return;
         }
 
-        // Compute partial products for this axis (efficient: O(n) using divide-out approach)
-        let (g_plus, g_minus) = crate::grid_tensor::reducer::compute_partial_products_for_axis(col, state);
-
+        let (partial_plus, partial_minus) =
+            crate::grid_tensor::reducer::compute_partial_products_for_axis(col, state);
         let is_stage1 = state.is_stage1_positive_only();
-        let alpha = self.alpha();
-        let v_min = DEFAULT_V_MIN;
-        let v_max = DEFAULT_V_MAX;
-
         let sorted_indices = &state.precomputed_statistics.sorted_indices[col];
+
         for i in lo_boundary_idx..=hi_boundary_idx {
-            // Get point ranges for left, right, and union intervals
             let (start, index, end) = state.interval_range_left_and_right(col, i);
+            let left_count = index - start;
+            let right_count = end - index;
+            let total_count = (left_count + right_count) as f64;
 
-            // Get sorted indices for each region (avoid per-boundary allocations)
-            let left_region = &sorted_indices[start..index];
-            let right_region = &sorted_indices[index..end];
-
-            // Compute stats using partial products (g_{\pm}^{(-j)} regressors)
-            let left_stats = crate::grid_tensor::reducer::compute_stats_using_partial_products(
-                col,
-                left_region,
-                &g_plus,
-                &g_minus,
-                state,
-            );
-            let right_stats = crate::grid_tensor::reducer::compute_stats_using_partial_products(
-                col,
-                right_region,
-                &g_plus,
-                &g_minus,
-                state,
-            );
-            // Union stats can be computed by additivity to avoid a third pass.
-            let union_stats = crate::grid_tensor::state::IntervalStats::union(&left_stats, &right_stats);
-
-            // Verify union additivity (I18 invariant) - debug builds only
-            #[cfg(debug_assertions)]
-            {
-                const EPS: f64 = 1e-10;
-                let union_region = &sorted_indices[start..end];
-                let union_stats_direct = crate::grid_tensor::reducer::compute_stats_using_partial_products(
-                    col,
-                    union_region,
-                    &g_plus,
-                    &g_minus,
-                    state,
-                );
-                assert!(
-                    (union_stats.sum_s11 - union_stats_direct.sum_s11).abs() < EPS,
-                    "I18 violation: S11 union additivity failed for col={}, boundary={}",
-                    col,
-                    i
-                );
-                assert!(
-                    (union_stats.sum_s22 - union_stats_direct.sum_s22).abs() < EPS,
-                    "I18 violation: S22 union additivity failed for col={}, boundary={}",
-                    col,
-                    i
-                );
-                assert!(
-                    (union_stats.sum_s12 - union_stats_direct.sum_s12).abs() < EPS,
-                    "I18 violation: S12 union additivity failed for col={}, boundary={}",
-                    col,
-                    i
-                );
-                assert!(
-                    (union_stats.sum_t1 - union_stats_direct.sum_t1).abs() < EPS,
-                    "I18 violation: t1 union additivity failed for col={}, boundary={}",
-                    col,
-                    i
-                );
-                assert!(
-                    (union_stats.sum_t2 - union_stats_direct.sum_t2).abs() < EPS,
-                    "I18 violation: t2 union additivity failed for col={}, boundary={}",
-                    col,
-                    i
-                );
-            }
-
-            // Solve for optimal parameters for left, right, and union
-            // Note: We compute gain_l and gain_r here even though error_reductions_resplit_pairs
-            // stores (gain_l, gain_r) for this boundary. However, those are computed using
-            // interval_stats (f_{\pm} regressors), while we need gains computed using partial
-            // products (g_{\pm}^{(-j)} regressors). These are different, so we must recompute.
-            // TODO: Consider caching these partial-product-based gains if we need them elsewhere.
-            let (gain_l, gain_r, u_plus_merged, u_minus_merged, gain_merged) = if is_stage1 {
-                // Stage 1 positive-only: use 1D ridge solver
-                // Left side: H^L = S_{11}^L, g^L = t_1^L
-                let h_l = left_stats.sum_s11;
-                let g_l = left_stats.sum_t1;
-                let (u_l, _denom_l, _num_l) = l2_update_unanchored(alpha, g_l, h_l);
-                let v_b_l = (1.0 + u_l).clamp(v_min, v_max);
-                let u_l_clamped = v_b_l - 1.0;
-                let gain_l = l2_gain_raw(u_l_clamped, g_l, h_l);
-
-                // Right side: H^R = S_{11}^R, g^R = t_1^R
-                let h_r = right_stats.sum_s11;
-                let g_r = right_stats.sum_t1;
-                let (u_r, _denom_r, _num_r) = l2_update_unanchored(alpha, g_r, h_r);
-                let v_b_r = (1.0 + u_r).clamp(v_min, v_max);
-                let u_r_clamped = v_b_r - 1.0;
-                let gain_r = l2_gain_raw(u_r_clamped, g_r, h_r);
-
-                // Union: H^U = S_{11}^U, g^U = t_1^U
-                let h_u = union_stats.sum_s11;
-                let g_u = union_stats.sum_t1;
-                let (u_u, _denom_u, _num_u) = l2_update_unanchored(alpha, g_u, h_u);
-                let v_b_u = (1.0 + u_u).clamp(v_min, v_max);
-                let u_u_clamped = v_b_u - 1.0;
-                let gain_merged = l2_gain_raw(u_u_clamped, g_u, h_u);
-
-                (gain_l, gain_r, u_u_clamped, 0.0, gain_merged)
-            } else {
-                // Full two-tensor: use 2×2 solver
-                let tau = self.tilt_tau();
-                let rho = self.tilt_rho();
-
-                let (_u_plus_l, _u_minus_l, gain_l) = solve_two_tensor(
-                    left_stats.sum_s11,
-                    left_stats.sum_s22,
-                    -left_stats.sum_s12,
-                    left_stats.sum_t1,
-                    -left_stats.sum_t2,
-                    alpha,
-                    tau,
-                    rho,
-                    v_min,
-                    v_max,
-                );
-
-                let (_u_plus_r, _u_minus_r, gain_r) = solve_two_tensor(
-                    right_stats.sum_s11,
-                    right_stats.sum_s22,
-                    -right_stats.sum_s12,
-                    right_stats.sum_t1,
-                    -right_stats.sum_t2,
-                    alpha,
-                    tau,
-                    rho,
-                    v_min,
-                    v_max,
-                );
-
-                let (u_plus_merged, u_minus_merged, gain_merged) = solve_two_tensor(
-                    union_stats.sum_s11,
-                    union_stats.sum_s22,
-                    -union_stats.sum_s12,
-                    union_stats.sum_t1,
-                    -union_stats.sum_t2,
-                    alpha,
-                    tau,
-                    rho,
-                    v_min,
-                    v_max,
-                );
-
-                (gain_l, gain_r, u_plus_merged, u_minus_merged, gain_merged)
+            let axis_factors = |interval_idx: usize| {
+                let backbone = state.backbone_values[col][interval_idx];
+                let tilt = state.tilt_values[col][interval_idx];
+                (backbone * tilt.exp(), backbone * (-tilt).exp())
             };
+            let left_factors = axis_factors(i);
+            let right_factors = axis_factors(i + 1);
+            let log_reference = |left: f64, right: f64| {
+                ((left_count as f64 * left.ln() + right_count as f64 * right.ln()) / total_count)
+                    .exp()
+            };
+            let reference = (
+                log_reference(left_factors.0, right_factors.0),
+                log_reference(left_factors.1, right_factors.1),
+            );
 
-            // Verify score dominance (I19 invariant) - debug builds only
-            #[cfg(debug_assertions)]
-            {
-                const EPS: f64 = 1e-8;
-                let gain_children = gain_l + gain_r;
-                assert!(
-                    gain_children >= gain_merged - EPS,
-                    "I19 violation: Score dominance failed for col={}, boundary={}: g_A+g_B={}, g_U={}",
-                    col, i, gain_children, gain_merged
-                );
+            let mut s11 = 0.0;
+            let mut s22 = 0.0;
+            let mut s12 = 0.0;
+            let mut t1 = 0.0;
+            let mut t2 = 0.0;
+            let mut current_loss = 0.0;
+
+            for &row in &sorted_indices[start..end] {
+                let weight = self.weight(state.residuals[row]);
+                let phi_plus = partial_plus[row] * reference.0;
+                let phi_minus = -partial_minus[row] * reference.1;
+                let reference_residual = state.labels[row] - phi_plus - phi_minus;
+                s11 += weight * phi_plus * phi_plus;
+                s22 += weight * phi_minus * phi_minus;
+                s12 += weight * phi_plus * phi_minus;
+                t1 += weight * reference_residual * phi_plus;
+                t2 += weight * reference_residual * phi_minus;
+                current_loss += weight * state.residuals[row] * state.residuals[row];
             }
 
-            // Store boundary benefit as merge gain: Δ_boundary = (g_A + g_B) - g_U
-            // Negative values mean merge improves objective (boundary not worth it)
-            // Positive values mean keeping boundary improves objective
-            let boundary_benefit = (gain_l + gain_r) - gain_merged;
+            let merged_factors = if is_stage1 {
+                let (u, _, _) = l2_update_unanchored(self.alpha(), t1, s11);
+                let multiplier = (1.0 + u).clamp(DEFAULT_V_MIN, DEFAULT_V_MAX);
+                canonical_merge_factors(
+                    reference.0 * multiplier,
+                    reference.0 * multiplier,
+                    true,
+                )
+            } else {
+                let (u_plus, u_minus, _) = solve_two_tensor(
+                    s11,
+                    s22,
+                    s12,
+                    t1,
+                    t2,
+                    self.alpha(),
+                    self.tilt_tau(),
+                    self.tilt_rho(),
+                    DEFAULT_V_MIN,
+                    DEFAULT_V_MAX,
+                );
+                let v_plus = 1.0 + u_plus;
+                let v_minus = 1.0 + u_minus;
+                canonical_merge_factors(
+                    reference.0 * v_plus,
+                    reference.1 * v_minus,
+                    false,
+                )
+            };
+            let parameter_penalty = log_coordinate_penalty(
+                merged_factors.0 / reference.0,
+                merged_factors.1 / reference.1,
+                self.alpha(),
+                self.tilt_tau(),
+                self.tilt_rho(),
+            );
+            let mut merged_loss = 0.0;
+            for &row in &sorted_indices[start..end] {
+                let weight = self.weight(state.residuals[row]);
+                let prediction =
+                    partial_plus[row] * merged_factors.0 - partial_minus[row] * merged_factors.1;
+                let residual = state.labels[row] - prediction;
+                merged_loss += weight * residual * residual;
+            }
 
-            // Merge gain is the negative of boundary benefit (merge improves when boundary_benefit < 0)
-            let merge_gain = -boundary_benefit;
-
-            // Store (u_plus, u_minus) for merged interval (used when applying merge)
-            state.precomputed_statistics.error_reductions_merge[col][i] = merge_gain;
-            state.precomputed_statistics.update_pairs_merge[col][i] =
-                (u_plus_merged, u_minus_merged);
+            let merge_gain = current_loss - merged_loss - parameter_penalty;
+            if merge_gain.is_finite()
+                && merged_factors.0.is_finite()
+                && merged_factors.1.is_finite()
+            {
+                state.precomputed_statistics.error_reductions_merge[col][i] = merge_gain;
+                state.precomputed_statistics.update_pairs_merge[col][i] = merged_factors;
+            } else {
+                state.precomputed_statistics.error_reductions_merge[col][i] = f64::NAN;
+                state.precomputed_statistics.update_pairs_merge[col][i] = (f64::NAN, f64::NAN);
+            }
         }
     }
 
@@ -1226,6 +1187,15 @@ impl RefinementStrategy {
             RefinementStrategy::L2Refinement { .. } => 1.0,
             RefinementStrategy::HuberRefinement { c, .. } => huber_weighting(res, *c),
         }
+    }
+
+    /// Current IRLS quadratic surrogate used to compare every structural action
+    /// and its stopping tolerance on one loss scale.
+    pub(crate) fn weighted_squared_error(&self, residuals: &ndarray::Array1<f64>) -> f64 {
+        residuals
+            .iter()
+            .map(|&residual| self.weight(residual) * residual * residual)
+            .sum()
     }
 
     /// Returns the prior sample size (tau_0) for parent anchoring.

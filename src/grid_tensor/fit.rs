@@ -36,7 +36,7 @@ pub fn fit<R: Rng + ?Sized>(
 
     // Initialize state
     let mut state = FittingState::new(x.view(), y.view());
-    
+
     // Initialize logging state if logging is enabled
     #[cfg(feature = "evo-logging")]
     {
@@ -46,30 +46,33 @@ pub fn fit<R: Rng + ?Sized>(
             state.logging_state = Some(LoggingState::new());
         }
     }
-    
+
     let state = refinement_strategy.initialize(state);
     // Histogram binning prologue: if max_bins is set, mark non-bin-boundary
     // positions as NaN in the split-candidate caches. This restricts the inner
     // solver loop to O(n_bins) candidates per interval. No-op when max_bins=None.
     let state = apply_histogram_binning_mask(state, hyperparameters.max_bins);
+    let mut state = state;
+    state.current_error = refinement_strategy.weighted_squared_error(&state.residuals);
     let mut state = split_strategy.initialize(state);
 
     let n_iter = hyperparameters.n_iter;
     let max_iterations = n_iter * MAX_ITERATIONS_MULTIPLIER;
 
     for iter in 0..max_iterations {
-        state.iteration = iter; // ✅ Fix: Update iteration counter
-                                // Resplit=PairRefit is now implemented (boundary-fixed refit)
-        // state.split_strategy_state.resplit_enabled = true; // Re-enabled: Resplit=PairRefit is correct
+        state.iteration = iter;
 
-        // Check termination conditions
-        if state.loop_state.fineness >= n_iter {
+        if !state.split_strategy_state.merge_enabled && state.loop_state.fineness >= n_iter {
             break;
         }
 
-        // Propose action from strategy
-        let Some(action) = split_strategy.propose_next_action(&state, rng) else {
-            log::debug!("No further splits possible, stopping");
+        // The fineness budget excludes new splits but leaves resplits and merges
+        // available under the same objective. A merge frees capacity for a later split.
+        let allow_split = state.loop_state.fineness < n_iter;
+        let Some(action) =
+            split_strategy.propose_next_action_with_split_budget(&state, rng, allow_split)
+        else {
+            log::debug!("No objective-improving structural action remains, stopping");
             break;
         };
 
@@ -83,23 +86,16 @@ pub fn fit<R: Rng + ?Sized>(
         // Use reducer pattern - always call it, even if logging_state is None (no-op)
         // Feature flag is encapsulated inside the reducers
         #[cfg(feature = "evo-logging")]
+        use crate::logging::reducer::{log_component_reducer, log_f_component_reducer};
 
-        use crate::logging::reducer::{log_f_component_reducer, log_component_reducer};
-        
         // Log f+/f- statistics (reducer computes stats internally from state)
         #[cfg(feature = "evo-logging")]
         {
-        state.logging_state = log_f_component_reducer(
-            state.logging_state.take(),
-            &state,
-            iter,
-        );
-        
-        state.logging_state = log_component_reducer(
-            state.logging_state.take(),
-            &state,
-            iter,
-        );
+            state.logging_state =
+                log_f_component_reducer(state.logging_state.take(), &state, iter);
+
+            state.logging_state =
+                log_component_reducer(state.logging_state.take(), &state, iter);
         }
     }
 
@@ -280,7 +276,7 @@ mod tests {
             fit,
             reducer::fitting_reducer,
             refinement::RefinementStrategy,
-            splitting::{SplitCandidate, SplitStrategy},
+            splitting::{MergeCandidate, SplitCandidate, SplitStrategy},
             state::FittingState,
             GridTensorParamsBuilder,
         },
@@ -1002,7 +998,362 @@ mod tests {
         assert!(gain.abs() < 1e-3, 
             "Resplit gain should be small after split (idempotence). gain={}. \
              Note: Non-zero gain is expected when parameters are clamped during split application.", 
-            gain);
+             gain);
+    }
+
+    #[test]
+    fn merge_optimizes_union_and_matches_applied_loss() {
+        let x = Array2::from_shape_vec((4, 1), vec![0.0, 1.0, 2.0, 3.0]).unwrap();
+        let y = Array1::from_vec(vec![2.0, 2.0, 4.0, 4.0]);
+        let refinement_strategy = RefinementStrategy::L2Refinement {
+            alpha: 0.0,
+            tilt_tau: 0.0,
+            tilt_rho: 0.0,
+            prior_sample_size: 0.0,
+            update_clamp: f64::INFINITY,
+        };
+        let split_strategy = SplitStrategy::Best {
+            min_interval_samples: 1,
+            complexity_penalty: 1.0,
+            min_split_loss: 0.0,
+        };
+
+        let mut state = FittingState::new(x.view(), y.view());
+        state = refinement_strategy.initialize(state);
+        state = split_strategy.initialize(state);
+
+        let split = SplitCandidate {
+            col: 0,
+            error_reduction: state.precomputed_statistics.error_reductions_split[0][2],
+            allowed_interval_idx: 0,
+            index: 2,
+            update_left: state.precomputed_statistics.update_pairs_split_left[0][2],
+            update_right: state.precomputed_statistics.update_pairs_split_right[0][2],
+        };
+        state = fitting_reducer(
+            state,
+            FittingAction::ApplySplit { split },
+            &refinement_strategy,
+            &split_strategy,
+        );
+
+        let (partial_plus, _) =
+            crate::grid_tensor::reducer::compute_partial_products_for_axis(0, &state);
+        for value in partial_plus {
+            assert!((value - 1.0).abs() < 1e-12);
+        }
+        assert!((state.backbone_values[0][0] - 2.0).abs() < 1e-12);
+        assert!((state.backbone_values[0][1] - 4.0).abs() < 1e-12);
+
+        let raw_gain = state.precomputed_statistics.error_reductions_merge[0][0];
+        let merged_factors = state.precomputed_statistics.update_pairs_merge[0][0];
+        assert!((raw_gain + 4.0).abs() < 1e-10);
+        assert!((merged_factors.0 - 3.0).abs() < 1e-12);
+        assert_eq!(merged_factors.0, merged_factors.1);
+
+        let old_error = state.current_error;
+        let merge = MergeCandidate {
+            col: 0,
+            error_reduction: raw_gain,
+            interval_idx: 0,
+            index: 2,
+        };
+        state = fitting_reducer(
+            state,
+            FittingAction::ApplyMerge { merge },
+            &refinement_strategy,
+            &split_strategy,
+        );
+
+        assert!(state.boundaries[0].is_empty());
+        assert_eq!(state.backbone_values[0].len(), 1);
+        assert!((state.backbone_values[0][0] - 3.0).abs() < 1e-12);
+        assert!(state.tilt_values[0][0].abs() < 1e-12);
+        assert!((old_error - state.current_error - raw_gain).abs() < 1e-10);
+        for row in 0..state.n {
+            assert!((state.f_plus[row] - 3.0).abs() < 1e-12);
+            assert!((state.f[row] - state.y_hat[row]).abs() < 1e-12);
+            assert!((state.residuals[row] - (state.labels[row] - state.y_hat[row])).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn interval_ids_follow_inserted_and_removed_boundaries() {
+        let x = Array2::from_shape_vec((6, 1), vec![5.0, 0.0, 3.0, 1.0, 4.0, 2.0])
+            .unwrap();
+        let y = Array1::from_vec(vec![6.0, 1.0, 4.0, 2.0, 5.0, 3.0]);
+        let refinement_strategy = RefinementStrategy::L2Refinement {
+            alpha: 0.1,
+            tilt_tau: 0.0,
+            tilt_rho: 0.0,
+            prior_sample_size: 0.0,
+            update_clamp: f64::INFINITY,
+        };
+        let split_strategy = SplitStrategy::Best {
+            min_interval_samples: 1,
+            complexity_penalty: 1.0,
+            min_split_loss: 0.0,
+        };
+
+        let mut state = FittingState::new(x.view(), y.view());
+        state = refinement_strategy.initialize(state);
+        state = split_strategy.initialize(state);
+
+        for index in [2, 4] {
+            let allowed_interval_idx = state.split_strategy_state.allowed_intervals[0]
+                .iter()
+                .position(|interval| interval.contains(index))
+                .unwrap();
+            let split = SplitCandidate {
+                col: 0,
+                error_reduction: state.precomputed_statistics.error_reductions_split[0][index],
+                allowed_interval_idx,
+                index,
+                update_left: state.precomputed_statistics.update_pairs_split_left[0][index],
+                update_right: state.precomputed_statistics.update_pairs_split_right[0][index],
+            };
+            state = fitting_reducer(
+                state,
+                FittingAction::ApplySplit { split },
+                &refinement_strategy,
+                &split_strategy,
+            );
+        }
+        assert_eq!(state.boundaries[0], vec![2, 4]);
+        assert_eq!(state.interval_id[0], vec![2, 0, 1, 0, 2, 1]);
+
+        let merge_first = MergeCandidate {
+            col: 0,
+            error_reduction: state.precomputed_statistics.error_reductions_merge[0][0],
+            interval_idx: 0,
+            index: 2,
+        };
+        state = fitting_reducer(
+            state,
+            FittingAction::ApplyMerge { merge: merge_first },
+            &refinement_strategy,
+            &split_strategy,
+        );
+        assert_eq!(state.boundaries[0], vec![4]);
+        assert_eq!(state.interval_id[0], vec![1, 0, 0, 0, 1, 0]);
+
+        let merge_last = MergeCandidate {
+            col: 0,
+            error_reduction: state.precomputed_statistics.error_reductions_merge[0][0],
+            interval_idx: 0,
+            index: 4,
+        };
+        state = fitting_reducer(
+            state,
+            FittingAction::ApplyMerge { merge: merge_last },
+            &refinement_strategy,
+            &split_strategy,
+        );
+        assert!(state.boundaries[0].is_empty());
+        assert_eq!(state.interval_id[0], vec![0; 6]);
+    }
+
+    #[test]
+    fn repeated_merges_refresh_every_remaining_merge_cache() {
+        let x = Array2::from_shape_vec((8, 1), (0..8).map(|value| value as f64).collect())
+            .unwrap();
+        let y = Array1::from_vec(vec![1.0, 2.0, 1.0, 2.0, 3.0, 4.0, 3.0, 4.0]);
+        let refinement_strategy = RefinementStrategy::L2Refinement {
+            alpha: 0.1,
+            tilt_tau: 0.0,
+            tilt_rho: 0.0,
+            prior_sample_size: 0.0,
+            update_clamp: f64::INFINITY,
+        };
+        let split_strategy = SplitStrategy::Best {
+            min_interval_samples: 1,
+            complexity_penalty: 1e6,
+            min_split_loss: 0.0,
+        };
+
+        let mut state = FittingState::new(x.view(), y.view());
+        state = refinement_strategy.initialize(state);
+        state = split_strategy.initialize(state);
+        state.current_error = refinement_strategy.weighted_squared_error(&state.residuals);
+
+        for index in [2, 4, 6] {
+            let allowed_interval_idx = state.split_strategy_state.allowed_intervals[0]
+                .iter()
+                .position(|interval| interval.contains(index))
+                .expect("forced split must remain allowed");
+            let split = SplitCandidate {
+                col: 0,
+                error_reduction: state.precomputed_statistics.error_reductions_split[0][index],
+                allowed_interval_idx,
+                index,
+                update_left: state.precomputed_statistics.update_pairs_split_left[0][index],
+                update_right: state.precomputed_statistics.update_pairs_split_right[0][index],
+            };
+            state = fitting_reducer(
+                state,
+                FittingAction::ApplySplit { split },
+                &refinement_strategy,
+                &split_strategy,
+            );
+        }
+        assert_eq!(state.boundaries[0], vec![2, 4, 6]);
+
+        let mut merge_count = 0;
+        while let Some(action) = split_strategy.propose_next_merge(&state) {
+            let old_boundary_count = state.boundaries[0].len();
+            state = fitting_reducer(
+                state,
+                action,
+                &refinement_strategy,
+                &split_strategy,
+            );
+            merge_count += 1;
+
+            assert_eq!(state.boundaries[0].len() + 1, old_boundary_count);
+            assert_eq!(
+                state.precomputed_statistics.error_reductions_merge[0].len(),
+                state.boundaries[0].len()
+            );
+            assert_eq!(
+                state.precomputed_statistics.update_pairs_merge[0].len(),
+                state.boundaries[0].len()
+            );
+            assert_eq!(
+                state.precomputed_statistics.interval_stats[0].len(),
+                state.boundaries[0].len() + 1
+            );
+
+            for (interval_idx, &index) in state.boundaries[0].iter().enumerate() {
+                let raw_gain =
+                    state.precomputed_statistics.error_reductions_merge[0][interval_idx];
+                let merged_factors =
+                    state.precomputed_statistics.update_pairs_merge[0][interval_idx];
+                assert!(raw_gain.is_finite());
+                assert!(merged_factors.0.is_finite() && merged_factors.0 > 0.0);
+                assert!(merged_factors.1.is_finite() && merged_factors.1 > 0.0);
+
+                let candidate = MergeCandidate {
+                    col: 0,
+                    error_reduction: raw_gain,
+                    interval_idx,
+                    index,
+                };
+                let old_error = state.current_error;
+                let merged_state = fitting_reducer(
+                    state.clone(),
+                    FittingAction::ApplyMerge { merge: candidate },
+                    &refinement_strategy,
+                    &split_strategy,
+                );
+                let applied_gain = old_error - merged_state.current_error;
+                let (start, split_at, end) = state.interval_range_left_and_right(0, interval_idx);
+                let left_count = (split_at - start) as f64;
+                let right_count = (end - split_at) as f64;
+                let total_count = left_count + right_count;
+                let axis_factors = |side: usize| {
+                    let backbone = state.backbone_values[0][side];
+                    let tilt = state.tilt_values[0][side];
+                    (backbone * tilt.exp(), backbone * (-tilt).exp())
+                };
+                let left = axis_factors(interval_idx);
+                let right = axis_factors(interval_idx + 1);
+                let geometric_reference = |left: f64, right: f64| {
+                    ((left_count * left.ln() + right_count * right.ln()) / total_count).exp()
+                };
+                let reference_plus = geometric_reference(left.0, right.0);
+                let reference_minus = geometric_reference(left.1, right.1);
+                let parameter_penalty =
+                    crate::grid_tensor::two_tensor_solver::log_coordinate_penalty(
+                        merged_factors.0 / reference_plus,
+                        merged_factors.1 / reference_minus,
+                        refinement_strategy.alpha(),
+                        refinement_strategy.tilt_tau(),
+                        refinement_strategy.tilt_rho(),
+                    );
+                assert!(
+                    (applied_gain - parameter_penalty - raw_gain).abs()
+                        <= 1e-9 * old_error.abs().max(1.0),
+                    "stale cache at boundary {interval_idx}: cached={raw_gain}, applied={applied_gain}, penalty={parameter_penalty}"
+                );
+            }
+        }
+
+        assert_eq!(merge_count, 3);
+        assert!(state.boundaries[0].is_empty());
+    }
+
+    #[test]
+    fn penalty_enabled_huber_actions_track_the_current_irls_surrogate() {
+        let x = Array2::from_shape_vec((6, 1), (0..6).map(|value| value as f64).collect())
+            .unwrap();
+        let y = Array1::from_vec(vec![0.0, 2.0, -20.0, 1.0, 3.0, 20.0]);
+        let refinement_strategy = RefinementStrategy::HuberRefinement {
+            alpha: 0.0,
+            c: 1.0,
+            tilt_tau: 0.0,
+            tilt_rho: 0.0,
+            prior_sample_size: 0.0,
+            update_clamp: f64::INFINITY,
+        };
+        let split_strategy = SplitStrategy::Best {
+            min_interval_samples: 1,
+            complexity_penalty: 1.0,
+            min_split_loss: 0.0,
+        };
+
+        let mut state = FittingState::new(x.view(), y.view());
+        state = refinement_strategy.initialize(state);
+        state = split_strategy.initialize(state);
+        state.current_error = refinement_strategy.weighted_squared_error(&state.residuals);
+        assert!(
+            (state.current_error - state.residuals.iter().map(|r| r * r).sum::<f64>()).abs()
+                > 1.0
+        );
+
+        let index = 3;
+        let allowed_interval_idx = state.split_strategy_state.allowed_intervals[0]
+            .iter()
+            .position(|interval| interval.contains(index))
+            .unwrap();
+        let split = SplitCandidate {
+            col: 0,
+            error_reduction: state.precomputed_statistics.error_reductions_split[0][index],
+            allowed_interval_idx,
+            index,
+            update_left: state.precomputed_statistics.update_pairs_split_left[0][index],
+            update_right: state.precomputed_statistics.update_pairs_split_right[0][index],
+        };
+        state = fitting_reducer(
+            state,
+            FittingAction::ApplySplit { split },
+            &refinement_strategy,
+            &split_strategy,
+        );
+        assert!(
+            (state.current_error
+                - refinement_strategy.weighted_squared_error(&state.residuals))
+            .abs()
+                < 1e-12
+        );
+
+        let merge = MergeCandidate {
+            col: 0,
+            error_reduction: state.precomputed_statistics.error_reductions_merge[0][0],
+            interval_idx: 0,
+            index,
+        };
+        state = fitting_reducer(
+            state,
+            FittingAction::ApplyMerge { merge },
+            &refinement_strategy,
+            &split_strategy,
+        );
+        assert!(
+            (state.current_error
+                - refinement_strategy.weighted_squared_error(&state.residuals))
+            .abs()
+                < 1e-12
+        );
     }
 
 }

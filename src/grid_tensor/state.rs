@@ -27,6 +27,7 @@ pub struct FittingState<'a> {
     // Predictions and residuals (outer residuals for forest-level)
     pub y_hat: Array1<f64>,
     pub residuals: Array1<f64>,
+    /// Current squared error, or the current IRLS quadratic surrogate for Huber refinement.
     pub current_error: f64,
 
     // Data references (immutable)
@@ -100,7 +101,7 @@ impl<'a> FittingState<'a> {
         let backbone_values = vec![vec![1.0]; p];
         let tilt_values = vec![vec![0.0]; p];
 
-        // Initialize interval_id: all points start in interval 0 for each axis
+        // All points start in interval 0 on every axis.
         let interval_id = vec![vec![0; n]; p];
 
         // Initialize lambdas from residuals (will be properly initialized in refinement::initialize)
@@ -496,7 +497,7 @@ pub struct PrecomputedStatistics {
     pub update_pairs_resplit_left: Vec<Vec<(f64, f64)>>,
     /// Pre-computed resplit update factors for right side [col][boundary_pos] -> (u_plus_R, u_minus_R)
     pub update_pairs_resplit_right: Vec<Vec<(f64, f64)>>,
-    /// Pre-computed merge update factors [col][boundary_pos] -> (u_plus, u_minus)
+    /// Absolute axis factors for a merged interval [col][boundary_pos] -> (a_plus, a_minus)
     pub update_pairs_merge: Vec<Vec<(f64, f64)>>,
     /// Pre-computed split error reductions [col][pos]
     pub error_reductions_split: Vec<Vec<f64>>,

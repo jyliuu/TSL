@@ -7,6 +7,8 @@ use crate::grid_tensor::{
     state::{FittingState, MAX_CONSECUTIVE_RESPLIT},
 };
 
+const ACTION_SCORE_RELATIVE_TOLERANCE: f64 = 1e-12;
+
 fn sample_best_split(
     allowed_intervals: &[Vec<Interval>],
     error_reductions: &[Vec<f64>],
@@ -214,7 +216,10 @@ pub struct SplitStrategyState {
     pub total_positions: Vec<usize>,
     pub last_transformation: Option<FittingAction>,
     pub resplit_enabled: bool,
+    /// Whether merge statistics participate in unified action selection.
     pub merge_enabled: bool,
+    /// Fixed loss-scale cost of adding one boundary to the grid.
+    pub boundary_penalty: f64,
 }
 
 impl Default for SplitStrategyState {
@@ -230,8 +235,8 @@ impl SplitStrategyState {
             total_positions: vec![],
             last_transformation: None,
             resplit_enabled: true,
-            // Merge is currently single-tensor/legacy-only; disable by default for two-tensor correctness.
             merge_enabled: false,
+            boundary_penalty: 0.0,
         }
     }
 }
@@ -243,7 +248,7 @@ pub enum SplitStrategy {
         split_try: usize,
         colsample_bytree: f64,
         min_interval_samples: usize,
-        /// Complexity penalty (lambda) for adaptive merge bonus.
+        /// Cost-complexity strength for every structural action.
         complexity_penalty: f64,
         min_split_loss: f64,
     },
@@ -274,101 +279,90 @@ impl SplitStrategy {
 
         state.split_strategy_state.allowed_intervals = allowed_intervals;
         state.split_strategy_state.total_positions = total_positions;
+        let complexity_penalty = self.complexity_penalty();
+        state.split_strategy_state.merge_enabled =
+            complexity_penalty.is_finite() && complexity_penalty > 0.0;
+        state.split_strategy_state.boundary_penalty = if state.split_strategy_state.merge_enabled
+            && state.n > 0
+            && state.current_error.is_finite()
+            && state.current_error >= 0.0
+        {
+            let loss_scale = state.current_error / state.n as f64;
+            let degrees_of_freedom = if state.is_stage1_positive_only() {
+                1.0
+            } else {
+                2.0
+            };
+            complexity_penalty * loss_scale * degrees_of_freedom * (state.n as f64).max(2.0).ln()
+        } else {
+            0.0
+        };
 
         state
     }
 
+    /// Propose the best sampled action under the unified cost-complexity objective.
     pub fn propose_next_action<R: Rng + ?Sized>(
         &self,
         state: &FittingState,
         rng: &mut R,
     ) -> Option<FittingAction> {
-        let best_split_candidate = self.propose_best_split(state, rng);
-        // TODO: merges are disabled — the OptimalMerge path produces NaN
-        // residuals (see ignored tests in fit.rs::tests and reducer.rs:134).
-        // Re-enable once the precomputed update_pairs_merge / applied-params
-        // mismatch is fixed.
-        let best_merge_candidate: Option<MergeCandidate> = None;
+        self.propose_next_action_with_split_budget(state, rng, true)
+    }
+
+    /// Propose one action, optionally excluding splits when the fineness budget is full.
+    pub fn propose_next_action_with_split_budget<R: Rng + ?Sized>(
+        &self,
+        state: &FittingState,
+        rng: &mut R,
+        allow_split: bool,
+    ) -> Option<FittingAction> {
+        let best_split_candidate = allow_split
+            .then(|| self.propose_best_split(state, rng))
+            .flatten();
         let best_resplit_candidate = self.propose_best_resplit(state);
+        let best_merge_candidate = self.propose_best_merge(state);
 
-        let split_action = best_split_candidate
-            .map(|sc| (sc.error_reduction, FittingAction::ApplySplit { split: sc }));
-
-        // Compute adaptive merge bonus for the best merge candidate
-        let merge_action = best_merge_candidate.map(|sc| {
-            let adaptive_bonus = self.compute_adaptive_merge_bonus(state, &sc);
+        let split_action = best_split_candidate.map(|candidate| {
             (
-                sc.error_reduction + adaptive_bonus,
-                FittingAction::ApplyMerge { merge: sc },
+                candidate.error_reduction - state.split_strategy_state.boundary_penalty,
+                FittingAction::ApplySplit { split: candidate },
             )
         });
 
-        let resplit_action = best_resplit_candidate.map(|sc| {
+        let resplit_action = best_resplit_candidate.map(|candidate| {
             (
-                sc.error_reduction,
-                FittingAction::ApplyResplit { resplit: sc },
+                candidate.error_reduction,
+                FittingAction::ApplyResplit { resplit: candidate },
             )
         });
 
-        [split_action, merge_action, resplit_action]
+        let merge_action = best_merge_candidate.map(|candidate| {
+            (
+                candidate.error_reduction + state.split_strategy_state.boundary_penalty,
+                FittingAction::ApplyMerge { merge: candidate },
+            )
+        });
+
+        let tolerance = ACTION_SCORE_RELATIVE_TOLERANCE * state.current_error.abs().max(1.0);
+        let minimum_gain = self.min_split_loss().max(tolerance);
+
+        [split_action, resplit_action, merge_action]
             .into_iter()
             .flatten()
             .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal))
+            .filter(|(score, _)| score.is_finite() && *score > minimum_gain)
             .map(|(_, action)| action)
     }
 
-    /// Compute adaptive merge bonus for a merge candidate.
-    ///
-    /// The bonus is BIC-inspired and scale-invariant:
-    ///   bonus = lambda * MSE * (log(n)/n + 1/harmonic_mean(n_left, n_right))
-    ///
-    /// Properties:
-    /// - Scale-invariant: proportional to MSE
-    /// - Larger bonus for smaller n (less data → prefer simpler models)
-    /// - Larger bonus when merging small intervals (uncertain estimates)
-    fn compute_adaptive_merge_bonus(&self, state: &FittingState, merge: &MergeCandidate) -> f64 {
-        let lambda = self.complexity_penalty();
-        if lambda <= 0.0 {
-            return 0.0;
-        }
-
-        let n_total = state.n as f64;
-        let current_mse = state.current_error / n_total;
-
-        // Get interval sample counts for the merge
-        let col = merge.col;
-        let interval_idx = merge.interval_idx;
-
-        // Compute n_left and n_right from boundaries
-        let boundaries = &state.boundaries[col];
-        let n_points = state.precomputed_statistics.sorted_indices[col].len();
-
-        let start_left = if interval_idx == 0 {
-            0
-        } else {
-            boundaries[interval_idx - 1]
-        };
-        let split_point = boundaries[interval_idx];
-        let end_right = boundaries
-            .get(interval_idx + 1)
-            .copied()
-            .unwrap_or(n_points);
-
-        let n_left = (split_point - start_left) as f64;
-        let n_right = (end_right - split_point) as f64;
-
-        // BIC component: complexity cost of having an extra split
-        let bic_bonus = lambda * current_mse * n_total.ln() / n_total;
-
-        // Small interval bonus: harmonic mean penalizes small intervals
-        let harmonic_mean = if n_left > 0.0 && n_right > 0.0 {
-            2.0 * n_left * n_right / (n_left + n_right)
-        } else {
-            1.0 // Avoid division by zero
-        };
-        let small_interval_bonus = lambda * current_mse / harmonic_mean.max(1.0);
-
-        bic_bonus + small_interval_bonus
+    /// Propose the highest-scoring merge under the same action threshold.
+    pub fn propose_next_merge(&self, state: &FittingState) -> Option<FittingAction> {
+        let merge = self.propose_best_merge(state)?;
+        let score = merge.error_reduction + state.split_strategy_state.boundary_penalty;
+        let tolerance = self
+            .min_split_loss()
+            .max(ACTION_SCORE_RELATIVE_TOLERANCE * state.current_error.abs().max(1.0));
+        (score.is_finite() && score > tolerance).then_some(FittingAction::ApplyMerge { merge })
     }
 
     /// Forbids splits around the given position by updating only the specific interval that contained the split
@@ -441,12 +435,10 @@ impl SplitStrategy {
         }
     }
 
-    /// Returns the complexity penalty (lambda) for adaptive merge bonus.
+    /// Return the cost-complexity strength used by every structural action.
     ///
-    /// The merge bonus is computed as:
-    ///   bonus = lambda * MSE * (log(n)/n + 1/harmonic_mean(n_left, n_right))
-    ///
-    /// This is BIC-inspired and scale-invariant.
+    /// Positive finite values assign a fixed-scale cost to each boundary. Splits
+    /// pay that cost, resplits leave it unchanged, and merges recover it.
     pub fn complexity_penalty(&self) -> f64 {
         match self {
             SplitStrategy::Random {
@@ -469,45 +461,49 @@ impl SplitStrategy {
         }
     }
 
-    #[allow(dead_code)] // TODO: re-enable in propose_next_action once merge NaN is fixed
     fn propose_best_merge(&self, state: &FittingState) -> Option<MergeCandidate> {
         if !state.split_strategy_state.merge_enabled {
             return None;
         }
-        let mut best_merge_candidate: Option<MergeCandidate> = None;
-        for (col_idx, (err_reductions, boundaries)) in state
+
+        let mut best: Option<MergeCandidate> = None;
+        for (col, ((raw_gains, merged_factors), boundaries)) in state
             .precomputed_statistics
             .error_reductions_merge
             .iter()
+            .zip(state.precomputed_statistics.update_pairs_merge.iter())
             .zip(state.boundaries.iter())
             .enumerate()
         {
-            for (index, (&err_reduction, &data_index)) in
-                err_reductions.iter().zip(boundaries.iter()).enumerate()
+            for (interval_idx, ((&error_reduction, &factors), &index)) in raw_gains
+                .iter()
+                .zip(merged_factors.iter())
+                .zip(boundaries.iter())
+                .enumerate()
             {
-                // Skip NaN values to prevent panic in partial_cmp
-                if err_reduction.is_nan() {
+                if !error_reduction.is_finite()
+                    || !factors.0.is_finite()
+                    || !factors.1.is_finite()
+                    || factors.0 <= 0.0
+                    || factors.1 <= 0.0
+                {
                     continue;
                 }
-                // Merge=OptimalMerge: all boundaries with valid gains are mergeable
-                // (no undo_map check needed - we compute optimal merged params at merge time)
 
-                if best_merge_candidate
+                if best
                     .as_ref()
-                    .is_none_or(|sc| err_reduction > sc.error_reduction)
+                    .is_none_or(|candidate| error_reduction > candidate.error_reduction)
                 {
-                    let _update = state.precomputed_statistics.update_pairs_merge[col_idx][index];
-                    best_merge_candidate = Some(MergeCandidate {
-                        col: col_idx,
-                        error_reduction: err_reduction,
-                        interval_idx: index,
-                        index: data_index,
+                    best = Some(MergeCandidate {
+                        col,
+                        error_reduction,
+                        interval_idx,
+                        index,
                     });
                 }
             }
         }
-
-        best_merge_candidate
+        best
     }
 
     fn propose_best_resplit(&self, state: &FittingState) -> Option<ResplitCandidate> {
@@ -618,10 +614,6 @@ impl SplitStrategy {
         };
 
         if let Some((col, index, interval_idx, err_reduction)) = best_split_info {
-            if err_reduction < self.min_split_loss() {
-                return None;
-            }
-
             let update_left = state.precomputed_statistics.update_pairs_split_left[col][index];
             let update_right = state.precomputed_statistics.update_pairs_split_right[col][index];
             Some(SplitCandidate {
@@ -737,6 +729,139 @@ mod tests {
         state
     }
 
+    fn best_strategy(complexity_penalty: f64) -> SplitStrategy {
+        SplitStrategy::Best {
+            min_interval_samples: 1,
+            complexity_penalty,
+            min_split_loss: 0.0,
+        }
+    }
+
+    fn create_merge_state(
+        complexity_penalty: f64,
+        boundaries: Vec<usize>,
+        raw_gains: Vec<f64>,
+        merge_factors: Vec<(f64, f64)>,
+        current_error: f64,
+    ) -> (SplitStrategy, FittingState<'static>) {
+        let strategy = best_strategy(complexity_penalty);
+        let mut state = create_mock_state(vec![vec![f64::NAN; 20]]);
+        state.current_error = current_error;
+        state = strategy.initialize(state);
+        state.boundaries[0] = boundaries;
+        state.precomputed_statistics.error_reductions_merge[0] = raw_gains;
+        state.precomputed_statistics.update_pairs_merge[0] = merge_factors;
+        (strategy, state)
+    }
+
+    #[test]
+    fn initialize_enables_merges_only_for_positive_finite_penalties() {
+        for penalty in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let strategy = best_strategy(penalty);
+            let state = strategy.initialize(create_mock_state(vec![vec![1.0; 20]]));
+            assert!(!state.split_strategy_state.merge_enabled);
+        }
+
+        let strategy = best_strategy(1.0);
+        let state = strategy.initialize(create_mock_state(vec![vec![1.0; 20]]));
+        assert!(state.split_strategy_state.merge_enabled);
+    }
+
+    #[test]
+    fn unified_selector_ranks_merge_against_split() {
+        let strategy = best_strategy(1.0);
+        let mut split_gains = vec![f64::NAN; 20];
+        split_gains[5] = 1.0;
+        let mut state = create_mock_state(vec![split_gains]);
+        state = strategy.initialize(state);
+        state.boundaries[0] = vec![10];
+        state.precomputed_statistics.error_reductions_merge[0] = vec![100.0];
+        state.precomputed_statistics.update_pairs_merge[0] = vec![(1.0, 1.0)];
+
+        let mut rng = StdRng::seed_from_u64(42);
+        assert!(matches!(
+            strategy.propose_next_action(&state, &mut rng),
+            Some(FittingAction::ApplyMerge { .. })
+        ));
+    }
+
+    #[test]
+    fn boundary_penalty_uses_fixed_initial_scale_and_model_degrees_of_freedom() {
+        let (_, state) = create_merge_state(1.0, vec![10], vec![0.0], vec![(1.0, 1.0)], 20.0);
+        let expected_stage1 = 20.0_f64.ln();
+        assert!((state.split_strategy_state.boundary_penalty - expected_stage1).abs() < 1e-12);
+
+        let strategy = best_strategy(1.0);
+        let mut state = create_mock_state(vec![vec![f64::NAN; 20]]);
+        state.current_error = 20.0;
+        state.lambda_minus = 1.0;
+        let state = strategy.initialize(state);
+        assert!(
+            (state.split_strategy_state.boundary_penalty - 2.0 * expected_stage1).abs() < 1e-12
+        );
+    }
+
+    #[test]
+    fn boundary_penalty_is_fixed_after_initialization() {
+        let (_, mut state) = create_merge_state(1.0, vec![10], vec![0.0], vec![(1.0, 1.0)], 20.0);
+        let initial = state.split_strategy_state.boundary_penalty;
+        state.current_error = 2_000.0;
+        assert_eq!(state.split_strategy_state.boundary_penalty, initial);
+    }
+
+    #[test]
+    fn split_and_inverse_merge_pay_opposite_boundary_costs() {
+        let strategy = best_strategy(1.0);
+        let mut split_gains = vec![f64::NAN; 20];
+        split_gains[5] = 4.0;
+        let mut state = create_mock_state(vec![split_gains]);
+        state.current_error = 20.0;
+        state = strategy.initialize(state);
+        state.boundaries[0] = vec![10];
+        state.precomputed_statistics.error_reductions_merge[0] = vec![-4.0];
+        state.precomputed_statistics.update_pairs_merge[0] = vec![(1.0, 1.0)];
+
+        let mut rng = StdRng::seed_from_u64(42);
+        assert!(matches!(
+            strategy.propose_next_action(&state, &mut rng),
+            Some(FittingAction::ApplySplit { .. })
+        ));
+
+        state.precomputed_statistics.error_reductions_split[0][5] = 2.0;
+        state.precomputed_statistics.error_reductions_merge[0][0] = -2.0;
+        assert!(matches!(
+            strategy.propose_next_action(&state, &mut rng),
+            Some(FittingAction::ApplyMerge { .. })
+        ));
+    }
+
+    #[test]
+    fn unified_selector_rejects_negative_effective_merge_score() {
+        let (strategy, state) =
+            create_merge_state(1.0, vec![10], vec![-6.0], vec![(1.0, 1.0)], 20.0);
+
+        assert!(strategy.propose_next_merge(&state).is_none());
+    }
+
+    #[test]
+    fn unified_selector_ranks_merge_score_and_skips_invalid_factors() {
+        let (strategy, state) = create_merge_state(
+            1.0,
+            vec![1, 10, 15],
+            vec![-5.0, 1.0, 100.0],
+            vec![(2.0, 2.0), (4.0, 4.0), (f64::NAN, 7.0)],
+            20.0,
+        );
+
+        let Some(FittingAction::ApplyMerge { merge }) = strategy.propose_next_merge(&state) else {
+            panic!("expected a merge action");
+        };
+        assert_eq!(merge.col, 0);
+        assert_eq!(merge.interval_idx, 1);
+        assert_eq!(merge.index, 10);
+        assert_eq!(merge.error_reduction, 1.0);
+    }
+
     #[test]
     fn test_top_k_splits_selects_from_top_k() {
         let error_reductions = vec![
@@ -751,9 +876,6 @@ mod tests {
         };
         let mut state = create_mock_state(error_reductions);
         state = strategy.initialize(state);
-
-        // Enable merge for testing
-        state.split_strategy_state.merge_enabled = true;
 
         let mut rng = StdRng::seed_from_u64(42);
         let action = strategy.propose_next_action(&state, &mut rng);
@@ -782,9 +904,6 @@ mod tests {
         let mut state = create_mock_state(error_reductions);
         state = strategy.initialize(state);
 
-        // Enable merge for testing
-        state.split_strategy_state.merge_enabled = true;
-
         let mut rng = StdRng::seed_from_u64(42);
         let action = strategy.propose_next_action(&state, &mut rng);
 
@@ -806,9 +925,6 @@ mod tests {
         };
         let mut state = create_mock_state(error_reductions);
         state = strategy.initialize(state);
-
-        // Enable merge for testing
-        state.split_strategy_state.merge_enabled = true;
 
         let mut rng = StdRng::seed_from_u64(42);
         let action = strategy.propose_next_action(&state, &mut rng);
@@ -860,9 +976,6 @@ mod tests {
         let mut state = create_mock_state(error_reductions);
         state = strategy.initialize(state);
 
-        // Enable merge for testing
-        state.split_strategy_state.merge_enabled = true;
-
         let mut rng = StdRng::seed_from_u64(42);
         let action = strategy.propose_next_action(&state, &mut rng);
 
@@ -881,9 +994,6 @@ mod tests {
         };
         let mut state = create_mock_state(error_reductions);
         state = strategy.initialize(state);
-
-        // Enable merge for testing
-        state.split_strategy_state.merge_enabled = true;
 
         let mut rng = StdRng::seed_from_u64(42);
         let action = strategy.propose_next_action(&state, &mut rng);
@@ -912,9 +1022,6 @@ mod tests {
         };
         let mut state = create_mock_state(error_reductions);
         state = strategy.initialize(state);
-
-        // Enable merge for testing
-        state.split_strategy_state.merge_enabled = true;
 
         let mut rng = StdRng::seed_from_u64(42);
         let action = strategy.propose_next_action(&state, &mut rng);
@@ -1089,9 +1196,6 @@ mod tests {
 
         state = strategy.initialize(state);
 
-        // Enable merge for testing
-        state.split_strategy_state.merge_enabled = true;
-
         let mut rng = StdRng::seed_from_u64(42);
         let action = strategy.propose_next_action(&state, &mut rng);
 
@@ -1136,9 +1240,6 @@ mod tests {
         };
 
         state = strategy.initialize(state);
-
-        // Enable merge for testing
-        state.split_strategy_state.merge_enabled = true;
 
         let mut rng = StdRng::seed_from_u64(42);
         let action = strategy.propose_next_action(&state, &mut rng);
@@ -1200,9 +1301,6 @@ mod tests {
         };
 
         state = strategy.initialize(state);
-
-        // Enable merge for testing
-        state.split_strategy_state.merge_enabled = true;
 
         let mut rng = StdRng::seed_from_u64(42);
         let action = strategy.propose_next_action(&state, &mut rng);

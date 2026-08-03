@@ -269,12 +269,15 @@ impl SplitStrategyParamsBuilder {
         self
     }
 
-    /// Complexity penalty (λ) for the adaptive merge bonus.
+    /// Cost-complexity strength for unified structural action selection.
     ///
-    /// `bonus = λ · MSE · (log(n)/n + 1/harmonic_mean(n_left, n_right))`
+    /// One boundary costs `λ · MSE_0 · d · ln(n)`, where `MSE_0` is the fixed
+    /// initial surrogate loss per observation and `d` is one in positive-only
+    /// mode and two in the full two-tensor model. Splits pay this cost, resplits
+    /// leave it unchanged, and merges recover it.
     ///
-    /// BIC-inspired and scale-invariant. Larger λ encourages simpler trees.
-    /// Default: 0.0. Typical values: 0.5–2.0.
+    /// Positive finite values enable merge candidates, and larger values encourage
+    /// simpler grids. The default `0.0` preserves split/resplit-only fitting.
     pub fn complexity_penalty(mut self, lambda: f64) -> Self {
         self.complexity_penalty = lambda;
         self

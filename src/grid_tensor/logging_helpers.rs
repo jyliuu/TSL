@@ -190,20 +190,18 @@ pub fn create_simple_split_event(
             )
         }
         FittingAction::ApplyMerge { merge } => {
-            // For merges, we need to compute the actual split value and counts
             let col = merge.col;
             let split_value = state.x[[
                 state.precomputed_statistics.sorted_indices[col][merge.index],
                 col,
             ]];
-            let (start, _, end) = state.interval_range_left_and_right(col, merge.interval_idx);
+            let (start, end) = state.interval_range(col, merge.interval_idx);
             let left_count = merge.index.saturating_sub(start);
             let right_count = end.saturating_sub(merge.index);
 
-            // Use actual state values after merge is applied (derive from backbone/tilt)
             let update_a = state.backbone_values[col][merge.interval_idx]
                 * state.tilt_values[col][merge.interval_idx].cosh();
-            let update_b = 0.0; // Dummy value for merge operations
+            let update_b = 0.0;
 
             (
                 Action::Merge,
@@ -264,7 +262,13 @@ pub fn create_simple_split_event(
 
     // Create residual updates for affected samples
     let mut residual_updates = Vec::new();
-    let (start, _, end) = state.interval_range_left_and_right(col, interval_idx);
+    let (start, end) = match action {
+        FittingAction::ApplyMerge { merge } => state.interval_range(col, merge.interval_idx),
+        _ => {
+            let (start, _, end) = state.interval_range_left_and_right(col, interval_idx);
+            (start, end)
+        }
+    };
     for &sample_id in &state.precomputed_statistics.sorted_indices[col][start..end] {
         residual_updates.push(Update {
             sample_id: sample_id as u32,
@@ -598,5 +602,54 @@ pub fn log_final_component_states(
     {
         // No-op when feature disabled
         let _ = (logging_state, grid_tensor, final_iteration);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::create_simple_split_event;
+    use crate::grid_tensor::{
+        action::FittingAction, splitting::MergeCandidate, state::FittingState,
+    };
+    use ndarray::{Array1, Array2};
+
+    #[test]
+    fn merge_events_log_the_pre_merge_union_for_first_middle_and_last_boundaries() {
+        let cases = [
+            (vec![4, 6], 0, 2, vec![0, 1, 2, 3]),
+            (vec![2, 6], 1, 4, vec![2, 3, 4, 5]),
+            (vec![2, 4], 2, 6, vec![4, 5, 6, 7]),
+        ];
+
+        for (post_merge_boundaries, interval_idx, index, expected_rows) in cases {
+            let x = Array2::from_shape_vec((8, 1), (0..8).map(|value| value as f64).collect())
+                .unwrap();
+            let y = Array1::zeros(8);
+            let mut state = FittingState::new(x.view(), y.view());
+            state.precomputed_statistics.sorted_indices[0] = (0..8).collect();
+            state.precomputed_statistics.sort_order[0] = (0..8).collect();
+            state.boundaries[0] = post_merge_boundaries;
+            state.backbone_values[0] = vec![1.0; state.boundaries[0].len() + 1];
+            state.tilt_values[0] = vec![0.0; state.boundaries[0].len() + 1];
+
+            let action = FittingAction::ApplyMerge {
+                merge: MergeCandidate {
+                    col: 0,
+                    error_reduction: -1.0,
+                    interval_idx,
+                    index,
+                },
+            };
+            let event = create_simple_split_event(&state, &action, 1.0);
+            let logged_rows: Vec<usize> = event
+                .residual_updates
+                .iter()
+                .map(|update| update.sample_id as usize)
+                .collect();
+
+            assert_eq!(logged_rows, expected_rows, "interval_idx={interval_idx}");
+            assert_eq!(event.left_count, Some(2));
+            assert_eq!(event.right_count, Some(2));
+        }
     }
 }
