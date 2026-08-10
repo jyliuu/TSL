@@ -16,7 +16,7 @@ crate-type = ["cdylib"]
 numpy = "0.27"
 pyo3 = { version = "0.27.1", features = ["extension-module", "abi3-py39"] }
 tsl_rust = { path = "../", default-features = false, features = ["use-rayon", "evo-logging"] }
-rand = "0.8.5"
+rand = "0.10.2"
 bincode = "1.3"
 
 [features]
