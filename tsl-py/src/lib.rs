@@ -817,6 +817,7 @@ impl TSLPy {
         top_k=10,
         must_fill_all_k=true,
         similarity_threshold=0.0,
+        consensus=0.0,
         bagged=false,
         seed=42,
         verbosity=1,
@@ -846,11 +847,17 @@ impl TSLPy {
         top_k: usize,
         must_fill_all_k: bool,
         similarity_threshold: f64,
+        consensus: f64,
         bagged: bool,
         seed: u64,
         verbosity: u8,
         visualdb: Option<String>,
     ) -> PyResult<(TSLPy, FitResultPy)> {
+        if !(consensus.is_finite() && consensus >= 0.0) {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "consensus must be finite and nonnegative, got {consensus}"
+            )));
+        }
         let x = x.as_array();
         let y = y.as_array();
         let x_contiguous = x.as_standard_layout();
@@ -918,6 +925,7 @@ impl TSLPy {
             .split_strategy(split_strategy_params)
             .refinement_strategy(refinement_strategy_params)
             .similarity_threshold(similarity_threshold)
+            .consensus(consensus)
             .seed(seed)
             .log_level(match verbosity {
                 0 => "off",

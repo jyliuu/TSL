@@ -94,6 +94,11 @@ impl TSLBoostedParamsBuilder {
         self
     }
 
+    pub fn consensus(mut self, consensus: f64) -> Self {
+        self.sp_params_builder = self.sp_params_builder.consensus(consensus);
+        self
+    }
+
     pub fn max_bins(mut self, max_bins: Option<u16>) -> Self {
         self.sp_params_builder = self.sp_params_builder.max_bins(max_bins);
         self

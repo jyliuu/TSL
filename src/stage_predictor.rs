@@ -7,6 +7,7 @@ pub mod params;
 
 mod aggregate_bagged;
 mod combine_grids;
+mod consensus;
 mod fitter;
 pub use aggregate_bagged::aggregate_bagged_two_tensor;
 

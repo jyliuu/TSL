@@ -12,6 +12,9 @@ pub struct StagePredictorParams {
     pub tg_params: GridTensorParams,
     pub similarity_threshold: f64,
     pub aggregation_method: Aggregation,
+    /// Strength ρ of the pull of each grid's branches toward the mean branches of the
+    /// other grids; 0 fits the grids independently.
+    pub consensus: f64,
 }
 
 #[derive(Debug)]
@@ -20,6 +23,7 @@ pub struct StagePredictorParamsBuilder {
     tg_params_builder: GridTensorParamsBuilder,
     similarity_threshold: f64,
     aggregation_method: Aggregation,
+    consensus: f64,
 }
 
 impl StagePredictorParamsBuilder {
@@ -29,6 +33,7 @@ impl StagePredictorParamsBuilder {
             tg_params_builder: GridTensorParamsBuilder::new(),
             similarity_threshold: 0.0,
             aggregation_method: Aggregation::Combined,
+            consensus: 0.0,
         }
     }
 
@@ -44,6 +49,13 @@ impl StagePredictorParamsBuilder {
 
     pub fn similarity_threshold(mut self, similarity_threshold: f64) -> Self {
         self.similarity_threshold = similarity_threshold;
+        self
+    }
+
+    /// Fit the bag in lockstep, adding `ρ (‖f₊ − c₊‖² + ‖f₋ − c₋‖²)` to each grid's
+    /// objective, where `c±` are the mean branches of the other grids and `ρ = consensus`.
+    pub fn consensus(mut self, consensus: f64) -> Self {
+        self.consensus = consensus;
         self
     }
 
@@ -73,6 +85,7 @@ impl StagePredictorParamsBuilder {
             tg_params: self.tg_params_builder.build(),
             similarity_threshold: self.similarity_threshold,
             aggregation_method: self.aggregation_method,
+            consensus: self.consensus,
         }
     }
 }

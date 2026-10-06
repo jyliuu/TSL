@@ -61,6 +61,15 @@ For bags with multiple grids and split logging disabled, initialization computes
 deterministic fitting state once and clones it for each independently seeded grid.
 Logging-enabled fits initialize each grid in its own logging context.
 
+With `consensus` $\rho>0$, the bag is fitted in lockstep instead (`consensus.rs`). Every
+grid starts from the shared initial state. Each round, it receives the mean branches of
+the other grids as its `BranchConsensus` reference, `RefinementStrategy::refresh_statistics`
+rebuilds the reference-dependent statistics and candidate scores, and `fit_step` applies
+one structural action under the
+[branch-consensus objective](../math/bagging-aggregation.md#consensus-fitting). Rounds run
+the grids in parallel under `use-rayon`. Finished grids keep contributing their final
+branches, and the reference is dropped before identification.
+
 `fit_grid_bag(x, y, params, rng)` exposes the ordered `(FitResult, GridTensor)` pairs
 before component aggregation. Each result contains the normalized grid's training
 predictions. Rust callers implementing prediction-based ensemble rules can reuse those
@@ -82,6 +91,6 @@ bit patterns. This preserves each branch, its predictions, and total observation
 ## Parameters (`params.rs`)
 
 `StagePredictorParams` carries `n_trees`, the nested `GridTensorParams`,
-`similarity_threshold` ($\xi$), and `aggregation_method`, with a fluent
+`similarity_threshold` ($\xi$), `aggregation_method`, and `consensus` ($\rho$), with a fluent
 `StagePredictorParamsBuilder` that delegates to `GridTensorParamsBuilder`. See
 [Architecture → builder pattern](architecture.md#the-builder-pattern).

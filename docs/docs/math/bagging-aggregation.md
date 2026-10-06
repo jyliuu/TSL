@@ -15,6 +15,43 @@ so independently fitted factors need not lie in a comparable gauge — two grids
 *same* stage yet sit at opposite ends of the $(\lambda_+,\lambda_-)$ spectrum. The
 align → normalize → reference → filter → average pipeline below resolves this.
 
+## Consensus fitting
+
+Independently fitted grids can reach the same stage function through different branch
+pairs. Adding a common component to both branches, $(\hat{m}_+ + h,\ \hat{m}_- + h)$,
+leaves $\hat{m} = \hat{m}_+ - \hat{m}_-$ unchanged, so agreement on $\hat{m}$ alone does
+not pin the factors ([non-identifiability](model.md#identifiability-and-stability)).
+Averaging the factors of such grids then produces a stage that none of them fitted.
+
+With `consensus` $\rho>0$ the grids of a stage are fitted in lockstep. Each round, every
+grid proposes and applies one structural action (split, resplit or merge) from its own
+randomized candidates. Before the round, grid $c$'s local objective gains a proximal term
+on its branches:
+
+$$
+\sum_i \bigl(y_i - \hat{m}^{(c)}(x^{(i)})\bigr)^2
++ \rho \sum_i \Bigl[\bigl(\hat{m}_+^{(c)}(x^{(i)}) - \bar{m}_+^{(-c)}(x^{(i)})\bigr)^2
++ \bigl(\hat{m}_-^{(c)}(x^{(i)}) - \bar{m}_-^{(-c)}(x^{(i)})\bigr)^2\Bigr],
+\qquad
+\bar{m}_\pm^{(-c)} = \frac{1}{n_{\text{grids}}-1}\sum_{c'\neq c}\hat{m}_\pm^{(c')}.
+$$
+
+A multiplicative update $(v_+, v_-)$ on an interval scales both branches on its rows, so
+the term stays quadratic in the update: it adds $\rho\,\hat{m}_\pm^2$ to the diagonal
+sufficient statistics and $\rho\,(\bar{m}_\pm - \hat{m}_\pm)\,\hat{m}_\pm$ to the linear
+ones, and the [two-tensor solve](fitting.md) is otherwise unchanged. Each branch is one
+product of univariate factors, so grids that agree on both branches agree on their
+factors up to the per-feature scale that normalization removes. The bag converges to one
+latent representation, and the align → average pipeline below combines near-identical
+factors.
+
+The proximal term also damps updates: where the grids agree, a step that moves both
+branches pays the same curvature as the data term. This regularizes noisy or sparsely
+supported stages and suppresses large cancelling branch pairs, and it can underfit
+near-noiseless targets within a fixed split budget, so $\rho$ is a tuning parameter
+(small values such as $0.1$–$1$ by cross-validation). Every round rebuilds the
+reference-dependent split statistics of each grid.
+
 ## The aggregation pipeline
 
 Working in the backbone/tilt parametrization, the combination proceeds in steps (Combine

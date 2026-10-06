@@ -30,7 +30,8 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
              min_split_loss=0.0, min_interval_samples=1, refinement_strategy="l2",
              prior_sample_size=0.0, update_clamp=float("inf"), tilt_tau=0.01,
              tilt_rho=0.0, split_strategy="random", top_k=10, must_fill_all_k=True,
-             similarity_threshold=0.0, bagged=False, seed=42, verbosity=1, visualdb=None)
+             similarity_threshold=0.0, consensus=0.0, bagged=False, seed=42, verbosity=1,
+             visualdb=None)
 ```
 
 **Parameters**
@@ -56,6 +57,7 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
 | `top_k` | `int` | `10` | (for `top_k`) candidate pool size |
 | `must_fill_all_k` | `bool` | `True` | (for `top_k`) require all $k$ slots |
 | `similarity_threshold` | `float` | `0.0` | bag trim $\xi$ (`0` keeps all) |
+| `consensus` | `float` | `0.0` | lockstep [consensus](../math/bagging-aggregation.md#consensus-fitting) strength $\rho\ge0$ (`0` fits grids independently) |
 | `bagged` | `bool` | `False` | enable the bagged-aggregation path |
 | `seed` | `int` | `42` | RNG seed (fits are deterministic) |
 | `verbosity` | `int` | `1` | log verbosity |
@@ -185,7 +187,8 @@ hyperparameters as the [`TSLRegressor` constructor](#cls-tslregressor); see the
 TSL.fit(x, y, epochs, decay, n_trees, n_iter, split_try, colsample_bytree, alpha,
         complexity_penalty, min_split_loss, min_interval_samples, refinement_strategy,
         prior_sample_size, update_clamp, tilt_tau, tilt_rho, split_strategy, top_k,
-        must_fill_all_k, similarity_threshold, bagged, seed, verbosity, visualdb=None)
+        must_fill_all_k, similarity_threshold, consensus, bagged, seed, verbosity,
+        visualdb=None)
         -> tuple[TSL, FitResult]
 ```
 

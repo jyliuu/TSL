@@ -87,10 +87,12 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
     prepared: Option<&grid_tensor::prepared_input::PreparedInput<'_>>,
 ) -> Vec<(FitResult, GridTensor)> {
     let StagePredictorParams {
-        n_trees, tg_params, ..
+        n_trees,
+        tg_params,
+        consensus,
+        ..
     } = hyperparameters;
 
-    #[cfg(feature = "use-rayon")]
     let epoch_opt = logging::current_epoch();
     let seeds: Vec<u64> = (0..*n_trees).map(|_| rng.gen()).collect();
     let initial_state = if *n_trees > 1 && !logging::is_logging_enabled() {
@@ -103,6 +105,19 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
     } else {
         None
     };
+
+    if *consensus > 0.0 && *n_trees > 1 {
+        return super::consensus::fit_consensus_bag(
+            x.view(),
+            y.view(),
+            tg_params,
+            *consensus,
+            &seeds,
+            initial_state.as_ref(),
+            prepared,
+            epoch_opt,
+        );
+    }
 
     let fitted_grids: Vec<(FitResult, GridTensor)>;
 

@@ -23,6 +23,7 @@ constructor defaults.
 |-------|:------:|---------|
 | `n_trees` | `10` | grid tensors fit per stage ($n_{\text{grids}}$); more reduces variance |
 | `similarity_threshold` | `0.0` | trim $\xi$ — keep top $\lceil(1-\xi)n_{\text{trees}}\rceil$ bags by similarity (`0` keeps all) |
+| `consensus` | `0.0` | lockstep [consensus](../math/bagging-aggregation.md#consensus-fitting) strength $\rho$: each grid's branches are pulled toward the mean branches of the others, so the bag converges to one latent representation (`0` fits grids independently) |
 | `bagged` | `False` | enable the bagged-aggregation path |
 
 The aggregation mode (`Mean` / `GeometricMean` / `Combined`) is set internally; see
@@ -94,3 +95,6 @@ TSLRegressor(
 Tune `epochs`, `n_iter`, and `n_trees` first. Use `alpha` to shrink multiplicative backbone
 changes, `tilt_tau`/`tilt_rho` to shrink tilt changes, `complexity_penalty` for structural
 cost-complexity selection, and `similarity_threshold` if bagged components disagree.
+`consensus` makes the bagged grids of each stage converge to one latent representation;
+its damping helps noisy or sparsely supported data and can underfit near-noiseless
+targets, so choose $\rho$ (typically $0.1$–$1$) by cross-validation.
