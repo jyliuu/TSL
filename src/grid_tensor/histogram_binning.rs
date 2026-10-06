@@ -23,14 +23,13 @@ use crate::grid_tensor::state::FittingState;
 
 /// Compute deterministic bin-edge positions in sorted order for a feature.
 ///
-/// Returns the sorted-position indices (`pos ∈ [1, n-1]`) at which a bin
-/// boundary lies. Positions where the underlying feature value equals the
-/// preceding sorted value (duplicates) are skipped — those positions are
-/// already disallowed as splits.
+/// Returns sorted-position indices separating distinct feature values.
+/// Quantile targets snap to the nearest distinct-value boundary; equidistant
+/// targets choose the lower rank. Repeated targets share one boundary.
 ///
 /// When `n_bins >= unique-value count`, every distinct boundary is a
 /// candidate (effectively the exact path).
-fn quantile_bin_edge_positions(
+pub(crate) fn quantile_bin_edge_positions(
     sorted_indices: &[usize],
     feature_values: &[f64],
     n_bins: usize,
@@ -41,24 +40,30 @@ fn quantile_bin_edge_positions(
     }
     let n_bins = n_bins.min(n);
 
-    let mut edges = Vec::with_capacity(n_bins.saturating_sub(1));
-    let mut last_pushed: Option<usize> = None;
-    // Bin boundary k lands at sorted-position floor(k * n / n_bins) for k in 1..n_bins.
+    let distinct: Vec<usize> = (1..n)
+        .filter(|&pos| {
+            feature_values[sorted_indices[pos]] != feature_values[sorted_indices[pos - 1]]
+        })
+        .collect();
+    if distinct.len() < n_bins {
+        return distinct;
+    }
+
+    let mut edges = Vec::with_capacity(n_bins - 1);
     for k in 1..n_bins {
-        let pos = (k * n) / n_bins;
-        if pos == 0 || pos >= n {
-            continue;
-        }
-        // Skip duplicates: if x[sorted[pos]] == x[sorted[pos-1]], the position
-        // is already NaN-marked as a forbidden split.
-        let v_here = feature_values[sorted_indices[pos]];
-        let v_prev = feature_values[sorted_indices[pos - 1]];
-        if v_here == v_prev {
-            continue;
-        }
-        if last_pushed != Some(pos) {
-            edges.push(pos);
-            last_pushed = Some(pos);
+        let target = (k * n) / n_bins;
+        let right = distinct.partition_point(|&boundary| boundary < target);
+        let boundary = if right == 0 {
+            distinct[0]
+        } else if right == distinct.len() {
+            distinct[right - 1]
+        } else if target - distinct[right - 1] <= distinct[right] - target {
+            distinct[right - 1]
+        } else {
+            distinct[right]
+        };
+        if edges.last() != Some(&boundary) {
+            edges.push(boundary);
         }
     }
     edges
@@ -170,12 +175,105 @@ mod tests {
         // sorted_indices preserves order.
         let sorted = (0..10).collect::<Vec<_>>();
         let values: Vec<f64> = vec![0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
-        // 5 bins -> would put edge at position 2 (between two 0s) -> skip.
+        // The target at rank2 snaps to the boundary after the repeated zero values.
         let edges = quantile_bin_edge_positions(&sorted, &values, 5);
-        assert!(!edges.contains(&2)); // Position 2 has same value as position 1
+        assert!(!edges.contains(&2));
+        assert!(edges.contains(&3));
         assert!(edges.contains(&4));
         assert!(edges.contains(&6));
         assert!(edges.contains(&8));
+    }
+
+    #[test]
+    fn every_low_cardinality_boundary_is_retained_with_uneven_counts() {
+        let values = [vec![0.0; 37], vec![1.0; 53], vec![2.0; 29], vec![3.0; 11]].concat();
+        let sorted: Vec<usize> = (0..values.len()).collect();
+        assert_eq!(
+            quantile_bin_edge_positions(&sorted, &values, 64),
+            vec![37, 90, 119]
+        );
+        assert_eq!(
+            quantile_bin_edge_positions(&sorted, &values, 4),
+            vec![37, 90, 119]
+        );
+    }
+
+    #[test]
+    fn quantiles_inside_duplicate_runs_snap_to_valid_boundaries() {
+        let values: Vec<f64> = (0..10)
+            .flat_map(|value| std::iter::repeat_n(value as f64, 10))
+            .collect();
+        let sorted: Vec<usize> = (0..values.len()).collect();
+        // Targets 25, 50, 75 land inside tied runs; lower-rank ties are deterministic.
+        assert_eq!(
+            quantile_bin_edge_positions(&sorted, &values, 4),
+            vec![20, 50, 70]
+        );
+    }
+
+    #[test]
+    fn repeated_quantile_targets_share_one_distinct_boundary() {
+        let values = [
+            vec![0.0; 80],
+            vec![1.0; 3],
+            vec![2.0; 3],
+            vec![3.0; 3],
+            vec![4.0; 3],
+            vec![5.0; 8],
+        ]
+        .concat();
+        let sorted: Vec<usize> = (0..values.len()).collect();
+        let edges = quantile_bin_edge_positions(&sorted, &values, 4);
+        assert_eq!(edges, vec![80]);
+        assert!(edges.len() < 4);
+    }
+
+    #[test]
+    fn replicated_discrete_data_preserves_boundary_values_and_scales_counts() {
+        let values: Vec<f64> = (0..10)
+            .flat_map(|value| std::iter::repeat_n(value as f64, 10))
+            .collect();
+        let sorted: Vec<usize> = (0..values.len()).collect();
+        let edges = quantile_bin_edge_positions(&sorted, &values, 4);
+        let replicated: Vec<f64> = values
+            .iter()
+            .flat_map(|&value| std::iter::repeat_n(value, 3))
+            .collect();
+        let replicated_sorted: Vec<usize> = (0..replicated.len()).rev().collect();
+        let mut replicated_sorted = replicated_sorted;
+        replicated_sorted.sort_by(|&a, &b| replicated[a].total_cmp(&replicated[b]));
+        let replicated_edges = quantile_bin_edge_positions(&replicated_sorted, &replicated, 4);
+        assert_eq!(
+            replicated_edges,
+            edges.iter().map(|edge| edge * 3).collect::<Vec<_>>()
+        );
+        for (edge, replicated_edge) in edges.iter().zip(replicated_edges) {
+            assert_eq!(
+                values[sorted[*edge]],
+                replicated[replicated_sorted[replicated_edge]]
+            );
+        }
+    }
+
+    #[test]
+    fn candidate_boundaries_obey_bin_budget_for_repeated_value_patterns() {
+        for unique in 1..30 {
+            let values: Vec<f64> = (0..unique)
+                .flat_map(|value| std::iter::repeat_n(value as f64, 1 + (value * 7 + unique) % 13))
+                .collect();
+            let sorted: Vec<usize> = (0..values.len()).collect();
+            for bins in 2..35 {
+                let edges = quantile_bin_edge_positions(&sorted, &values, bins);
+                assert!(edges.len() < bins);
+                assert!(edges.windows(2).all(|pair| pair[0] < pair[1]));
+                assert!(edges.iter().all(|&edge| edge > 0
+                    && edge < values.len()
+                    && values[edge - 1] < values[edge]));
+                if unique <= bins {
+                    assert_eq!(edges.len(), unique - 1);
+                }
+            }
+        }
     }
 
     #[test]
