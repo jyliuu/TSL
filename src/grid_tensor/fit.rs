@@ -5,6 +5,8 @@ use crate::{
     grid_tensor::{
         identification::l2_identify,
         reducer::fitting_reducer,
+        refinement::RefinementStrategy,
+        splitting::SplitStrategy,
         state::FittingState,
         GridTensor, GridTensorParams,
     },
@@ -85,49 +87,80 @@ pub(crate) fn fit_initialized<R: Rng + ?Sized>(
         .get_refinement_strategy();
     let split_strategy = hyperparameters.split_strategy_params.get_split_strategy();
 
-    let n_iter = hyperparameters.n_iter;
-    let max_iterations = n_iter * MAX_ITERATIONS_MULTIPLIER;
-
-    for iter in 0..max_iterations {
-        state.iteration = iter;
-
-        if !state.split_strategy_state.merge_enabled && state.loop_state.fineness >= n_iter {
+    for iter in 0..max_iterations(hyperparameters.n_iter) {
+        let advanced;
+        (state, advanced) = fit_step(
+            state,
+            iter,
+            hyperparameters.n_iter,
+            &refinement_strategy,
+            &split_strategy,
+            rng,
+        );
+        if !advanced {
             break;
-        }
-
-        // The fineness budget excludes new splits but leaves resplits and merges
-        // available under the same objective. A merge frees capacity for a later split.
-        let allow_split = state.loop_state.fineness < n_iter;
-        let Some(action) =
-            split_strategy.propose_next_action_with_split_budget(&state, rng, allow_split)
-        else {
-            log::debug!("No objective-improving structural action remains, stopping");
-            break;
-        };
-
-        // Apply action through reducer (which calls logging reducer internally)
-        state = fitting_reducer(state, action, &refinement_strategy, &split_strategy);
-        if state.terminated {
-            break;
-        }
-
-        // Log component states and f+/f- statistics every iteration
-        // Use reducer pattern - always call it, even if logging_state is None (no-op)
-        // Feature flag is encapsulated inside the reducers
-        #[cfg(feature = "evo-logging")]
-        use crate::logging::reducer::{log_component_reducer, log_f_component_reducer};
-
-        // Log f+/f- statistics (reducer computes stats internally from state)
-        #[cfg(feature = "evo-logging")]
-        {
-            state.logging_state =
-                log_f_component_reducer(state.logging_state.take(), &state, iter);
-
-            state.logging_state =
-                log_component_reducer(state.logging_state.take(), &state, iter);
         }
     }
+    finish_fit(state)
+}
 
+/// Upper bound on structural actions for a grid with fineness budget `n_iter`.
+pub(crate) fn max_iterations(n_iter: usize) -> usize {
+    n_iter * MAX_ITERATIONS_MULTIPLIER
+}
+
+/// Propose and apply one structural action.
+///
+/// Returns `false` once the grid is finished: the split budget is exhausted with merges
+/// disabled, no objective-improving action remains, or the reducer terminated the fit.
+pub(crate) fn fit_step<'a, R: Rng + ?Sized>(
+    mut state: FittingState<'a>,
+    iter: usize,
+    n_iter: usize,
+    refinement_strategy: &RefinementStrategy,
+    split_strategy: &SplitStrategy,
+    rng: &mut R,
+) -> (FittingState<'a>, bool) {
+    state.iteration = iter;
+
+    if !state.split_strategy_state.merge_enabled && state.loop_state.fineness >= n_iter {
+        return (state, false);
+    }
+
+    // The fineness budget excludes new splits but leaves resplits and merges
+    // available under the same objective. A merge frees capacity for a later split.
+    let allow_split = state.loop_state.fineness < n_iter;
+    let Some(action) =
+        split_strategy.propose_next_action_with_split_budget(&state, rng, allow_split)
+    else {
+        log::debug!("No objective-improving structural action remains, stopping");
+        return (state, false);
+    };
+
+    // Apply action through reducer (which calls logging reducer internally)
+    state = fitting_reducer(state, action, refinement_strategy, split_strategy);
+    if state.terminated {
+        return (state, false);
+    }
+
+    // Log component states and f+/f- statistics every iteration
+    // Use reducer pattern - always call it, even if logging_state is None (no-op)
+    // Feature flag is encapsulated inside the reducers
+    #[cfg(feature = "evo-logging")]
+    use crate::logging::reducer::{log_component_reducer, log_f_component_reducer};
+
+    // Log f+/f- statistics (reducer computes stats internally from state)
+    #[cfg(feature = "evo-logging")]
+    {
+        state.logging_state = log_f_component_reducer(state.logging_state.take(), &state, iter);
+
+        state.logging_state = log_component_reducer(state.logging_state.take(), &state, iter);
+    }
+    (state, true)
+}
+
+/// Identify the fitted factors and convert the state into the output types.
+pub(crate) fn finish_fit(mut state: FittingState<'_>) -> (FitResult, GridTensor) {
     log::debug!(
         "Split/Resplit/Merge counts: {}/{}/{}",
         state.loop_state.split_count,
@@ -138,6 +171,7 @@ pub(crate) fn fit_initialized<R: Rng + ?Sized>(
     // Extract logging state before conversion (for final state logging)
     #[cfg(feature = "evo-logging")]
     let logging_state = state.logging_state.take();
+    #[cfg(feature = "evo-logging")]
     let final_iteration = state.iteration;
 
     // Convert FittingState to output types
@@ -149,12 +183,11 @@ pub(crate) fn fit_initialized<R: Rng + ?Sized>(
     // Always call it - it handles None internally
     #[cfg(feature = "evo-logging")]
     {
-    use crate::grid_tensor::logging_helpers::log_final_component_states;
-    log_final_component_states(logging_state, &grid_tensor, final_iteration);
+        use crate::grid_tensor::logging_helpers::log_final_component_states;
+        log_final_component_states(logging_state, &grid_tensor, final_iteration);
     }
     (fit_result, grid_tensor)
 }
-
 
 /// Compute real intervals from state boundaries and sorted indices
 fn compute_real_intervals(
