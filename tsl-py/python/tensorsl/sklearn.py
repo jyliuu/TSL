@@ -78,8 +78,11 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         heavily shrunk toward the parent, while a child with 100 samples will mostly trust its own data.
         Default: 0.0 (no anchoring). Typical values: 10-50.
     update_clamp : float, default=float('inf')
-        Clamping parameter for refinement updates. Limits magnitude of update multipliers to the range
-        [exp(-update_clamp), exp(update_clamp)]. Use float('inf') for no clamping.
+        Nonnegative log-step cap for refinement updates. Branch multipliers lie in
+        [max(0.05, exp(-update_clamp)), min(20, exp(update_clamp))]. Positive infinity
+        retains the numerical bounds [0.05, 20]. Split and boundary-refit updates
+        are relative to current factors; merge updates are relative to the
+        count-weighted geometric reference of neighboring factors.
     tilt_tau : float, default=0.01
         L2 penalty on the multiplicative tilt update
         ``0.5 * log(v_plus / v_minus)``.

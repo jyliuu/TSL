@@ -49,7 +49,7 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
 | `min_interval_samples` | `int` | `1` | minimum observations either side of a split |
 | `refinement_strategy` | `str` | `"l2"` | `"l2"` or `"huber"` |
 | `prior_sample_size` | `float` | `0.0` | parent-anchoring strength (advanced; `0.0` = off) |
-| `update_clamp` | `float` | `inf` | update-magnitude cap (advanced; `inf` = off) |
+| `update_clamp` | `float` | `inf` | nonnegative log-step cap; `inf` retains numerical multiplier bounds $[0.05,20]$ |
 | `tilt_tau` | `float` | `0.01` | $\ell_2$ penalty on the tilt update $\delta=\frac12\log(v_+/v_-)$ |
 | `tilt_rho` | `float` | `0.0` | $\ell_1$ penalty on $\delta$; can produce zero tilt updates |
 | `split_strategy` | `str` | `"random"` | `"random"`, `"best_split"`, or `"top_k"` |

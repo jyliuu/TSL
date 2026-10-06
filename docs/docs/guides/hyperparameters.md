@@ -70,7 +70,7 @@ the exact logarithmic penalties.
 | Param | Default | Meaning |
 |-------|:------:|---------|
 | `prior_sample_size` | `0.0` | parent-anchoring strength ($\tau_0$); the default `0.0` disables anchoring |
-| `update_clamp` | `inf` | cap on update magnitude; the default `inf` imposes no extra cap |
+| `update_clamp` | `inf` | nonnegative log-step cap $c$; branch multipliers are bounded by $[\max(0.05,e^{-c}),\min(20,e^c)]$ |
 
 !!! note
     Leave the two advanced parameters at their defaults unless you are experimenting — the

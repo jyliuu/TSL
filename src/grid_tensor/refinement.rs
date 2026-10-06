@@ -35,6 +35,24 @@ pub enum RefinementStrategy {
 }
 
 impl RefinementStrategy {
+    /// Multiplier limits combine the numerical box with the configured log-step cap.
+    #[inline]
+    pub(crate) fn multiplier_bounds(&self) -> (f64, f64) {
+        let clamp = self.update_clamp();
+        assert!(
+            clamp >= 0.0,
+            "update_clamp must be nonnegative or positive infinity"
+        );
+        if clamp >= DEFAULT_V_MAX.ln() {
+            (DEFAULT_V_MIN, DEFAULT_V_MAX)
+        } else {
+            (
+                (-clamp).exp().max(DEFAULT_V_MIN),
+                clamp.exp().min(DEFAULT_V_MAX),
+            )
+        }
+    }
+
     #[inline]
     pub fn tilt_tau(&self) -> f64 {
         match self {
@@ -805,8 +823,7 @@ impl RefinementStrategy {
 
         let is_stage1 = state.is_stage1_positive_only();
         let alpha = self.alpha();
-        let v_min = DEFAULT_V_MIN;
-        let v_max = DEFAULT_V_MAX;
+        let (v_min, v_max) = self.multiplier_bounds();
 
         for i in lo_boundary_idx..=hi_boundary_idx {
             // Use interval stats directly (O(1) lookup instead of prefix_range computation)
@@ -894,6 +911,7 @@ impl RefinementStrategy {
         }
 
         let is_stage1 = state.is_stage1_positive_only();
+        let (v_min, v_max) = self.multiplier_bounds();
         let sorted_indices = &state.precomputed_statistics.sorted_indices[col];
 
         for i in lo_boundary_idx..=hi_boundary_idx {
@@ -949,7 +967,7 @@ impl RefinementStrategy {
 
             let merged_factors = if is_stage1 {
                 let (u, _, _) = l2_update_unanchored(self.alpha(), t1, s11);
-                let multiplier = (1.0 + u).clamp(DEFAULT_V_MIN, DEFAULT_V_MAX);
+                let multiplier = (1.0 + u).clamp(v_min, v_max);
                 canonical_merge_factors(
                     reference.0 * multiplier,
                     reference.0 * multiplier,
@@ -965,8 +983,8 @@ impl RefinementStrategy {
                     self.alpha(),
                     self.tilt_tau(),
                     self.tilt_rho(),
-                    DEFAULT_V_MIN,
-                    DEFAULT_V_MAX,
+                    v_min,
+                    v_max,
                 );
                 let v_plus = 1.0 + u_plus;
                 let v_minus = 1.0 + u_minus;
@@ -1031,8 +1049,7 @@ impl RefinementStrategy {
         error_reductions_pairs[start] = (f64::NAN, f64::NAN);
 
         let alpha = self.alpha();
-        let v_min = DEFAULT_V_MIN;
-        let v_max = DEFAULT_V_MAX;
+        let (v_min, v_max) = self.multiplier_bounds();
         let tau = self.tilt_tau();
         let rho = self.tilt_rho();
 

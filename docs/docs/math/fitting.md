@@ -559,11 +559,17 @@ $$
 When $\rho>0$, the solver checks positive, negative, and exactly zero tilt updates and
 keeps the best valid proposal.
 
-The proposed multipliers are limited to
+For `update_clamp` $c\geq0$, the proposed multipliers are limited to
 
 $$
-v_+,v_-\in[0.05,20].
+v_+,v_-\in[\max(0.05,e^{-c}),\min(20,e^c)].
 $$
+
+The default $c=\infty$ retains the numerical interval $[0.05,20]$. The same
+limits apply to L2 and Huber proposals. For a merge, the multipliers are measured
+from the count-weighted geometric reference of the two neighboring factors.
+Consequently, $c=0$ freezes split and boundary-refit updates, while a merge can
+still replace unequal factors with their common reference.
 
 The action score uses the exact log-coordinate update penalty at this limited proposal.
 When the selected action is applied, the code also enforces

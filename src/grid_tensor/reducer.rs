@@ -58,8 +58,7 @@ fn reduce_apply_transformation<'a>(
             let (u_plus_l, u_minus_l) = split_candidate.update_left;
             let (u_plus_r, u_minus_r) = split_candidate.update_right;
 
-            let v_min = crate::grid_tensor::two_tensor_solver::DEFAULT_V_MIN;
-            let v_max = crate::grid_tensor::two_tensor_solver::DEFAULT_V_MAX;
+            let (v_min, v_max) = refinement_strategy.multiplier_bounds();
 
             let is_stage1 = state.is_stage1_positive_only();
             let (v_b_l, delta_d_l, v_b_r, delta_d_r) = if is_stage1 {
@@ -194,8 +193,7 @@ fn reduce_apply_transformation<'a>(
             // Convert two-tensor updates to (v_b, delta_d) for each side
             let (u_plus_l, u_minus_l) = resplit_candidate.update_left;
             let (u_plus_r, u_minus_r) = resplit_candidate.update_right;
-            let v_min = crate::grid_tensor::two_tensor_solver::DEFAULT_V_MIN;
-            let v_max = crate::grid_tensor::two_tensor_solver::DEFAULT_V_MAX;
+            let (v_min, v_max) = refinement_strategy.multiplier_bounds();
 
             let is_stage1 = state.is_stage1_positive_only();
             let (v_b_l, delta_d_l, v_b_r, delta_d_r) = if is_stage1 {
