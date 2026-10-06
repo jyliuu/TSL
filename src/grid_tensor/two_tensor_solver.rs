@@ -30,7 +30,7 @@ pub const DEFAULT_RHO: f64 = 0.0;
 pub const DEFAULT_V_MIN: f64 = 0.05;
 pub const DEFAULT_V_MAX: f64 = 20.0;
 
-/// Condition number threshold for near-singular matrix detection
+/// Relative eigenvalue threshold for numerically null quadratic directions
 const COND_THRESHOLD: f64 = 1e12;
 
 /// Solve the two-tensor 2×2 system
@@ -53,8 +53,7 @@ const COND_THRESHOLD: f64 = 1e12;
 /// - `u_minus` = v_minus - 1 (after clamping)
 /// - `gain` = exact penalized objective decrease at the clamped multipliers
 ///
-/// # Panics
-/// Never panics - returns (0.0, 0.0, 0.0) for near-singular or invalid cases
+/// Invalid inputs and rank-deficient systems without a finite descent update return a no-op.
 pub fn solve_two_tensor(
     s11: f64,
     s22: f64,
@@ -67,6 +66,21 @@ pub fn solve_two_tensor(
     v_min: f64,
     v_max: f64,
 ) -> (f64, f64, f64) {
+    if [s11, s22, s12, t1, t2, alpha, tau, rho, v_min, v_max]
+        .iter()
+        .any(|value| !value.is_finite())
+        || s11 < 0.0
+        || s22 < 0.0
+        || alpha < 0.0
+        || tau < 0.0
+        || rho < 0.0
+        || v_min <= 0.0
+        || v_min > 1.0
+        || v_max < 1.0
+    {
+        return (0.0, 0.0, 0.0);
+    }
+
     // The local coordinates are m = (u_+ + u_-)/2 and
     // t = (u_+ - u_-)/2. Their quadratic penalty contributes
     // 1/4 [[α+τ, α-τ], [α-τ, α+τ]] to the system.
@@ -74,6 +88,52 @@ pub fn solve_two_tensor(
     let a12 = s12 + 0.25 * (alpha - tau);
     let a21 = a12; // Symmetric
     let a22 = s22 + 0.25 * (alpha + tau);
+
+    let Some(rank_deficient) = quadratic_rank(a11, a12, a22) else {
+        return (0.0, 0.0, 0.0);
+    };
+    if rank_deficient {
+        // Compare feasible range and zero-tilt candidates using the exact
+        // log penalty. A minimum-norm range step controls nullspace motion.
+        let mut best = (0.0, 0.0, 0.0);
+        let mut consider = |up: f64, um: f64| {
+            let up = (1.0 + up).clamp(v_min, v_max) - 1.0;
+            let um = (1.0 + um).clamp(v_min, v_max) - 1.0;
+            let mut fraction = 1.0;
+            for _ in 0..32 {
+                let up = fraction * up;
+                let um = fraction * um;
+                let gain = data_loss_gain(up, um, s11, s22, s12, t1, t2)
+                    - log_coordinate_penalty(1.0 + up, 1.0 + um, alpha, tau, rho);
+                if gain.is_finite() && gain > 0.0 {
+                    if gain > best.2 {
+                        best = (up, um, gain);
+                    }
+                    break;
+                }
+                fraction *= 0.5;
+            }
+        };
+        if rho == 0.0 {
+            if let Some((up, um)) = solve_2x2(a11, a12, a22, t1, t2) {
+                consider(up, um);
+            }
+        } else {
+            for sign in [1.0, -1.0] {
+                if let Some((up, um)) =
+                    solve_2x2(a11, a12, a22, t1 - sign * rho / 4.0, t2 + sign * rho / 4.0)
+                {
+                    if sign * (up - um) > 0.0 {
+                        consider(up, um);
+                    }
+                }
+            }
+            if let Some(common) = zero_tilt_candidate(a11, a12, a22, t1, t2) {
+                consider(common, common);
+            }
+        }
+        return best;
+    }
 
     // Right-hand side vector t = [t1, t2]^T
     let t = [t1, t2];
@@ -99,135 +159,127 @@ pub fn solve_two_tensor(
     let gain = data_loss_gain(u_plus_clamped, u_minus_clamped, s11, s22, s12, t1, t2)
         - log_coordinate_penalty(v_plus, v_minus, alpha, tau, rho);
 
-    (u_plus_clamped, u_minus_clamped, gain)
+    if gain.is_finite() {
+        (u_plus_clamped, u_minus_clamped, gain)
+    } else {
+        (0.0, 0.0, 0.0)
+    }
 }
 
 /// Solve the 2×2 system when ρ = 0 (pure quadratic case)
-fn solve_rho_zero(a11: f64, a12: f64, a21: f64, a22: f64, t1: f64, t2: f64) -> (f64, f64) {
-    // Compute determinant
-    let det = a11 * a22 - a12 * a21;
-
-    // Check for near-singularity
-    if det.abs() < 1e-15 || !det.is_finite() {
-        // Near-singular: return no-op (u = 0)
-        return (0.0, 0.0);
-    }
-
-    // Check condition number
-    let norm_a = (a11 * a11 + a12 * a12 + a21 * a21 + a22 * a22).sqrt();
-    let cond = norm_a / det.abs();
-    if cond > COND_THRESHOLD {
-        // Near-singular: return no-op (u = 0)
-        return (0.0, 0.0);
-    }
-
-    // Solve: A u = t
-    // u_+ = (a22 * t1 - a12 * t2) / det
-    // u_- = (a11 * t2 - a21 * t1) / det
-    let u_plus = (a22 * t1 - a12 * t2) / det;
-    let u_minus = (a11 * t2 - a21 * t1) / det;
-
-    // Check for NaN/Inf
-    if !u_plus.is_finite() || !u_minus.is_finite() {
-        return (0.0, 0.0);
-    }
-
-    (u_plus, u_minus)
+fn solve_rho_zero(a11: f64, a12: f64, _a21: f64, a22: f64, t1: f64, t2: f64) -> (f64, f64) {
+    solve_2x2(a11, a12, a22, t1, t2).unwrap_or((0.0, 0.0))
 }
 
-/// Solve the 2×2 system when ρ > 0 (L1 penalty case)
-///
-/// Uses 3-case closed-form subgradient check:
-/// - (+) Solve A u = t - (ρ/2) c, accept if c^T u > 0
-/// - (−) Solve A u = t + (ρ/2) c, accept if c^T u < 0
-/// - (0) Else project q = A^{-1} t onto hyperplane c^T u = 0
+/// Solve both signed tilt regions and the zero-tilt boundary.
 fn solve_rho_positive(
     a11: f64,
     a12: f64,
-    a21: f64,
+    _a21: f64,
     a22: f64,
     t1: f64,
     t2: f64,
     rho: f64,
 ) -> (f64, f64) {
-    // c = [1, -1]^T
-    let c = [1.0, -1.0];
-    let rho_half = rho / 2.0;
-
-    // Compute determinant
-    let det = a11 * a22 - a12 * a21;
-
-    // Check for near-singularity
-    if det.abs() < 1e-15 || !det.is_finite() {
-        return (0.0, 0.0);
-    }
-
-    // Case (+): Solve A u = t - (ρ/2) c
-    let t_plus = [t1 - rho_half * c[0], t2 - rho_half * c[1]];
-    let u_plus_case = solve_2x2(a11, a12, a21, a22, t_plus[0], t_plus[1], det);
-    if u_plus_case.is_some() {
-        let (u_p, u_m) = u_plus_case.unwrap();
-        let c_dot_u = c[0] * u_p + c[1] * u_m;
-        if c_dot_u > 0.0 {
-            return (u_p, u_m);
+    let mut best = (0.0, 0.0);
+    let mut best_objective = 0.0;
+    let mut consider = |up: f64, um: f64| {
+        let objective = a11 * up * up + 2.0 * a12 * up * um + a22 * um * um
+            - 2.0 * (t1 * up + t2 * um)
+            + rho * (up - um).abs();
+        if objective.is_finite() && objective < best_objective {
+            best = (up, um);
+            best_objective = objective;
         }
-    }
-
-    // Case (−): Solve A u = t + (ρ/2) c
-    let t_minus = [t1 + rho_half * c[0], t2 + rho_half * c[1]];
-    let u_minus_case = solve_2x2(a11, a12, a21, a22, t_minus[0], t_minus[1], det);
-    if u_minus_case.is_some() {
-        let (u_p, u_m) = u_minus_case.unwrap();
-        let c_dot_u = c[0] * u_p + c[1] * u_m;
-        if c_dot_u < 0.0 {
-            return (u_p, u_m);
-        }
-    }
-
-    // Case (0): Project q = A^{-1} t onto hyperplane c^T u = 0
-    // u^(0) = q - r * (c^T q) / (c^T r)
-    // where q = A^{-1} t, r = A^{-1} c
-    let q = solve_2x2(a11, a12, a21, a22, t1, t2, det);
-    let r = solve_2x2(a11, a12, a21, a22, c[0], c[1], det);
-
-    if q.is_some() && r.is_some() {
-        let (q_p, q_m) = q.unwrap();
-        let (r_p, r_m) = r.unwrap();
-        let c_dot_q = c[0] * q_p + c[1] * q_m;
-        let c_dot_r = c[0] * r_p + c[1] * r_m;
-
-        if c_dot_r.abs() > 1e-15 {
-            let u_p = q_p - r_p * (c_dot_q / c_dot_r);
-            let u_m = q_m - r_m * (c_dot_q / c_dot_r);
-            if u_p.is_finite() && u_m.is_finite() {
-                return (u_p, u_m);
+    };
+    for sign in [1.0, -1.0] {
+        if let Some((up, um)) =
+            solve_2x2(a11, a12, a22, t1 - sign * rho / 2.0, t2 + sign * rho / 2.0)
+        {
+            if sign * (up - um) > 0.0 {
+                consider(up, um);
             }
         }
     }
-
-    // Fallback: no-op
-    (0.0, 0.0)
+    if let Some(common) = zero_tilt_candidate(a11, a12, a22, t1, t2) {
+        consider(common, common);
+    }
+    best
 }
 
-/// Helper to solve 2×2 system A u = t given precomputed determinant
-fn solve_2x2(
-    a11: f64,
-    a12: f64,
-    a21: f64,
-    a22: f64,
-    t1: f64,
-    t2: f64,
-    det: f64,
-) -> Option<(f64, f64)> {
-    if det.abs() < 1e-15 || !det.is_finite() {
+fn zero_tilt_candidate(a11: f64, a12: f64, a22: f64, t1: f64, t2: f64) -> Option<f64> {
+    let scale = a11.abs().max(a12.abs()).max(a22.abs());
+    if scale <= 0.0 || !scale.is_finite() {
         return None;
     }
+    let trace = a11 / scale + a22 / scale;
+    let curvature = trace + 2.0 * (a12 / scale);
+    if curvature <= trace / COND_THRESHOLD {
+        return None;
+    }
+    let common = (t1 / scale + t2 / scale) / curvature;
+    common.is_finite().then_some(common)
+}
 
-    let u_plus = (a22 * t1 - a12 * t2) / det;
-    let u_minus = (a11 * t2 - a21 * t1) / det;
+/// Return whether a finite positive-semidefinite system has a null direction.
+fn quadratic_rank(a11: f64, a12: f64, a22: f64) -> Option<bool> {
+    let scale = a11.abs().max(a12.abs()).max(a22.abs());
+    if scale <= 0.0 || !scale.is_finite() {
+        return None;
+    }
+    let a = a11 / scale;
+    let b = a12 / scale;
+    let c = a22 / scale;
+    let determinant = a * c - b * b;
+    let tolerance = (a + c).powi(2) / COND_THRESHOLD;
+    if a < -1.0 / COND_THRESHOLD || c < -1.0 / COND_THRESHOLD || determinant < -tolerance {
+        None
+    } else {
+        Some(determinant <= tolerance)
+    }
+}
 
-    if u_plus.is_finite() && u_minus.is_finite() {
-        Some((u_plus, u_minus))
+/// Minimum-norm solution with numerically null PSD directions truncated.
+fn solve_2x2(a11: f64, a12: f64, a22: f64, t1: f64, t2: f64) -> Option<(f64, f64)> {
+    let scale = a11.abs().max(a12.abs()).max(a22.abs());
+    if scale <= 0.0 || !scale.is_finite() {
+        return None;
+    }
+    let a = a11 / scale;
+    let b = a12 / scale;
+    let c = a22 / scale;
+    let t1 = t1 / scale;
+    let t2 = t2 / scale;
+    let determinant = a * c - b * b;
+    let tolerance = (a + c).powi(2) / COND_THRESHOLD;
+    if a < -1.0 / COND_THRESHOLD || c < -1.0 / COND_THRESHOLD || determinant < -tolerance {
+        return None;
+    }
+    let solution = if determinant > tolerance {
+        (
+            (c * t1 - b * t2) / determinant,
+            (a * t2 - b * t1) / determinant,
+        )
+    } else {
+        let eigenvalue = 0.5 * (a + c + (a - c).hypot(2.0 * b));
+        if eigenvalue <= 0.0 || !eigenvalue.is_finite() {
+            return None;
+        }
+        let left = (b, eigenvalue - a);
+        let right = (eigenvalue - c, b);
+        let (mut vx, mut vy) = if left.0.hypot(left.1) >= right.0.hypot(right.1) {
+            left
+        } else {
+            right
+        };
+        let norm = vx.hypot(vy);
+        vx /= norm;
+        vy /= norm;
+        let projected = (vx * t1 + vy * t2) / eigenvalue;
+        (vx * projected, vy * projected)
+    };
+    if solution.0.is_finite() && solution.1.is_finite() {
+        Some(solution)
     } else {
         None
     }
@@ -360,25 +412,118 @@ mod tests {
     }
 
     #[test]
-    fn test_solve_near_singular() {
-        // Near-singular case: very small determinant
-        let (u_plus, u_minus, gain) = solve_two_tensor(
-            1e-10, // s11
-            1e-10, // s22
-            1e-10, // s12 (makes det very small)
-            1.0,   // t1
-            1.0,   // t2
-            0.0,   // alpha
-            0.0,   // tau
-            0.0,   // rho
-            0.05,  // v_min
-            20.0,  // v_max
-        );
+    fn rank_one_tilt_direction_has_a_minimum_norm_descent_update() {
+        let (up, um, gain) =
+            solve_two_tensor(2.0, 2.0, -2.0, 0.4, -0.4, 0.0, 0.01, 0.0, 0.05, 20.0);
+        let expected_difference = 0.4 / (2.0 + 0.01 / 4.0);
+        assert!((up - um - expected_difference).abs() < 1e-12);
+        assert!((up + um).abs() < 1e-12);
+        assert!(gain > 0.0);
+    }
 
-        // Should return no-op (0, 0, 0) for near-singular
-        assert_eq!(u_plus, 0.0);
-        assert_eq!(u_minus, 0.0);
-        assert_eq!(gain, 0.0);
+    #[test]
+    fn rank_one_tilt_l1_penalty_uses_soft_thresholding() {
+        let rho = 0.2;
+        let (up, um, gain) =
+            solve_two_tensor(2.0, 2.0, -2.0, 0.4, -0.4, 0.0, 0.01, rho, 0.05, 20.0);
+        let expected_difference = (0.4 - rho / 4.0) / (2.0 + 0.01 / 4.0);
+        assert!((up - um - expected_difference).abs() < 1e-12);
+        assert!((up + um).abs() < 1e-12);
+        assert!(gain > 0.0);
+        assert_eq!(
+            solve_two_tensor(2.0, 2.0, -2.0, 0.4, -0.4, 0.0, 0.01, 2.0, 0.05, 20.0),
+            (0.0, 0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn quadratic_update_is_invariant_to_uniform_system_scale() {
+        for (s11, s22, s12, alpha, tau) in [
+            (2.0, 2.0, -2.0, 0.0, 0.01),
+            (2.0, 3.0, -0.4, 0.3, 0.01),
+            (1.002001, 1.0, -1.001, 0.0, 0.0),
+        ] {
+            for rho in [0.0, 0.001, 0.1] {
+                let reference =
+                    solve_two_tensor(s11, s22, s12, 0.4, -0.4, alpha, tau, rho, 0.05, 20.0);
+                for scale in [1e-100, 1e100] {
+                    let result = solve_two_tensor(
+                        s11 * scale,
+                        s22 * scale,
+                        s12 * scale,
+                        0.4 * scale,
+                        -0.4 * scale,
+                        alpha * scale,
+                        tau * scale,
+                        rho * scale,
+                        0.05,
+                        20.0,
+                    );
+                    assert!((result.0 - reference.0).abs() < 1e-10);
+                    assert!((result.1 - reference.1).abs() < 1e-10);
+                    assert!((result.2 / scale - reference.2).abs() < 1e-10);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn asymmetric_rank_one_system_uses_the_identified_direction() {
+        let (up, um, gain) = solve_two_tensor(4.0, 1.0, -2.0, 0.8, -0.4, 0.0, 0.0, 0.0, 0.05, 20.0);
+        assert!((up - 0.16).abs() < 1e-12);
+        assert!((um + 0.08).abs() < 1e-12);
+        assert!((gain - 0.16).abs() < 1e-12);
+    }
+
+    #[test]
+    fn rank_one_l1_candidates_are_compared_after_multiplier_bounds() {
+        let p = 1.001;
+        let (up, um, gain) = solve_two_tensor(p * p, 1.0, -p, p, -1.0, 0.0, 0.0, 0.001, 0.05, 20.0);
+        assert!(up.abs() < 1.0 && um.abs() < 1.0);
+        assert!(gain > 0.99);
+    }
+
+    #[test]
+    fn rank_deficient_clamped_update_has_exact_positive_gain() {
+        for target in [0.2, 2.0, 20.0, -20.0] {
+            let (up, um, gain) =
+                solve_two_tensor(1.0, 1.0, -1.0, target, -target, 0.0, 5.0, 0.1, 0.05, 20.0);
+            assert!((0.05 - 1e-14..=20.0).contains(&(1.0 + up)));
+            assert!((0.05 - 1e-14..=20.0).contains(&(1.0 + um)));
+            assert!(gain > 0.0);
+            let expected = data_loss_gain(up, um, 1.0, 1.0, -1.0, target, -target)
+                - log_coordinate_penalty(1.0 + up, 1.0 + um, 0.0, 5.0, 0.1);
+            assert!((gain - expected).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn rank_one_l1_solution_can_use_the_zero_tilt_direction() {
+        let (up, um, gain) =
+            solve_two_tensor(1.0, 4.0, -2.0, -0.2, 0.4, 0.0, 0.0, 10.0, 0.05, 20.0);
+        assert!((up - um).abs() < 1e-12);
+        assert!(up > 0.0 && gain > 0.0);
+    }
+
+    #[test]
+    fn invalid_and_indefinite_systems_have_no_update() {
+        for bad in [f64::NAN, f64::INFINITY, -1.0] {
+            assert_eq!(
+                solve_two_tensor(bad, 1.0, -0.5, 0.2, -0.2, 0.0, 0.01, 0.0, 0.05, 20.0),
+                (0.0, 0.0, 0.0)
+            );
+        }
+        for rho in [0.0, 0.1] {
+            for cross in [-2.0, 2.0] {
+                assert_eq!(
+                    solve_two_tensor(1.0, 1.0, cross, 0.2, -0.2, 0.0, 0.0, rho, 0.05, 20.0),
+                    (0.0, 0.0, 0.0)
+                );
+            }
+        }
+        let roundoff =
+            solve_two_tensor(1.0, 1.0, -1.0 - 1e-14, 0.2, -0.2, 0.0, 0.0, 0.0, 0.05, 20.0);
+        assert!(roundoff.2 > 0.0);
     }
 
     #[test]
