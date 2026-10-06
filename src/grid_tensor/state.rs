@@ -50,6 +50,9 @@ pub struct FittingState<'a> {
 
     pub terminated: bool,
 
+    /// Proximal pull of each branch toward reference branch functions.
+    pub branch_consensus: Option<BranchConsensus>,
+
     // Logging state (optional: only when logging enabled)
     // Note: LoggingState is not Clone (contains Sender), so FittingState is not Clone
     #[cfg(feature = "evo-logging")]
@@ -83,6 +86,7 @@ impl<'a> Clone for FittingState<'a> {
             split_strategy_state: self.split_strategy_state.clone(),
             iteration: self.iteration,
             terminated: self.terminated,
+            branch_consensus: self.branch_consensus.clone(),
             #[cfg(feature = "evo-logging")]
             logging_state: None, // Can't clone LoggingState (contains Sender)
         }
@@ -149,9 +153,34 @@ impl<'a> FittingState<'a> {
             split_strategy_state,
             iteration: 0,
             terminated: false,
+            branch_consensus: None,
             #[cfg(feature = "evo-logging")]
             logging_state: None,
         }
+    }
+
+    /// Per-row sufficient statistics of the penalized local objective.
+    ///
+    /// With branch consensus `ρ, c₊, c₋`, the objective adds
+    /// `ρ (f₊ − c₊)² + ρ (f₋ − c₋)²` per row, which contributes to `s11`, `s22`, `t1` and `t2`.
+    #[inline]
+    pub(crate) fn point_statistics(&self, row: usize, weight: f64) -> PrefixStats {
+        let (fp, fm, rt) = (self.f_plus[row], self.f_minus[row], self.r_tilde[row]);
+        let mut stats = PrefixStats {
+            s11: weight * fp * fp,
+            s22: weight * fm * fm,
+            s12: weight * fp * fm,
+            t1: weight * rt * fp,
+            t2: weight * rt * fm,
+        };
+        if let Some(consensus) = &self.branch_consensus {
+            let rho = consensus.weight;
+            stats.s11 += rho * fp * fp;
+            stats.s22 += rho * fm * fm;
+            stats.t1 += rho * (consensus.plus[row] - fp) * fp;
+            stats.t2 += rho * (fm - consensus.minus[row]) * fm;
+        }
+        stats
     }
 
     /// Check if we're in Stage 1 positive-only mode
@@ -370,6 +399,15 @@ impl<'a> FittingState<'a> {
     }
 }
 
+/// Reference branch functions on the training rows and the strength `ρ` of the
+/// proximal pull toward them.
+#[derive(Debug, Clone)]
+pub struct BranchConsensus {
+    pub weight: f64,
+    pub plus: Array1<f64>,
+    pub minus: Array1<f64>,
+}
+
 /// Per-interval aggregate statistics for O(1) resplit/merge lookups
 #[derive(Debug, Clone, Copy, Default)]
 pub struct IntervalStats {
@@ -530,6 +568,8 @@ pub struct PrecomputedStatistics {
     pub binned_prefix_sums: Vec<Vec<PrefixStats>>,
 
     pub initialized: bool,
+    /// Branch-consensus weight folded into the stored `s11`/`s22` statistics.
+    pub consensus_weight: f64,
 }
 
 impl PrecomputedStatistics {
@@ -559,6 +599,7 @@ impl PrecomputedStatistics {
             bin_indices: vec![std::sync::Arc::from([]); p],
             binned_prefix_sums: vec![vec![]; p],
             initialized: false,
+            consensus_weight: 0.0,
         }
     }
 }
