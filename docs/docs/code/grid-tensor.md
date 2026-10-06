@@ -27,6 +27,11 @@ $\hat{m}_+ - \hat{m}_- = \lambda_+\prod_j b_j e^{d_j} - \lambda_-\prod_j b_j e^{
 | `new_two_tensor(...)` | construct from the two-tensor fields (sets `scaling = 1.0`) |
 | `predict_single_unscaled(x)` / `predict_unscaled(X)` | **unscaled** $\tilde{m}_+ - \tilde{m}_-$ (one point / batch) |
 | `predict_single_backbone_and_tilt(x)` / `predict_backbone_and_tilt(X)` | decompose into $(\prod_j b_j,\ \sum_j d_j)$ |
+| `coalesce_equal_bins()` | merge adjacent bins with bitwise-equal backbone and tilt values, summing their observation counts |
+
+Batch prediction caches the two branch factors per bin when there are enough input
+values to amortize their construction. Multiplication follows feature order, preserving
+the scalar prediction calculation.
 
 !!! warning "Use the unscaled path"
     `predict_unscaled` returns $\tilde{m}_+ - \tilde{m}_-$ **without** $\lambda$ scaling beyond what is
@@ -38,9 +43,10 @@ $\hat{m}_+ - \hat{m}_- = \lambda_+\prod_j b_j e^{d_j} - \lambda_-\prod_j b_j e^{
 `grid_tensor::fit` (`src/grid_tensor/fit.rs`) iterates the action/reducer pattern:
 
 1. build a `FittingState` from `(x, y)`;
-2. initialize the `RefinementStrategy` (precomputes all candidate scores) and the
-   `SplitStrategy` (builds allowed intervals);
-3. optionally apply the histogram-binning mask (`max_bins`);
+2. initialize the `RefinementStrategy` row statistics and prefix sums, then apply the
+   optional histogram-binning mask (`max_bins`);
+3. score the retained candidate positions and initialize the `SplitStrategy`
+   allowed intervals;
 4. score eligible split, resplit, and merge actions under one fixed-scale cost-complexity
    objective, then apply the highest positive-gain action through the **reducer**;
 5. at the `n_iter` fineness budget, exclude new splits while leaving resplits and merges
@@ -104,6 +110,12 @@ $\beta=\tfrac12(\log v_++\log v_-)$ and
 $\delta=\tfrac12(\log v_+-\log v_-)$. The full derivation is in
 [Fitting → the closed-form solver](../math/fitting.md#the-closed-form-2x2-solver).
 
+Numerical rank is determined relative to the system's scale. For a positive-semidefinite
+rank-deficient system, the solver proposes a minimum-norm step in its retained range,
+clamps it to the multiplier bounds, and backtracks against the exact log-penalized
+objective. With a tilt $\ell_1$ penalty, it also considers the signed tilt regions and
+the zero-tilt boundary. A finite positive-gain update is required on this path.
+
 ### Refinement strategies (`refinement.rs`)
 
 `RefinementStrategy` has two variants that differ only in the weights $w_i$:
@@ -114,6 +126,13 @@ $\delta=\tfrac12(\log v_+-\log v_-)$. The full derivation is in
 Both expose `alpha` (log-backbone $\ell_2$), `tilt_tau` (tilt $\ell_2$), `tilt_rho` (tilt
 $\ell_1$), `prior_sample_size`, and `update_clamp`. `initialize` precomputes the penalized
 gain of every candidate position.
+
+`update_clamp` accepts nonnegative values and positive infinity. With cap $c$,
+branch multipliers lie in $[\max(0.05,e^{-c}),\min(20,e^c)]$; infinity retains the
+numerical bounds. Split and boundary-refit updates use the current factors as
+their reference. Merge updates use the count-weighted geometric reference of
+the neighboring factors. Proposal scoring and action application share these
+bounds; see [Fitting](../math/fitting.md).
 
 ## Identification
 
@@ -128,12 +147,20 @@ predictions). The same routine runs before averaging bagged grids
 ## Histogram binning
 
 `apply_histogram_binning_mask` (`src/grid_tensor/histogram_binning.rs`) is an optional
-prologue enabled by `max_bins: Some(u16)`. It computes deterministic quantile bin edges per
-feature, forbids non-edge split positions, and replaces per-position prefix sums with
-per-bin cumulative sums. This cuts the per-candidate cost from $O(n)$ to $O(\text{bins})$
-with little accuracy loss on larger datasets. With `max_bins: None` the exact path
-(every position a candidate) is used. Parity between the two paths is tested in
+prologue enabled by `max_bins >= 2`. Quantile targets snap to the nearest boundary between
+distinct values, with lower-rank ties selected deterministically. Features with at most
+`max_bins` distinct values retain every distinct-value boundary. Repeated targets share a
+boundary, so a feature can have fewer candidates than the requested bin count.
+
+The mask excludes other positions before initial candidate scoring and replaces
+per-position prefix sums with per-bin cumulative sums. Each candidate uses constant-time
+prefix lookups; statistic updates traverse retained bin boundaries. With `max_bins: None`
+the exact candidate path is used. Parity between the two paths is tested in
 `tests/histogram_binning.rs`.
+
+Each binned feature stores a `u16` bin index for every training row. Statistic updates
+use this mapping to place row deltas into bin buckets. The immutable mappings are shared
+across cloned fitting states and reused across stages when `PreparedInput` is available.
 
 ## Parameters (`params.rs`)
 

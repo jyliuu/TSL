@@ -70,6 +70,9 @@ Bagged Two-Tensor Grids):
 7. **Combine scalars** by geometric mean:
    $\lambda_{\pm}^{\text{combined}} = \exp\bigl(\tfrac{1}{|\mathcal{K}|}\sum_{c\in\mathcal{K}}\log\lambda_{\pm}^{(c)}\bigr)$.
 
+8. **Coalesce equal bins.** Merge adjacent intervals whose backbone and tilt values
+   are bitwise equal, adding their observation counts. Both branch functions are preserved.
+
 After combination the stage coefficients are refit by least squares (the
 [backfit](fitting.md#coefficient-backfitting)).
 
@@ -95,10 +98,11 @@ determines how the combined grid is turned into stage predictions. See
 There is a worked case where bagged grids converge to two distinct backbone representations
 of one fitted stage (a consequence of [non-identifiability](model.md#identifiability-and-stability)).
 Without the similarity filter, averaging across the two branches degrades the fit; the
-reference + trim step keeps a single canonical branch. The `synthetic2.py` example
+reference + trim step selects a subset of similar representations. It does not establish
+uniqueness of the factorization. The `synthetic2.py` example
 reproduces this diagnostic — see [Examples](../index.md#examples).
 
 <figure markdown="span">
   ![Bagged backbones splitting into two modes at epoch 0](../assets/img/backbone_bimodal_epoch0.png){ width="90%" }
-  <figcaption markdown="span">Synthetic example — bagged [GridTensors](../code/grid-tensor.md) at epoch 0 converging to two distinct backbone shapes for the same stage (two clusters of curves visible in the plot). This bimodality is a consequence of the [sign-flip non-identifiability](model.md#identifiability-and-stability) of the two-tensor form: both orientations fit the residuals equally well, so different trees in the bag find different local optima. The align-then-filter step computes pairwise backbone similarity, anchors to a reference tree, and discards outlier trees before averaging — collapsing the two clusters into a single canonical representation. Reproduced by the [`synthetic2.py`](../index.md#examples) example script.</figcaption>
+  <figcaption markdown="span">Synthetic example — bagged [GridTensors](../code/grid-tensor.md) at epoch 0 converging to two distinct backbone shapes for the same stage. Differences between factor shapes can reflect alternative decompositions or different fitted functions; this plot alone does not distinguish them. Similarity filtering anchors aggregation to a reference representation. Reproduced by the [`synthetic2.py`](../index.md#examples) example script.</figcaption>
 </figure>

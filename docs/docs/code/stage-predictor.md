@@ -57,6 +57,15 @@ pub enum Aggregation { Mean, GeometricMean, Combined }
 4. solve OLS for `scaling_plus`/`scaling_minus` where the aggregation mode needs it;
 5. return the `StagePredictor` and a `FitResult`.
 
+For bags with multiple grids and split logging disabled, initialization computes the
+deterministic fitting state once and clones it for each independently seeded grid.
+Logging-enabled fits initialize each grid in its own logging context.
+
+`fit_grid_bag(x, y, params, rng)` exposes the ordered `(FitResult, GridTensor)` pairs
+before component aggregation. Each result contains the normalized grid's training
+predictions. Rust callers implementing prediction-based ensemble rules can reuse those
+values and choose their own aggregation.
+
 ## Combining grids
 
 - **`combine_grids.rs`** — `refine_grids_to_union_two_tensor` resamples every grid onto the
@@ -65,6 +74,10 @@ pub enum Aggregation { Mean, GeometricMean, Combined }
 - **`aggregate_bagged.rs`** — `aggregate_bagged_two_tensor` runs the full
   [align → normalize → reference → similarity-filter → log-space average](../math/bagging-aggregation.md)
   pipeline and returns the kept `candidate_indices` plus the combined grid.
+
+Union alignment walks the ordered source and union boundaries together. The combined
+primary grid coalesces adjacent intervals when both backbone and tilt values have equal
+bit patterns. This preserves each branch, its predictions, and total observation counts.
 
 ## Parameters (`params.rs`)
 

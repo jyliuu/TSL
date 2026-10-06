@@ -33,6 +33,11 @@ This **orthogonal-greedy** refit (each stage fit greedily on residuals, then *al
 coefficients re-optimized together) is what makes later stages correct earlier ones rather
 than merely stacking. The math is in [Fitting](../math/fitting.md#coefficient-backfitting).
 
+For multi-epoch fits with multiple grids per stage and split logging disabled,
+`PreparedInput` caches the feature sort order, inverse ranks, quantile boundaries, and row-to-bin mappings
+across epochs. Residual-dependent statistics are recomputed for each stage. The cache
+belongs to the same feature view and `max_bins` configuration throughout the fit.
+
 If a `visualdb_path` is set (and `evo-logging` is on), per-stage snapshots — grid JSON,
 $\tilde{m}_+/\tilde{m}_-$ arrays, scaling — are streamed to SQLite; see [Logging](logging.md).
 
