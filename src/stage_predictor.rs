@@ -1,5 +1,6 @@
 use super::grid_tensor::GridTensor;
-pub use fitter::fit_ensemble;
+pub use fitter::{fit_ensemble, fit_grid_bag};
+pub(crate) use fitter::fit_ensemble_with_input;
 use ndarray::{Array1, ArrayView2};
 use serde::{Deserialize, Serialize};
 pub mod params;
@@ -7,6 +8,7 @@ pub mod params;
 mod aggregate_bagged;
 mod combine_grids;
 mod fitter;
+pub use aggregate_bagged::aggregate_bagged_two_tensor;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StagePredictor {

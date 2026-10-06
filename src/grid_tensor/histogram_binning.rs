@@ -81,8 +81,32 @@ pub(crate) fn quantile_bin_edge_positions(
 /// `SplitStrategy::initialize` (so that `allowed_intervals` is built from the
 /// binned mask).
 pub fn apply_histogram_binning_mask<'a>(
+    state: FittingState<'a>,
+    max_bins: Option<u16>,
+) -> FittingState<'a> {
+    apply_histogram_binning_mask_with_input(state, max_bins, None)
+}
+
+pub(crate) fn row_bin_indices(sorted_indices: &[usize], edges: &[usize]) -> std::sync::Arc<[u16]> {
+    if edges.is_empty() {
+        return std::sync::Arc::from([]);
+    }
+    assert!(edges.len() <= u16::MAX as usize);
+    let mut membership = vec![0; sorted_indices.len()];
+    let mut bin = 0;
+    for (rank, &row) in sorted_indices.iter().enumerate() {
+        while bin < edges.len() && edges[bin] <= rank {
+            bin += 1;
+        }
+        membership[row] = bin as u16;
+    }
+    membership.into()
+}
+
+pub(crate) fn apply_histogram_binning_mask_with_input<'a>(
     mut state: FittingState<'a>,
     max_bins: Option<u16>,
+    prepared: Option<&super::prepared_input::PreparedInput<'_>>,
 ) -> FittingState<'a> {
     let Some(max_bins) = max_bins else {
         return state;
@@ -100,15 +124,22 @@ pub fn apply_histogram_binning_mask<'a>(
         // Build a boolean keep-mask over [0, n).
         // Position 0 and position n-1 are always NaN (no split before-first /
         // after-last), so we just need to mark the interior.
-        let feature_values: Vec<f64> = (0..n).map(|i| state.x[[i, col]]).collect();
-        let edges = quantile_bin_edge_positions(sorted_indices, &feature_values, n_bins);
+        let edges = if let Some(prepared) = prepared {
+            prepared.bin_edges[col].clone()
+        } else {
+            let feature_values: Vec<f64> = (0..n).map(|i| state.x[[i, col]]).collect();
+            quantile_bin_edge_positions(sorted_indices, &feature_values, n_bins)
+        };
 
-        // If we have at least as many distinct candidates as max_bins, mask
-        // out non-edge positions. Otherwise, every distinct value is its own
-        // bin already — no masking needed (equivalent to exact).
+        // Constant columns have no valid split boundaries.
         if edges.is_empty() {
             continue;
         }
+        state.precomputed_statistics.bin_indices[col] = if let Some(prepared) = prepared {
+            prepared.bin_indices[col].clone()
+        } else {
+            row_bin_indices(sorted_indices, &edges)
+        };
 
         let mut keep = vec![false; n];
         for &e in &edges {
@@ -158,6 +189,27 @@ pub fn apply_histogram_binning_mask<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_row_bins_match_rank_search_and_share_immutable_storage() {
+        let sorted: Vec<usize> = (0..127).map(|i| i * 29 % 127).collect();
+        for edges in [vec![1, 11, 31, 90, 126], vec![63], (1..127).collect()] {
+            let cached = row_bin_indices(&sorted, &edges);
+            for (rank, &row) in sorted.iter().enumerate() {
+                assert_eq!(cached[row] as usize, edges.partition_point(|&edge| edge <= rank));
+            }
+            let mut statistics = crate::grid_tensor::state::PrecomputedStatistics::new(127, 1);
+            statistics.bin_indices[0] = cached;
+            let cloned = statistics.clone();
+            assert!(std::sync::Arc::ptr_eq(&statistics.bin_indices[0], &cloned.bin_indices[0]));
+        }
+        assert!(row_bin_indices(&sorted, &[]).is_empty());
+        let sorted: Vec<_> = (0..=u16::MAX as usize).rev().collect();
+        let edges: Vec<_> = (1..=u16::MAX as usize).collect();
+        let cached = row_bin_indices(&sorted, &edges);
+        assert_eq!(cached[0], u16::MAX);
+        assert_eq!(cached[u16::MAX as usize], 0);
+    }
 
     #[test]
     fn bin_edge_positions_uniform_data() {

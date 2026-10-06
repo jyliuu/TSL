@@ -519,6 +519,10 @@ pub struct PrecomputedStatistics {
     /// "no binning for this column — iterate all positions as candidates".
     pub bin_edges: BinEdges,
 
+    /// Immutable row-to-bin mappings shared by cloned grid fitting states.
+    /// Exact and constant columns have empty mappings.
+    pub bin_indices: Vec<std::sync::Arc<[u16]>>,
+
     /// Bin-cumulative prefix sums (length B = bin_edges[col].len() + 1) used in
     /// the binned path. `binned_prefix_sums[col][k]` equals the cumulative
     /// stats sum for all sorted positions in bins `0..=k`. Empty when
@@ -552,6 +556,7 @@ impl PrecomputedStatistics {
             sorted_indices: vec![vec![]; p],
             sort_order: vec![vec![0; n]; p],
             bin_edges: vec![vec![]; p],
+            bin_indices: vec![std::sync::Arc::from([]); p],
             binned_prefix_sums: vec![vec![]; p],
             initialized: false,
         }

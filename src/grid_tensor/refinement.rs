@@ -188,7 +188,17 @@ fn canonical_merge_factors(a_plus: f64, a_minus: f64, is_stage1: bool) -> (f64, 
 }
 
 impl RefinementStrategy {
-    pub fn initialize<'a>(&'a self, mut state: FittingState<'a>) -> FittingState<'a> {
+    pub fn initialize<'a>(&self, state: FittingState<'a>) -> FittingState<'a> {
+        self.initialize_with_input(state, None, None)
+    }
+
+    pub(crate) fn initialize_with_input<'a>(
+        &self,
+        mut state: FittingState<'a>,
+        prepared: Option<&super::prepared_input::PreparedInput<'_>>,
+        max_bins: Option<u16>,
+    ) -> FittingState<'a> {
+        self.multiplier_bounds();
         // Check if Stage 1 positive-only mode: all residuals are nonnegative
         let is_stage1 = state.residuals.iter().all(|&r| r >= 0.0);
 
@@ -243,12 +253,17 @@ impl RefinementStrategy {
         state.current_error = state.residuals.iter().map(|r| r * r).sum();
 
         for col in 0..state.p {
-            let mut indices = (0..state.n).collect::<Vec<_>>();
-            indices.sort_by(|&a, &b| state.x[[a, col]].partial_cmp(&state.x[[b, col]]).unwrap());
-
-            for (pos, &i) in indices.iter().enumerate() {
-                state.precomputed_statistics.sort_order[col][i] = pos;
-            }
+            let indices = if let Some(prepared) = prepared {
+                state.precomputed_statistics.sort_order[col].clone_from(&prepared.sort_order[col]);
+                prepared.sorted_indices[col].clone()
+            } else {
+                let mut indices = (0..state.n).collect::<Vec<_>>();
+                indices.sort_by(|&a, &b| state.x[[a, col]].partial_cmp(&state.x[[b, col]]).unwrap());
+                for (pos, &i) in indices.iter().enumerate() {
+                    state.precomputed_statistics.sort_order[col][i] = pos;
+                }
+                indices
+            };
 
             // Compute per-point two-tensor statistics and build prefix sums
             // For two-tensor, we need 5 sufficient statistics:
@@ -332,7 +347,8 @@ impl RefinementStrategy {
                 });
         }
 
-        // Compute error reductions AFTER all columns have been initialized
+        state = super::histogram_binning::apply_histogram_binning_mask_with_input(
+            state, max_bins, prepared);
         state = self.update_error_reductions_split_for_all_cols(state);
 
         state.precomputed_statistics.initialized = true;
@@ -441,10 +457,9 @@ impl RefinementStrategy {
                 bucket_d.clear();
                 bucket_d.resize(bin_span, PrefixStats::ZERO);
 
-                let sort_order = &state.precomputed_statistics.sort_order[c];
+                let bin_indices = &state.precomputed_statistics.bin_indices[c];
                 for (j, &pt) in updated_points.iter().enumerate() {
-                    let pos_full = sort_order[pt];
-                    let bin = bin_edges.partition_point(|&e| e <= pos_full);
+                    let bin = bin_indices[pt] as usize;
                     let off = bin - min_bin;
                     let slot = &mut bucket_d[off];
                     slot.s11 += d_s11[j];
@@ -522,10 +537,9 @@ impl RefinementStrategy {
             bucket_d.clear();
             bucket_d.resize(bin_span, PrefixStats::ZERO);
 
-            let sort_order = &state.precomputed_statistics.sort_order[col];
+            let bin_indices = &state.precomputed_statistics.bin_indices[col];
             for (j, &pt) in updated_points.iter().enumerate() {
-                let pos_full = sort_order[pt];
-                let bin = bin_edges.partition_point(|&e| e <= pos_full);
+                let bin = bin_indices[pt] as usize;
                 let off = bin - min_bin;
                 let slot = &mut bucket_d[off];
                 slot.s11 += d_s11[j];

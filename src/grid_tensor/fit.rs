@@ -3,7 +3,6 @@ use rand::Rng;
 
 use crate::{
     grid_tensor::{
-        histogram_binning::apply_histogram_binning_mask,
         identification::l2_identify,
         reducer::fitting_reducer,
         state::FittingState,
@@ -28,6 +27,28 @@ pub fn fit<R: Rng + ?Sized>(
     hyperparameters: &GridTensorParams,
     rng: &mut R,
 ) -> (FitResult, GridTensor) {
+    let state = initialize_state(x.view(), y.view(), hyperparameters);
+    fit_initialized(state, hyperparameters, rng)
+}
+
+/// Prepare the deterministic statistics and candidate caches for one stage.
+pub(crate) fn initialize_state<'a>(
+    x: ndarray::ArrayView2<'a, f64>,
+    y: ndarray::ArrayView1<'a, f64>,
+    hyperparameters: &GridTensorParams,
+) -> FittingState<'a> {
+    initialize_state_with_input(x, y, hyperparameters, None)
+}
+
+pub(crate) fn initialize_state_with_input<'a>(
+    x: ndarray::ArrayView2<'a, f64>,
+    y: ndarray::ArrayView1<'a, f64>,
+    hyperparameters: &GridTensorParams,
+    prepared: Option<&super::prepared_input::PreparedInput<'_>>,
+) -> FittingState<'a> {
+    if let Some(prepared) = prepared {
+        prepared.assert_matches(x, hyperparameters.max_bins);
+    }
     let refinement_strategy = hyperparameters
         .refinement_strategy_params
         .get_refinement_strategy();
@@ -35,7 +56,7 @@ pub fn fit<R: Rng + ?Sized>(
     let split_strategy = hyperparameters.split_strategy_params.get_split_strategy();
 
     // Initialize state
-    let mut state = FittingState::new(x.view(), y.view());
+    let mut state = FittingState::new(x, y);
 
     // Initialize logging state if logging is enabled
     #[cfg(feature = "evo-logging")]
@@ -47,14 +68,22 @@ pub fn fit<R: Rng + ?Sized>(
         }
     }
 
-    let state = refinement_strategy.initialize(state);
-    // Histogram binning prologue: if max_bins is set, mark non-bin-boundary
-    // positions as NaN in the split-candidate caches. This restricts the inner
-    // solver loop to O(n_bins) candidates per interval. No-op when max_bins=None.
-    let state = apply_histogram_binning_mask(state, hyperparameters.max_bins);
+    let state = refinement_strategy.initialize_with_input(state, prepared, hyperparameters.max_bins);
     let mut state = state;
     state.current_error = refinement_strategy.weighted_squared_error(&state.residuals);
-    let mut state = split_strategy.initialize(state);
+    split_strategy.initialize(state)
+}
+
+/// Fit from a state initialized with the same data and hyperparameters.
+pub(crate) fn fit_initialized<R: Rng + ?Sized>(
+    mut state: FittingState<'_>,
+    hyperparameters: &GridTensorParams,
+    rng: &mut R,
+) -> (FitResult, GridTensor) {
+    let refinement_strategy = hyperparameters
+        .refinement_strategy_params
+        .get_refinement_strategy();
+    let split_strategy = hyperparameters.split_strategy_params.get_split_strategy();
 
     let n_iter = hyperparameters.n_iter;
     let max_iterations = n_iter * MAX_ITERATIONS_MULTIPLIER;
