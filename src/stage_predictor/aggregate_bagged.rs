@@ -490,7 +490,9 @@ pub fn aggregate_bagged_two_tensor(
         panic!("Cannot aggregate empty grid list");
     }
     if grids.len() == 1 {
-        return grids[0].clone();
+        let mut grid = grids[0].clone();
+        grid.coalesce_equal_bins();
+        return grid;
     }
 
     // Step 1: Align all grids to union grid
@@ -604,7 +606,7 @@ pub fn aggregate_bagged_two_tensor(
     let (combined_lambda_plus, combined_lambda_minus) =
         combine_lambdas_geometric_mean(&lambda_plus_candidates, &lambda_minus_candidates, None);
 
-    GridTensor::new_two_tensor(
+    let mut combined = GridTensor::new_two_tensor(
         aligned_grids[0].splits.clone(),
         union_observation_counts,
         aligned_grids[0].intervals.clone(),
@@ -612,7 +614,9 @@ pub fn aggregate_bagged_two_tensor(
         temp_tilt,
         combined_lambda_plus,
         combined_lambda_minus,
-    )
+    );
+    combined.coalesce_equal_bins();
+    combined
 }
 
 #[cfg(test)]

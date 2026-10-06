@@ -1,6 +1,7 @@
 use ndarray::{Array1, ArrayView2, Axis};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub mod action;
+mod compact;
 pub mod fit;
 pub mod histogram_binning;
 pub mod identification;
@@ -131,6 +132,40 @@ impl GridTensor {
         (f_plus, f_minus)
     }
 
+    pub(crate) fn two_tensor_factors(&self) -> Vec<Vec<(f64, f64)>> {
+        self.backbone_values
+            .iter()
+            .zip(&self.tilt_values)
+            .map(|(backbone, tilt)| {
+                backbone
+                    .iter()
+                    .enumerate()
+                    .map(|(bin, &b)| {
+                        let d = tilt[bin];
+                        (b * d.exp(), b * (-d).exp())
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[inline]
+    fn fold_precomputed_two_tensor<I: Iterator<Item = f64>>(
+        &self,
+        values: I,
+        factors: &[Vec<(f64, f64)>],
+    ) -> (f64, f64) {
+        let mut f_plus = self.lambda_plus;
+        let mut f_minus = self.lambda_minus;
+        for (axis, val) in values.enumerate() {
+            let bin = self.splits[axis].partition_point(|&split| split <= val);
+            let (a_plus, a_minus) = factors[axis][bin];
+            f_plus *= a_plus;
+            f_minus *= a_minus;
+        }
+        (f_plus, f_minus)
+    }
+
     /// Optimized prediction for a single sample
     #[inline]
     pub fn predict_single_unscaled(&self, x: &[f64]) -> f64 {
@@ -155,11 +190,23 @@ impl GridTensor {
     pub fn predict_unscaled(&self, x: ArrayView2<f64>) -> Array1<f64> {
         let n_rows = x.nrows();
         let mut y_hat = Array1::zeros(n_rows);
+        if n_rows == 0 {
+            return y_hat;
+        }
+        let n_factor_bins: usize = self.backbone_values.iter().map(Vec::len).sum();
+        let factors =
+            (n_rows.saturating_mul(x.ncols()) > n_factor_bins).then(|| self.two_tensor_factors());
 
         for (i, row) in x.axis_iter(Axis(0)).enumerate() {
-            let (f_plus, f_minus) = match row.as_slice() {
-                Some(slice) => self.fold_two_tensor(slice.iter().copied()),
-                None => self.fold_two_tensor(row.iter().copied()),
+            let (f_plus, f_minus) = match (factors.as_ref(), row.as_slice()) {
+                (Some(factors), Some(slice)) => {
+                    self.fold_precomputed_two_tensor(slice.iter().copied(), factors)
+                }
+                (Some(factors), None) => {
+                    self.fold_precomputed_two_tensor(row.iter().copied(), factors)
+                }
+                (None, Some(slice)) => self.fold_two_tensor(slice.iter().copied()),
+                (None, None) => self.fold_two_tensor(row.iter().copied()),
             };
             y_hat[i] = f_plus - f_minus;
         }
