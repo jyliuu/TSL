@@ -1115,9 +1115,23 @@ impl RefinementStrategy {
                 bins_t1.resize(binned.len(), 0.0);
                 bins_t2.clear();
                 bins_t2.resize(binned.len(), 0.0);
-                for (i, &bin) in statistics.bin_indices[col].iter().enumerate() {
-                    bins_t1[bin as usize] += statistics.c_t1[i];
-                    bins_t2[bin as usize] += statistics.c_t2[i];
+                let row_bins = &statistics.bin_indices[col];
+                match (
+                    statistics.c_t1.get(..row_bins.len()),
+                    statistics.c_t2.get(..row_bins.len()),
+                ) {
+                    (Some(t1), Some(t2)) => {
+                        for ((&bin, &value1), &value2) in row_bins.iter().zip(t1).zip(t2) {
+                            bins_t1[bin as usize] += value1;
+                            bins_t2[bin as usize] += value2;
+                        }
+                    }
+                    _ => {
+                        for (i, &bin) in statistics.bin_indices[col].iter().enumerate() {
+                            bins_t1[bin as usize] += statistics.c_t1[i];
+                            bins_t2[bin as usize] += statistics.c_t2[i];
+                        }
+                    }
                 }
                 let (mut t1, mut t2) = (0.0, 0.0);
                 for (slot, (b1, b2)) in binned.iter_mut().zip(bins_t1.iter().zip(&bins_t2)) {
@@ -2129,3 +2143,6 @@ mod cycle7_refresh_tests;
 
 #[cfg(test)]
 mod cycle8_scatter_tests;
+
+#[cfg(test)]
+mod cycle11_linear_bin_slice_tests;
