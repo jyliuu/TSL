@@ -164,6 +164,59 @@ fn fit_members_with_candidate_refresh<'a>(
     );
 }
 
+/// Reuse full-row reference storage with matching contiguous branch inputs.
+fn reuse_full_row_reference(
+    current: &mut FittingState<'_>,
+    total_plus: &ArrayView1<'_, f64>,
+    total_minus: &ArrayView1<'_, f64>,
+    others: f64,
+    consensus: f64,
+) -> bool {
+    let Some(reference) = current.branch_consensus.as_mut() else {
+        return false;
+    };
+    if reference.anchors.is_some()
+        || [
+            total_plus.len(),
+            total_minus.len(),
+            current.f_plus.len(),
+            current.f_minus.len(),
+            reference.plus.len(),
+            reference.minus.len(),
+        ]
+        .into_iter()
+        .any(|len| len != current.n)
+    {
+        return false;
+    }
+    let (
+        Some(total_plus),
+        Some(total_minus),
+        Some(current_plus),
+        Some(current_minus),
+        Some(reference_plus),
+        Some(reference_minus),
+    ) = (
+        total_plus.as_slice(),
+        total_minus.as_slice(),
+        current.f_plus.as_slice(),
+        current.f_minus.as_slice(),
+        reference.plus.as_slice_mut(),
+        reference.minus.as_slice_mut(),
+    )
+    else {
+        return false;
+    };
+    for row in 0..current.n {
+        let plus_difference = total_plus[row] - current_plus[row];
+        let minus_difference = total_minus[row] - current_minus[row];
+        reference_plus[row] = plus_difference / others;
+        reference_minus[row] = minus_difference / others;
+    }
+    reference.weight = consensus;
+    true
+}
+
 fn fit_members_with_split_scoring<'a>(
     members: &mut [Member<'a>],
     tg_params: &GridTensorParams,
@@ -241,12 +294,20 @@ fn fit_members_with_split_scoring<'a>(
                     };
                     refinement.refresh_consensus_reference(current, reference)
                 } else {
-                    current.branch_consensus = Some(BranchConsensus {
-                        weight: consensus,
-                        plus: (&total_plus - &current.f_plus) / others,
-                        minus: (&total_minus - &current.f_minus) / others,
-                        anchors: None,
-                    });
+                    if !reuse_full_row_reference(
+                        &mut current,
+                        &total_plus,
+                        &total_minus,
+                        others,
+                        consensus,
+                    ) {
+                        current.branch_consensus = Some(BranchConsensus {
+                            weight: consensus,
+                            plus: (&total_plus - &current.f_plus) / others,
+                            minus: (&total_minus - &current.f_minus) / others,
+                            anchors: None,
+                        });
+                    }
                     refinement.refresh_statistics(current)
                 };
                 let batch_size = consensus_interval.min(iteration_budget - *next_iteration);
@@ -395,7 +456,7 @@ mod tests {
         total / pairs
     }
 
-    fn fit_members_single_action_reference<'a>(
+    pub(super) fn fit_members_single_action_reference<'a>(
         members: &mut [Member<'a>],
         tg_params: &GridTensorParams,
         consensus: f64,
@@ -523,7 +584,7 @@ mod tests {
         assert_members_equal(initial, params, eager, deferred)
     }
 
-    fn assert_members_equal<'a>(
+    pub(super) fn assert_members_equal<'a>(
         initial: &FittingState<'a>,
         params: &GridTensorParams,
         mut eager: Vec<Member<'a>>,
@@ -1235,3 +1296,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod cycle9_reference_tests;
