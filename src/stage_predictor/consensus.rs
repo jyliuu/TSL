@@ -2,10 +2,10 @@
 //!
 //! Every grid takes one structural action per round. Before each round, grid `b`'s local
 //! objective gains the proximal term `ρ (‖f₊ − c₊‖² + ‖f₋ − c₋‖²)` on the training rows,
-//! where `c±` are the mean branches of the other grids. Each branch is a single product
-//! of univariate factors, so grids that agree on both branches agree on their factors up
-//! to the per-feature scale that identification removes. Agreement on `f = f₊ − f₋`
-//! alone would leave every common-mode change of the two branches free.
+//! where `c±` are the mean branches of the other grids. The term encourages agreement
+//! of the positive branches on observed training rows. Factor identification also depends
+//! on feature support; branch agreement on these rows does not establish unique factors.
+//! Agreement on `f = f₊ − f₋` alone leaves common changes of the two branches unpenalized.
 
 use ndarray::{Array1, ArrayView1, ArrayView2};
 use rand::{rngs::StdRng, SeedableRng};
@@ -27,7 +27,6 @@ struct Member<'a> {
     tree_id: usize,
     rng: StdRng,
     state: Option<FittingState<'a>>,
-    active: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -45,10 +44,6 @@ pub(super) fn fit_consensus_bag<'a>(
         consensus.is_finite() && consensus >= 0.0,
         "consensus must be finite and nonnegative"
     );
-    let refinement = tg_params.refinement_strategy_params.get_refinement_strategy();
-    let split = tg_params.split_strategy_params.get_split_strategy();
-    let others = (seeds.len().max(2) - 1) as f64;
-
     let mut members: Vec<Member<'a>> = seeds
         .iter()
         .enumerate()
@@ -59,53 +54,10 @@ pub(super) fn fit_consensus_bag<'a>(
                 Some(initial_state) => initial_state.clone(),
                 None => initialize_state_with_input(x, y, tg_params, prepared),
             })),
-            active: true,
         })
         .collect();
 
-    let mut total_plus = Array1::<f64>::zeros(y.len());
-    let mut total_minus = Array1::<f64>::zeros(y.len());
-    for iter in 0..max_iterations(tg_params.n_iter) {
-        total_plus.fill(0.0);
-        total_minus.fill(0.0);
-        for member in &members {
-            let state = member.state.as_ref().expect("member state");
-            total_plus += &state.f_plus;
-            total_minus += &state.f_minus;
-        }
-        let (total_plus, total_minus) = (total_plus.view(), total_minus.view());
-        let advance = |member: &mut Member<'a>| {
-            if !member.active {
-                return;
-            }
-            let Member {
-                tree_id,
-                rng,
-                state,
-                active,
-            } = member;
-            in_context(*tree_id, epoch, || {
-                let mut current = state.take().expect("member state");
-                current.branch_consensus = Some(BranchConsensus {
-                    weight: consensus,
-                    plus: (&total_plus - &current.f_plus) / others,
-                    minus: (&total_minus - &current.f_minus) / others,
-                });
-                let current = refinement.refresh_statistics(current);
-                let (current, advanced) =
-                    fit_step(current, iter, tg_params.n_iter, &refinement, &split, rng);
-                *state = Some(current);
-                *active = advanced;
-            });
-        };
-        #[cfg(feature = "use-rayon")]
-        members.par_iter_mut().for_each(advance);
-        #[cfg(not(feature = "use-rayon"))]
-        members.iter_mut().for_each(advance);
-        if members.iter().all(|member| !member.active) {
-            break;
-        }
-    }
+    fit_members(&mut members, tg_params, consensus, epoch);
 
     members
         .into_iter()
@@ -121,6 +73,75 @@ pub(super) fn fit_consensus_bag<'a>(
         .collect()
 }
 
+fn fit_members<'a>(
+    members: &mut [Member<'a>],
+    tg_params: &GridTensorParams,
+    consensus: f64,
+    epoch: Option<usize>,
+) {
+    let refinement = tg_params
+        .refinement_strategy_params
+        .get_refinement_strategy();
+    let split = tg_params.split_strategy_params.get_split_strategy();
+    let others = (members.len().max(2) - 1) as f64;
+    let n = members
+        .first()
+        .map_or(0, |member| member.state.as_ref().expect("member state").n);
+    let mut total_plus = Array1::<f64>::zeros(n);
+    let mut total_minus = Array1::<f64>::zeros(n);
+    for iter in 0..max_iterations(tg_params.n_iter) {
+        total_plus.fill(0.0);
+        total_minus.fill(0.0);
+        for member in members.iter() {
+            let state = member.state.as_ref().expect("member state");
+            total_plus += &state.f_plus;
+            total_minus += &state.f_minus;
+        }
+        let (total_plus, total_minus) = (total_plus.view(), total_minus.view());
+        let advance = |member: &mut Member<'a>| {
+            let current = member.state.as_ref().expect("member state");
+            if current.terminated
+                || (!current.split_strategy_state.merge_enabled
+                    && current.loop_state.fineness >= tg_params.n_iter)
+            {
+                return false;
+            }
+            let Member {
+                tree_id,
+                rng,
+                state,
+            } = member;
+            in_context(*tree_id, epoch, || {
+                let mut current = state.take().expect("member state");
+                current.branch_consensus = Some(BranchConsensus {
+                    weight: consensus,
+                    plus: (&total_plus - &current.f_plus) / others,
+                    minus: (&total_minus - &current.f_minus) / others,
+                });
+                let current = refinement.refresh_statistics(current);
+                let (current, advanced) =
+                    fit_step(current, iter, tg_params.n_iter, &refinement, &split, rng);
+                *state = Some(current);
+                advanced
+            })
+        };
+        // Every member sees the round's frozen reference before progress is combined.
+        #[cfg(feature = "use-rayon")]
+        let advanced = members
+            .par_iter_mut()
+            .map(advance)
+            .reduce(|| false, |left, right| left | right);
+        #[cfg(not(feature = "use-rayon"))]
+        let advanced = members
+            .iter_mut()
+            .map(advance)
+            .fold(false, |left, right| left | right);
+        if !advanced {
+            break;
+        }
+    }
+}
+
 fn in_context<R>(tree_id: usize, epoch: Option<usize>, f: impl FnOnce() -> R) -> R {
     logging::with_tree_id(tree_id, || match epoch {
         Some(epoch) => logging::with_epoch(epoch, f),
@@ -130,11 +151,21 @@ fn in_context<R>(tree_id: usize, epoch: Option<usize>, f: impl FnOnce() -> R) ->
 
 #[cfg(test)]
 mod tests {
-    use ndarray::{Array1, Array2, ArrayView2};
+    use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
+
+    use super::{fit_members, Member};
     use rand::{rngs::StdRng, SeedableRng};
 
     use crate::{
-        grid_tensor::GridTensor,
+        grid_tensor::{
+            fit::{finish_fit, fit_step, initialize_state_with_input},
+            params::{
+                GridTensorParamsBuilder, RefinementStrategyParamsBuilder,
+                SplitStrategyParamsBuilder,
+            },
+            state::BranchConsensus,
+            GridTensor, GridTensorParams,
+        },
         stage_predictor::{
             extract_two_tensor_predictions_unscaled, fit_grid_bag,
             params::StagePredictorParamsBuilder,
@@ -214,5 +245,182 @@ mod tests {
             pulled < 0.25 * independent,
             "independent {independent}, consensus {pulled}"
         );
+    }
+
+    fn lifecycle_params(n_iter: usize) -> GridTensorParams {
+        GridTensorParamsBuilder::new()
+            .n_iter(n_iter)
+            .split_strategy(
+                SplitStrategyParamsBuilder::new()
+                    .best_split()
+                    .min_interval_samples(2)
+                    .build(),
+            )
+            .refinement_strategy(
+                RefinementStrategyParamsBuilder::new()
+                    .l2()
+                    .alpha(0.0)
+                    .tilt_tau(0.0)
+                    .tilt_rho(0.0)
+                    .build(),
+            )
+            .build()
+    }
+
+    fn constant_members<'a>(
+        x: ArrayView2<'a, f64>,
+        y: ArrayView1<'a, f64>,
+        params: &GridTensorParams,
+        branches: &[(f64, f64)],
+    ) -> Vec<Member<'a>> {
+        let refinement = params.refinement_strategy_params.get_refinement_strategy();
+        let total_plus: f64 = branches.iter().map(|pair| pair.0).sum();
+        let total_minus: f64 = branches.iter().map(|pair| pair.1).sum();
+        let others = (branches.len() - 1) as f64;
+        branches
+            .iter()
+            .enumerate()
+            .map(|(tree_id, &(plus, minus))| {
+                let mut state = initialize_state_with_input(x, y, params, None);
+                state.lambda_plus = plus;
+                state.lambda_minus = minus;
+                state.f_plus.fill(plus);
+                state.f_minus.fill(minus);
+                state.f.fill(plus - minus);
+                state.y_hat.assign(&state.f);
+                state.residuals.assign(&(&y - &state.f));
+                state.r_tilde.assign(&state.residuals);
+                state.current_error = state.residuals.iter().map(|r| r * r).sum();
+                state.branch_consensus = Some(BranchConsensus {
+                    weight: 1.0,
+                    plus: Array1::from_elem(y.len(), (total_plus - plus) / others),
+                    minus: Array1::from_elem(y.len(), (total_minus - minus) / others),
+                });
+                Member {
+                    tree_id,
+                    rng: StdRng::seed_from_u64(tree_id as u64 + 1),
+                    state: Some(refinement.refresh_statistics(state)),
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn consensus_retries_a_stalled_member_after_peer_branches_move() {
+        let x = Array2::from_shape_fn((16, 1), |(row, _)| row as f64);
+        let y = Array1::zeros(x.nrows());
+        let params = lifecycle_params(2);
+        let refinement = params.refinement_strategy_params.get_refinement_strategy();
+        let split = params.split_strategy_params.get_split_strategy();
+        let mut members = constant_members(x.view(), y.view(), &params, &[(3.0, 2.0), (4.0, 1.0)]);
+
+        // A=(3,2) is stationary against B=(4,1), but B improves against A.
+        let mut rng = members[0].rng.clone();
+        let (stalled, advanced) = fit_step(
+            members[0].state.as_ref().unwrap().clone(),
+            0,
+            params.n_iter,
+            &refinement,
+            &split,
+            &mut rng,
+        );
+        assert!(!advanced);
+        assert_eq!(stalled.loop_state.fineness, 0);
+        let mut rng = members[1].rng.clone();
+        let (peer, advanced) = fit_step(
+            members[1].state.as_ref().unwrap().clone(),
+            0,
+            params.n_iter,
+            &refinement,
+            &split,
+            &mut rng,
+        );
+        assert!(advanced);
+        for (&plus, &minus) in peer.f_plus.iter().zip(peer.f_minus.iter()) {
+            assert!((plus - 8.0 / 3.0).abs() < 1e-12);
+            assert!((minus - 7.0 / 3.0).abs() < 1e-12);
+        }
+
+        let mut retried = stalled;
+        retried.branch_consensus = Some(BranchConsensus {
+            weight: 1.0,
+            plus: peer.f_plus.clone(),
+            minus: peer.f_minus.clone(),
+        });
+        let retried = refinement.refresh_statistics(retried);
+        let (retried, advanced) =
+            fit_step(retried, 1, params.n_iter, &refinement, &split, &mut rng);
+        assert!(advanced);
+        for (&plus, &minus) in retried.f_plus.iter().zip(retried.f_minus.iter()) {
+            assert!((plus - 23.0 / 9.0).abs() < 1e-12);
+            assert!((minus - 22.0 / 9.0).abs() < 1e-12);
+        }
+
+        fit_members(&mut members, &params, 1.0, None);
+        for member in members {
+            let mut state = member.state.unwrap();
+            assert!(
+                state.loop_state.fineness > 0,
+                "member {} must advance",
+                member.tree_id
+            );
+            assert!(state.loop_state.fineness <= params.n_iter);
+            let actions = state.loop_state.split_count
+                + state.loop_state.resplit_count
+                + state.loop_state.merge_count;
+            assert!(actions <= super::max_iterations(params.n_iter));
+            assert!(state.iteration < super::max_iterations(params.n_iter));
+            let cached_plus = state.f_plus.clone();
+            let cached_minus = state.f_minus.clone();
+            state.branch_consensus = None;
+            let (_, grid) = finish_fit(state);
+            let (plus, minus) = extract_two_tensor_predictions_unscaled(&grid, x.view());
+            for ((&actual_plus, &actual_minus), (&expected_plus, &expected_minus)) in plus
+                .iter()
+                .zip(minus.iter())
+                .zip(cached_plus.iter().zip(cached_minus.iter()))
+            {
+                assert!(actual_plus.is_finite() && actual_plus > 0.0);
+                assert!(actual_minus.is_finite() && actual_minus > 0.0);
+                assert!((actual_plus - expected_plus).abs() < 1e-12);
+                assert!((actual_minus - expected_minus).abs() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn consensus_stops_after_a_whole_round_without_progress() {
+        let x = Array2::from_shape_fn((16, 1), |(row, _)| row as f64);
+        let y = Array1::zeros(x.nrows());
+        let params = lifecycle_params(5);
+        let mut members = constant_members(x.view(), y.view(), &params, &[(2.0, 2.0), (2.0, 2.0)]);
+        fit_members(&mut members, &params, 1.0, None);
+        for member in members {
+            let state = member.state.unwrap();
+            assert_eq!(state.iteration, 0);
+            assert_eq!(state.loop_state.fineness, 0);
+            assert!(state.f.iter().all(|&prediction| prediction == 0.0));
+        }
+    }
+
+    #[test]
+    fn consensus_keeps_exhausted_and_terminated_members_fixed() {
+        let x = Array2::from_shape_fn((16, 1), |(row, _)| row as f64);
+        let y = Array1::zeros(x.nrows());
+        let params = lifecycle_params(2);
+        let mut members = constant_members(x.view(), y.view(), &params, &[(3.0, 2.0), (4.0, 1.0)]);
+        members[0].state.as_mut().unwrap().loop_state.fineness = params.n_iter;
+        members[1].state.as_mut().unwrap().terminated = true;
+        for member in &mut members {
+            member.state.as_mut().unwrap().iteration = 7;
+        }
+        fit_members(&mut members, &params, 1.0, None);
+        for (member, (plus, minus)) in members.into_iter().zip([(3.0, 2.0), (4.0, 1.0)]) {
+            let state = member.state.unwrap();
+            assert_eq!(state.iteration, 7);
+            assert_eq!(state.loop_state.split_count, 0);
+            assert!(state.f_plus.iter().all(|&value| value == plus));
+            assert!(state.f_minus.iter().all(|&value| value == minus));
+        }
     }
 }
