@@ -517,19 +517,8 @@ impl RefinementStrategy {
             return state;
         }
 
-        let mut deltas = Vec::with_capacity(updated_points.len());
-        for &row in updated_points {
-            let point = state.point_curvature_statistics(row, self.weight(state.residuals[row]));
-            deltas.push([
-                point.s11 - state.precomputed_statistics.c_s11[row],
-                point.s22 - state.precomputed_statistics.c_s22[row],
-                point.s12 - state.precomputed_statistics.c_s12[row],
-            ]);
-            // Row statistics depend on predictions and the reference, not another row's cache.
-            state.precomputed_statistics.c_s11[row] = point.s11;
-            state.precomputed_statistics.c_s22[row] = point.s22;
-            state.precomputed_statistics.c_s12[row] = point.s12;
-        }
+        let deltas = self.collect_binned_curvature_deltas(&mut state, col, start, end);
+        let updated_points = &state.precomputed_statistics.sorted_indices[col][start..end];
 
         let mut buckets = Vec::new();
         let mut features = (0..state.p).filter(|&feature| feature != col);
@@ -623,6 +612,84 @@ impl RefinementStrategy {
         }
         state.linear_statistics_stale = true;
         state
+    }
+
+    /// Collect full-row L2 curvature deltas in affected-row order.
+    fn collect_binned_curvature_deltas(
+        &self,
+        state: &mut FittingState<'_>,
+        col: usize,
+        start: usize,
+        end: usize,
+    ) -> Vec<[f64; 3]> {
+        let updated_points = &state.precomputed_statistics.sorted_indices[col][start..end];
+        let mut deltas = Vec::with_capacity(updated_points.len());
+        let n = state.n;
+        if let (Some(f_plus), Some(f_minus), Some(r_tilde), Some(residuals), Some(reference)) = (
+            state.f_plus.as_slice(),
+            state.f_minus.as_slice(),
+            state.r_tilde.as_slice(),
+            state.residuals.as_slice(),
+            state.branch_consensus.as_ref(),
+        ) {
+            if let (Some(target_plus), Some(target_minus)) =
+                (reference.plus.as_slice(), reference.minus.as_slice())
+            {
+                if matches!(self, Self::L2Refinement { .. })
+                    && reference.anchors.is_none()
+                    && [
+                        f_plus.len(),
+                        f_minus.len(),
+                        r_tilde.len(),
+                        residuals.len(),
+                        target_plus.len(),
+                        target_minus.len(),
+                        state.precomputed_statistics.c_s11.len(),
+                        state.precomputed_statistics.c_s22.len(),
+                        state.precomputed_statistics.c_s12.len(),
+                    ]
+                    .into_iter()
+                    .all(|length| length == n)
+                {
+                    let rho = reference.weight;
+                    let c_s11 = &mut state.precomputed_statistics.c_s11[..n];
+                    let c_s22 = &mut state.precomputed_statistics.c_s22[..n];
+                    let c_s12 = &mut state.precomputed_statistics.c_s12[..n];
+                    for &row in updated_points {
+                        if row >= n {
+                            // The first failing row uses the residual array's indexing behavior.
+                            let _ = state.residuals[row];
+                            unreachable!();
+                        }
+                        let fp = f_plus[row];
+                        let fm = f_minus[row];
+                        let mut s11 = 1.0 * fp * fp;
+                        let mut s22 = 1.0 * fm * fm;
+                        let s12 = 1.0 * fp * fm;
+                        s11 += rho * fp * fp;
+                        s22 += rho * fm * fm;
+                        deltas.push([s11 - c_s11[row], s22 - c_s22[row], s12 - c_s12[row]]);
+                        c_s11[row] = s11;
+                        c_s22[row] = s22;
+                        c_s12[row] = s12;
+                    }
+                    return deltas;
+                }
+            }
+        }
+        for &row in updated_points {
+            let point = state.point_curvature_statistics(row, self.weight(state.residuals[row]));
+            deltas.push([
+                point.s11 - state.precomputed_statistics.c_s11[row],
+                point.s22 - state.precomputed_statistics.c_s22[row],
+                point.s12 - state.precomputed_statistics.c_s12[row],
+            ]);
+            // Row statistics depend on predictions and the reference, not another row's cache.
+            state.precomputed_statistics.c_s11[row] = point.s11;
+            state.precomputed_statistics.c_s22[row] = point.s22;
+            state.precomputed_statistics.c_s12[row] = point.s12;
+        }
+        deltas
     }
 
     fn update_statistics_impl<'a, const LINEAR: bool>(
@@ -2146,3 +2213,6 @@ mod cycle8_scatter_tests;
 
 #[cfg(test)]
 mod cycle11_linear_bin_slice_tests;
+
+#[cfg(test)]
+mod cycle13_curvature_delta_tests;
