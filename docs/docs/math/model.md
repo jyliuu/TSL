@@ -126,22 +126,24 @@ This cleanly separates **activity** from **direction**:
 
 ## Normalization (gauge fixing)
 
-The backbone–tilt form is invariant to feature-wise rescalings of $b_j^{(\ell)}$ and
-constant shifts of $d_j^{(\ell)}$. TSL fixes the representative that satisfies
+The backbone–tilt form is invariant to positive feature-wise rescalings of
+$b_j^{(\ell)}$ and constant shifts of $d_j^{(\ell)}$ when the branch scalars absorb
+the corresponding changes. After fitting, `l2_identify` uses the training counts
+to impose
 
 $$
-\mathbb{E}\!\left[\log b_j^{(\ell)}(X_j)\right] = 0,
+\mathbb{E}_n\!\left[b_j^{(\ell)}(X_j)^2\right] = 1,
 \qquad
-\mathbb{E}\!\left[d_j^{(\ell)}(X_j)\right] = 0,
+\mathbb{E}_n\!\left[d_j^{(\ell)}(X_j)\right] = 0,
 \qquad j\in[p],
 $$
 
-equivalently $\mathbb{E}[\log \hat{m}_{+,j}^{(\ell)}(X_j)] = \mathbb{E}[\log \hat{m}_{-,j}^{(\ell)}(X_j)] = 0$.
-Each univariate branch factor then has **geometric mean one**, and all branch-level scale
-is carried by $\lambda_{\pm}^{(\ell)}$. The empirical version of this normalization is
-applied in code by `l2_identify` (after a fit) and before averaging bagged grids; see
-[GridTensor → identification](../code/grid-tensor.md#identification) and
-[Bagging & aggregation](bagging-aggregation.md).
+Each backbone has empirical RMS one, each tilt has empirical mean zero, and
+$\lambda_{\pm}^{(\ell)}$ absorb the removed scales and offsets. Bag aggregation
+also uses a separate shape-comparison normalization: it centers $\log b_j$ and
+$d_j$ before computing distances, leaving the stored branch scalars untouched at
+that step. See [GridTensor → identification](../code/grid-tensor.md#identification)
+and [Bagging & aggregation](bagging-aggregation.md).
 
 This fixes a *within-stage* representative but does not remove the support-induced
 non-identifiability discussed [below](#identifiability-and-stability).
@@ -154,10 +156,12 @@ admissible representation*, not a uniquely recoverable ground truth.
 
 ### 1. Classical scaling and permutation
 
-As in classical tensor decomposition, a fully observed array is identifiable only up to
-permutation and scaling. TSL inherits these and remedies them by
-[normalization](#normalization-gauge-fixing) (geometric-mean-one factors, scale in
-$\lambda_\pm$).
+Per-feature positive rescalings and tilt shifts can leave both branch functions
+unchanged after compensating their scalars. The
+[normalization](#normalization-gauge-fixing) selects a convention for these
+transformations. Permuting the stages also leaves their sum unchanged; this
+normalization does not choose a canonical stage order. Fixing these conventions
+alone does not prove uniqueness of the full decomposition.
 
 ### 2. Non-rectangular support
 
@@ -184,24 +188,26 @@ cancellation that would occur from averaging, say, the $x_1$-component of $m^{(1
 that of $m^{(3)}$ — this is what stabilizes [aggregation](bagging-aggregation.md). Yet even
 with signs fixed, a positive component can still carry region-dependent scalings: on $A$,
 replacing $a_1\mapsto a_1/c$ and $a_2\mapsto c\,a_2$ ($c>0$) leaves predictions unchanged on
-$\mathcal{X}$. Only evaluating on the full rectangular span $[-1,1]^2$ — where the rescaling
-would change predictions off-support — resolves it.
+$\mathcal{X}$. Outcomes observed in the cross regions, or additional modeling
+assumptions, are needed to distinguish these representations. Evaluating a fitted
+model off-support supplies extrapolations, not additional evidence. Agreement of
+bagged branch predictions on the observed support leaves this ambiguity intact.
 
 ### 3. Noisy observations
 
-The supervised fitting criterion sees only predictive error against noisy $y^{(i)}$, so
-distinct separable representations can attain essentially the same error. Consequently the
-latent factors are **not** uniquely recoverable; they are one of many admissible
-representations selected by the stochastic fit.
+The supervised fitting criterion uses observed outcomes and regularization. Distinct
+factorizations and distinct fitted functions can attain similar error. Randomized
+split paths can therefore yield different factor shapes, including variation within
+one apparent group of bags. Prediction stability and factor stability are separate
+empirical properties.
 
-A concrete consequence: when fitting $n_{\text{grids}}$ grids in parallel, bagged grids can
-converge to two distinct backbone representations of the *same* stage, populating opposite
-ends of the $(\lambda_+,\lambda_-)$ spectrum. The
-[align-then-filter](bagging-aggregation.md#the-aggregation-pipeline) aggregation resolves
-this by selecting a single canonical representative before averaging — the practical reason
-the similarity filter exists. So read backbone/tilt **shapes** and PD curves as faithful
-(see [Proposition 1](partial-dependence.md#proposition-1-partial-dependence-decomposition)),
-but do **not** read the raw factor values as a unique ground-truth decomposition.
+The [align-then-filter](bagging-aggregation.md#the-aggregation-pipeline) procedure
+selects similar shapes before averaging. Independent bags also supply diversity
+that can reduce fitting variance; filtering or consensus changes that tradeoff.
+Neither procedure proves uniqueness or recovery of latent factors. Backbone/tilt
+curves and the [exact branch-PD decomposition](partial-dependence.md#proposition-1-partial-dependence-decomposition)
+describe the particular fitted model. Their interpretation includes its normalization,
+reference distribution and extrapolation outside observed support.
 
 ## Where to go next
 

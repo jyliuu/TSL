@@ -188,7 +188,8 @@ TSL.fit(x, y, epochs, decay, n_trees, n_iter, split_try, colsample_bytree, alpha
         complexity_penalty, min_split_loss, min_interval_samples, refinement_strategy,
         prior_sample_size, update_clamp, tilt_tau, tilt_rho, split_strategy, top_k,
         must_fill_all_k, similarity_threshold, consensus, bagged, seed, verbosity,
-        visualdb=None)
+        visualdb=None, *, max_bins=None, consensus_interval=1,
+        nonnegative_scaling=False, consensus_anchors=None)
         -> tuple[TSL, FitResult]
 ```
 
@@ -201,6 +202,38 @@ Fit a boosted TSL model.
 | `x` | `ndarray (n_samples, n_features)` | _required_ | training features (`float64`) |
 | `y` | `ndarray (n_samples,)` | _required_ | training targets |
 | _hyperparameters_ | — | — | same names/types as the [`TSLRegressor` constructor](#cls-tslregressor) |
+| `max_bins` | `int | None` | `None` | keyword-only quantile candidate budget for this native fit; integers must be at least 2; `None` uses all eligible distinct-value positions |
+| `consensus_interval` | `int` | `1` | keyword-only maximum local action attempts per frozen peer reference; must be at least 1; used when `consensus > 0` and `n_trees > 1` |
+| `consensus_anchors` | `int | None` | `None` | keyword-only training-row sample size for the consensus penalty; positive integers below the training row count sample that many shared anchors; `None` or a count at least the training row count uses every row |
+| `nonnegative_scaling` | `bool` | `False` | keyword-only constraint on the joint outer branch coefficients; `True` uses bounded nonnegative least squares |
+
+`max_bins` limits candidate split locations per feature, while `n_iter` controls
+the grid's structural budget. Histogram boundaries snap past blocks of equal
+values so a split does not divide tied observations. This native `TSL.fit` option
+retains independent randomized bags when `consensus=0`.
+
+`consensus_interval=1` updates peer references before each action attempt. Larger
+values retain the reference for a batch, reducing full refreshes while changing the
+fitting schedule. Each grid keeps its split budget and at most $3\,\texttt{n_iter}$
+action attempts; a stalled grid can retry after its peers advance.
+
+`consensus_anchors=m` with $0<m<n$ samples training rows uniformly without
+replacement, once per stage, using a separate deterministic RNG stream. All bags
+share the anchor set; bag proposal seeds are unaffected. The data loss uses all $n$
+rows, while the branch-agreement penalty uses anchors weighted by $n/m$. This changes
+the estimator. `None` and counts at least $n$ use the full-row consensus path.
+After initialization, reference updates use sparse binned statistics when every
+feature has a binned cache and merges are disabled; other configurations use a full
+weighted refresh. See [training-row anchors](../math/bagging-aggregation.md#training-row-anchors).
+
+`nonnegative_scaling=True` jointly refits all branch coefficients subject to
+nonnegativity. It preserves the sign of each scaled branch and can set a coefficient
+to zero. The bounded active-set solver retains the best feasible training-loss
+incumbent, including the preceding model with zero coefficients for the new stage.
+See [coefficient backfitting](../math/fitting.md#coefficient-backfitting).
+
+These keyword-only options are available on native `TSL.fit` and the Rust
+builders. The `TSLRegressor` constructor does not expose them.
 
 **Returns**
 
@@ -461,7 +494,7 @@ One boosting stage ([details](stage-predictor.md)).
 | `grid_tensors` | `list[GridTensor]` | the bag of fitted components |
 | `combined_grid_tensor` | `GridTensor` | the aggregated primary grid |
 | `candidate_indices` | `list[int] | None` | bags kept after similarity filtering |
-| `scaling_plus`, `scaling_minus` | `float | None` | OLS coefficients for $\tilde{m}_+$ and $-\tilde{m}_-$ |
+| `scaling_plus`, `scaling_minus` | `float | None` | outer branch coefficients for $\tilde{m}_+$ and $-\tilde{m}_-$; nonnegative when fitted with `nonnegative_scaling=True` |
 
 ### `predict` { #meth-stagepredictor-predict }
 
@@ -477,7 +510,7 @@ StagePredictor.predict(x) -> np.ndarray
 
 | Type | Description |
 |------|-------------|
-| `ndarray (n_samples,)` | the stage's contribution, with OLS scaling applied. |
+| `ndarray (n_samples,)` | the stage's contribution, with outer branch scaling applied. |
 
 ---
 
