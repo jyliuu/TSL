@@ -104,6 +104,15 @@ impl<'a> Clone for FittingState<'a> {
     }
 }
 
+/// A zero-filled contiguous array whose data begins `slot` KiB into its allocation.
+///
+/// Row caches built with distinct slots keep one row's elements in distinct L1 sets
+/// when their allocations share a page alignment; the padding is never read.
+pub(crate) fn staggered_zeros(n: usize, slot: usize) -> Array1<f64> {
+    let pad = slot * 128;
+    Array1::zeros(n + pad).slice_move(ndarray::s![pad..])
+}
+
 impl<'a> FittingState<'a> {
     pub fn new(x: ArrayView2<'a, f64>, y: ArrayView1<'a, f64>) -> Self {
         let split_strategy_state = SplitStrategyState::new();
@@ -127,18 +136,32 @@ impl<'a> FittingState<'a> {
 
         // Initialize per-point caches
         // Initially f_plus = lambda_plus, f_minus = lambda_minus (since all b=1, d=0)
-        let f_plus = Array1::from_elem(n, lambda_plus);
-        let f_minus = Array1::from_elem(n, lambda_minus);
-        let f = &f_plus - &f_minus;
+        // Each cache starts a different number of KiB into its own allocation, so one
+        // row's caches occupy distinct L1 sets even when the allocations are page-aligned.
+        let mut f_plus = staggered_zeros(n, 1);
+        f_plus.fill(lambda_plus);
+        let mut f_minus = staggered_zeros(n, 2);
+        f_minus.fill(lambda_minus);
+        let mut f = staggered_zeros(n, 3);
+        ndarray::Zip::from(&mut f)
+            .and(&f_plus)
+            .and(&f_minus)
+            .for_each(|f, &plus, &minus| *f = plus - minus);
 
         // Initially y_hat = f (stage prediction)
-        let y_hat = f.clone();
-        let residuals = (y.to_owned() - y_hat.view()).to_owned();
+        let mut y_hat = staggered_zeros(n, 4);
+        y_hat.assign(&f);
+        let mut residuals = staggered_zeros(n, 5);
+        ndarray::Zip::from(&mut residuals)
+            .and(&y)
+            .and(&y_hat)
+            .for_each(|residual, &label, &prediction| *residual = label - prediction);
         let current_error = residuals.iter().map(|r| r * r).sum();
 
         // Initially r_tilde = R (within-stage residual equals outer residual when f=0)
         // But since we initialized f, we need to compute r_tilde = R - f
-        let r_tilde = residuals.clone();
+        let mut r_tilde = staggered_zeros(n, 6);
+        r_tilde.assign(&residuals);
 
         Self {
             x,
@@ -750,3 +773,6 @@ impl LoopState {
         }
     }
 }
+
+#[cfg(test)]
+mod stagger_tests;
