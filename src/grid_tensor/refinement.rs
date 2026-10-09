@@ -493,6 +493,87 @@ impl RefinementStrategy {
         self.update_statistics_impl::<false>(state, col, start, end, affected_points_range)
     }
 
+    /// Scatter curvature deltas while locating the touched bins in the same row traversal.
+    pub(crate) fn update_binned_curvature_statistics<'a>(
+        &self,
+        mut state: FittingState<'a>,
+        col: usize,
+        start: usize,
+        end: usize,
+    ) -> FittingState<'a> {
+        state.require_current_statistics();
+        assert!(matches!(self, Self::L2Refinement { .. }));
+        assert!(state
+            .branch_consensus
+            .as_ref()
+            .is_some_and(|reference| reference.anchors.is_none()));
+        assert!(state
+            .precomputed_statistics
+            .bin_edges
+            .iter()
+            .all(|edges| !edges.is_empty()));
+        let updated_points = &state.precomputed_statistics.sorted_indices[col][start..end];
+        if updated_points.is_empty() {
+            return state;
+        }
+
+        let mut deltas = Vec::with_capacity(updated_points.len());
+        for &row in updated_points {
+            let point = state.point_curvature_statistics(row, self.weight(state.residuals[row]));
+            deltas.push([
+                point.s11 - state.precomputed_statistics.c_s11[row],
+                point.s22 - state.precomputed_statistics.c_s22[row],
+                point.s12 - state.precomputed_statistics.c_s12[row],
+            ]);
+            // Row statistics depend on predictions and the reference, not another row's cache.
+            state.precomputed_statistics.c_s11[row] = point.s11;
+            state.precomputed_statistics.c_s22[row] = point.s22;
+            state.precomputed_statistics.c_s12[row] = point.s12;
+        }
+
+        let mut buckets = Vec::new();
+        for feature in (0..state.p)
+            .filter(|&feature| feature != col)
+            .chain(once(col))
+        {
+            let bins = &state.precomputed_statistics.bin_indices[feature];
+            let bin_count = state.precomputed_statistics.binned_prefix_sums[feature].len();
+            buckets.clear();
+            buckets.resize(bin_count, [0.0; 3]);
+            let (mut first, mut last) = (usize::MAX, 0);
+            for (&row, delta) in updated_points.iter().zip(&deltas) {
+                let bin = bins[row] as usize;
+                // Every touched row contributes to the range, including zero deltas.
+                first = first.min(bin);
+                last = last.max(bin);
+                let slot = &mut buckets[bin];
+                slot[0] += delta[0];
+                slot[1] += delta[1];
+                slot[2] += delta[2];
+            }
+
+            // Bin membership is monotone in sorted rank. These bounds equal the bins
+            // of the minimum and maximum affected ranks, without a separate rank scan.
+            let prefix = &mut state.precomputed_statistics.binned_prefix_sums[feature];
+            let mut accumulated = [0.0; 3];
+            for bin in first..=last {
+                accumulated[0] += buckets[bin][0];
+                accumulated[1] += buckets[bin][1];
+                accumulated[2] += buckets[bin][2];
+                prefix[bin].s11 += accumulated[0];
+                prefix[bin].s22 += accumulated[1];
+                prefix[bin].s12 += accumulated[2];
+            }
+            for slot in &mut prefix[(last + 1)..] {
+                slot.s11 += accumulated[0];
+                slot.s22 += accumulated[1];
+                slot.s12 += accumulated[2];
+            }
+        }
+        state.linear_statistics_stale = true;
+        state
+    }
+
     fn update_statistics_impl<'a, const LINEAR: bool>(
         &self,
         mut state: FittingState<'a>,
@@ -1924,3 +2005,6 @@ mod anchor_review_tests;
 
 #[cfg(test)]
 mod deferred_review_tests;
+
+#[cfg(test)]
+mod cycle4_review_tests;

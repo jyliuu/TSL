@@ -88,6 +88,17 @@ fn reduce_apply_transformation<'a>(
     let old_error = state.current_error;
     // Clone the action before transformation to avoid borrowing issues
     let action_for_logging = transformation.clone();
+    let fused_binned_curvature = candidate_refresh == CandidateRefresh::Deferred
+        && matches!(refinement_strategy, RefinementStrategy::L2Refinement { .. })
+        && state
+            .branch_consensus
+            .as_ref()
+            .is_some_and(|reference| reference.anchors.is_none())
+        && state
+            .precomputed_statistics
+            .bin_edges
+            .iter()
+            .all(|edges| !edges.is_empty());
 
     // Step 1: Update tree structure (insert/remove/update boundaries and grid_values)
 
@@ -137,7 +148,8 @@ fn reduce_apply_transformation<'a>(
 
             state =
                 reduce_grid_split_two_tensor(state, v_b_l, delta_d_l, v_b_r, delta_d_r, col, idx);
-            let affected_ranges = state.get_affected_ranges(col, original_affected_interval);
+            let affected_ranges = (!fused_binned_curvature)
+                .then(|| state.get_affected_ranges(col, original_affected_interval));
 
             // Compute new axis factors after split using the *clamped* child parameters stored in state.
             let b_l = state.backbone_values[col][insert_at];
@@ -166,7 +178,7 @@ fn reduce_apply_transformation<'a>(
                 state,
                 col,
                 &original_affected_interval,
-                &affected_ranges,
+                affected_ranges.as_deref(),
                 refinement_strategy,
                 candidate_refresh,
             );
@@ -196,7 +208,8 @@ fn reduce_apply_transformation<'a>(
                 b_merged_optimal,
                 d_merged_optimal,
             );
-            let affected_ranges = state.get_affected_ranges(col, original_affected_interval);
+            let affected_ranges = (!fused_binned_curvature)
+                .then(|| state.get_affected_ranges(col, original_affected_interval));
 
             let b_merged = state.backbone_values[col][interval_idx];
             let d_merged = state.tilt_values[col][interval_idx];
@@ -217,7 +230,7 @@ fn reduce_apply_transformation<'a>(
                 state,
                 col,
                 &original_affected_interval,
-                &affected_ranges,
+                affected_ranges.as_deref(),
                 refinement_strategy,
                 candidate_refresh,
             );
@@ -284,7 +297,8 @@ fn reduce_apply_transformation<'a>(
                 col,
                 interval_idx,
             );
-            let affected_ranges = state.get_affected_ranges(col, original_affected_interval);
+            let affected_ranges = (!fused_binned_curvature)
+                .then(|| state.get_affected_ranges(col, original_affected_interval));
 
             // Compute new factors (after param update) for both intervals using stored (clamped) params.
             let b_left_new = state.backbone_values[col][interval_idx];
@@ -315,7 +329,7 @@ fn reduce_apply_transformation<'a>(
                 state,
                 col,
                 &original_affected_interval,
-                &affected_ranges,
+                affected_ranges.as_deref(),
                 refinement_strategy,
                 candidate_refresh,
             );
@@ -667,11 +681,15 @@ fn reduce_grid_statistics_and_refresh_caches<'a>(
     mut state: FittingState<'a>,
     col: usize,
     original_affected_interval: &(usize, usize),
-    affected_ranges: &[AffectedRange],
+    affected_ranges: Option<&[AffectedRange]>,
     refinement: &RefinementStrategy,
     candidate_refresh: CandidateRefresh,
 ) -> FittingState<'a> {
     let &(start, end) = original_affected_interval;
+    let Some(affected_ranges) = affected_ranges else {
+        assert_eq!(candidate_refresh, CandidateRefresh::Deferred);
+        return refinement.update_binned_curvature_statistics(state, col, start, end);
+    };
     // Convert AffectedRange to point ranges for update_statistics
     // update_statistics expects a Vec indexed by column number, so we need to build
     // a full vector with empty ranges (1, 0) for unaffected columns
