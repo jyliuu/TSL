@@ -52,19 +52,40 @@ pub(super) fn fit_consensus_bag<'a>(
         consensus.is_finite() && consensus >= 0.0,
         "consensus must be finite and nonnegative"
     );
-    let mut members: Vec<Member<'a>> = seeds
-        .iter()
-        .enumerate()
-        .map(|(tree_id, &seed)| Member {
-            tree_id,
-            rng: StdRng::seed_from_u64(seed),
-            next_iteration: 0,
-            state: Some(in_context(tree_id, epoch, || match initial_state {
-                Some(initial_state) => initial_state.clone(),
-                None => initialize_state_with_input(x, y, tg_params, prepared),
-            })),
-        })
-        .collect();
+    // Member setup and teardown have no observable order while logging is disabled, so
+    // a shared initial state is cloned and the fitted grids are converted on the pool.
+    let shared_setup = initial_state.filter(|_| !logging::is_logging_enabled());
+    let member = |tree_id: usize, seed: u64, state: FittingState<'a>| Member {
+        tree_id,
+        rng: StdRng::seed_from_u64(seed),
+        next_iteration: 0,
+        state: Some(state),
+    };
+    let mut members: Vec<Member<'a>> = match shared_setup {
+        #[cfg(feature = "use-rayon")]
+        Some(initial_state) => seeds
+            .par_iter()
+            .enumerate()
+            .map(|(tree_id, &seed)| {
+                member(
+                    tree_id,
+                    seed,
+                    in_context(tree_id, epoch, || initial_state.clone()),
+                )
+            })
+            .collect(),
+        _ => seeds
+            .iter()
+            .enumerate()
+            .map(|(tree_id, &seed)| {
+                let state = in_context(tree_id, epoch, || match initial_state {
+                    Some(initial_state) => initial_state.clone(),
+                    None => initialize_state_with_input(x, y, tg_params, prepared),
+                });
+                member(tree_id, seed, state)
+            })
+            .collect(),
+    };
 
     let anchors = sample_consensus_anchors(
         x.nrows(),
@@ -92,18 +113,87 @@ pub(super) fn fit_consensus_bag<'a>(
         );
     }
 
-    members
-        .into_iter()
-        .map(|member| {
-            let mut state = member.state.expect("member state");
-            state.branch_consensus = None;
-            in_context(member.tree_id, epoch, || {
-                let (fit_res, grid) = finish_fit(state);
-                logging::log_grid_error_fitted(fit_res.err, logging::GridErrorVariant::Train);
-                (fit_res, grid)
-            })
+    let finish = |member: Member<'a>| {
+        let mut state = member.state.expect("member state");
+        state.branch_consensus = None;
+        in_context(member.tree_id, epoch, || {
+            let (fit_res, grid) = finish_fit(state);
+            logging::log_grid_error_fitted(fit_res.err, logging::GridErrorVariant::Train);
+            (fit_res, grid)
         })
-        .collect()
+    };
+    #[cfg(feature = "use-rayon")]
+    if shared_setup.is_some() {
+        return members.into_par_iter().map(finish).collect();
+    }
+    members.into_iter().map(finish).collect()
+}
+
+/// Sum every member's full-row branches over parallel row chunks.
+///
+/// Each row total starts from zero and adds the members in order, so the result is
+/// identical to the sequential elementwise sum. Returns `false`, leaving the totals
+/// untouched, unless every branch is a contiguous array of the totals' length.
+fn accumulate_full_row_totals(
+    members: &[Member<'_>],
+    total_plus: &mut Array1<f64>,
+    total_minus: &mut Array1<f64>,
+) -> bool {
+    let n = total_plus.len();
+    if total_minus.len() != n {
+        return false;
+    }
+    let Some(branches) = members
+        .iter()
+        .map(|member| {
+            let state = member.state.as_ref().expect("member state");
+            match (state.f_plus.as_slice(), state.f_minus.as_slice()) {
+                (Some(plus), Some(minus)) if plus.len() == n && minus.len() == n => {
+                    Some((plus, minus))
+                }
+                _ => None,
+            }
+        })
+        .collect::<Option<Vec<_>>>()
+    else {
+        return false;
+    };
+    let (Some(total_plus), Some(total_minus)) =
+        (total_plus.as_slice_mut(), total_minus.as_slice_mut())
+    else {
+        return false;
+    };
+    let chunk = (n / 32).max(512);
+    let accumulate = |start: usize, plus_chunk: &mut [f64], minus_chunk: &mut [f64]| {
+        plus_chunk.fill(0.0);
+        minus_chunk.fill(0.0);
+        let end = start + plus_chunk.len();
+        for &(plus, minus) in &branches {
+            for (total, &value) in plus_chunk.iter_mut().zip(&plus[start..end]) {
+                *total += value;
+            }
+            for (total, &value) in minus_chunk.iter_mut().zip(&minus[start..end]) {
+                *total += value;
+            }
+        }
+    };
+    #[cfg(feature = "use-rayon")]
+    total_plus
+        .par_chunks_mut(chunk)
+        .zip(total_minus.par_chunks_mut(chunk))
+        .enumerate()
+        .for_each(|(index, (plus_chunk, minus_chunk))| {
+            accumulate(index * chunk, plus_chunk, minus_chunk)
+        });
+    #[cfg(not(feature = "use-rayon"))]
+    total_plus
+        .chunks_mut(chunk)
+        .zip(total_minus.chunks_mut(chunk))
+        .enumerate()
+        .for_each(|(index, (plus_chunk, minus_chunk))| {
+            accumulate(index * chunk, plus_chunk, minus_chunk)
+        });
+    true
 }
 
 fn sample_consensus_anchors(
@@ -244,18 +334,22 @@ fn fit_members_with_split_scoring<'a>(
     let mut total_minus = Array1::<f64>::zeros(reference_len);
     let iteration_budget = max_iterations(tg_params.n_iter);
     for _ in 0..iteration_budget {
-        total_plus.fill(0.0);
-        total_minus.fill(0.0);
-        for member in members.iter() {
-            let state = member.state.as_ref().expect("member state");
-            if let Some(anchors) = anchors {
-                for (index, &row) in anchors.rows.iter().enumerate() {
-                    total_plus[index] += state.f_plus[row];
-                    total_minus[index] += state.f_minus[row];
+        if anchors.is_some()
+            || !accumulate_full_row_totals(members, &mut total_plus, &mut total_minus)
+        {
+            total_plus.fill(0.0);
+            total_minus.fill(0.0);
+            for member in members.iter() {
+                let state = member.state.as_ref().expect("member state");
+                if let Some(anchors) = anchors {
+                    for (index, &row) in anchors.rows.iter().enumerate() {
+                        total_plus[index] += state.f_plus[row];
+                        total_minus[index] += state.f_minus[row];
+                    }
+                } else {
+                    total_plus += &state.f_plus;
+                    total_minus += &state.f_minus;
                 }
-            } else {
-                total_plus += &state.f_plus;
-                total_minus += &state.f_minus;
             }
         }
         let (total_plus, total_minus) = (total_plus.view(), total_minus.view());
@@ -1299,3 +1393,5 @@ mod tests {
 
 #[cfg(test)]
 mod cycle9_reference_tests;
+#[cfg(test)]
+mod full_row_totals_tests;
