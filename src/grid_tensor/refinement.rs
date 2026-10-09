@@ -532,10 +532,61 @@ impl RefinementStrategy {
         }
 
         let mut buckets = Vec::new();
-        for feature in (0..state.p)
-            .filter(|&feature| feature != col)
-            .chain(once(col))
-        {
+        let mut features = (0..state.p).filter(|&feature| feature != col);
+        let mut unpaired = None;
+        while let Some(first_feature) = features.next() {
+            let Some(second_feature) = features.next() else {
+                unpaired = Some(first_feature);
+                break;
+            };
+            let first_bins = &state.precomputed_statistics.bin_indices[first_feature];
+            let second_bins = &state.precomputed_statistics.bin_indices[second_feature];
+            let first_count = state.precomputed_statistics.binned_prefix_sums[first_feature].len();
+            let second_count = state.precomputed_statistics.binned_prefix_sums[second_feature].len();
+            buckets.clear();
+            buckets.resize(first_count + second_count, [0.0; 3]);
+            let (first_buckets, second_buckets) = buckets.split_at_mut(first_count);
+            let (mut first_min, mut first_max) = (usize::MAX, 0);
+            let (mut second_min, mut second_max) = (usize::MAX, 0);
+            // Each histogram receives additions in affected-row order.
+            for (&row, delta) in updated_points.iter().zip(&deltas) {
+                let first_bin = first_bins[row] as usize;
+                let second_bin = second_bins[row] as usize;
+                first_min = first_min.min(first_bin);
+                first_max = first_max.max(first_bin);
+                second_min = second_min.min(second_bin);
+                second_max = second_max.max(second_bin);
+                let first_slot = &mut first_buckets[first_bin];
+                first_slot[0] += delta[0];
+                first_slot[1] += delta[1];
+                first_slot[2] += delta[2];
+                let second_slot = &mut second_buckets[second_bin];
+                second_slot[0] += delta[0];
+                second_slot[1] += delta[1];
+                second_slot[2] += delta[2];
+            }
+            for (feature, buckets, first, last) in [
+                (first_feature, &*first_buckets, first_min, first_max),
+                (second_feature, &*second_buckets, second_min, second_max),
+            ] {
+                let prefix = &mut state.precomputed_statistics.binned_prefix_sums[feature];
+                let mut accumulated = [0.0; 3];
+                for bin in first..=last {
+                    accumulated[0] += buckets[bin][0];
+                    accumulated[1] += buckets[bin][1];
+                    accumulated[2] += buckets[bin][2];
+                    prefix[bin].s11 += accumulated[0];
+                    prefix[bin].s22 += accumulated[1];
+                    prefix[bin].s12 += accumulated[2];
+                }
+                for slot in &mut prefix[(last + 1)..] {
+                    slot.s11 += accumulated[0];
+                    slot.s22 += accumulated[1];
+                    slot.s12 += accumulated[2];
+                }
+            }
+        }
+        for feature in unpaired.into_iter().chain(once(col)) {
             let bins = &state.precomputed_statistics.bin_indices[feature];
             let bin_count = state.precomputed_statistics.binned_prefix_sums[feature].len();
             buckets.clear();
@@ -2075,3 +2126,6 @@ mod cycle5_refresh_tests;
 
 #[cfg(test)]
 mod cycle7_refresh_tests;
+
+#[cfg(test)]
+mod cycle8_scatter_tests;
