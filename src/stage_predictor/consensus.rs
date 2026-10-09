@@ -1,6 +1,6 @@
 //! Lockstep bag fitting toward shared branch functions.
 //!
-//! Every grid takes one structural action per round. Before each round, grid `b`'s local
+//! Every grid takes a bounded batch of structural actions per round. Grid `b`'s local
 //! objective gains the proximal term `ρ (‖f₊ − c₊‖² + ‖f₋ − c₋‖²)` on the training rows,
 //! where `c±` are the mean branches of the other grids. The term encourages agreement
 //! of the positive branches on observed training rows. Factor identification also depends
@@ -16,7 +16,8 @@ use rayon::prelude::*;
 use crate::{
     grid_tensor::{
         fit::{
-            finish_fit, fit_step_with_candidate_refresh, initialize_state_with_input, max_iterations,
+            finish_fit, fit_step_with_candidate_refresh, initialize_state_with_input,
+            max_iterations,
         },
         prepared_input::PreparedInput,
         reducer::CandidateRefresh,
@@ -30,6 +31,7 @@ struct Member<'a> {
     tree_id: usize,
     rng: StdRng,
     state: Option<FittingState<'a>>,
+    next_iteration: usize,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -38,6 +40,7 @@ pub(super) fn fit_consensus_bag<'a>(
     y: ArrayView1<'a, f64>,
     tg_params: &GridTensorParams,
     consensus: f64,
+    consensus_interval: usize,
     seeds: &[u64],
     initial_state: Option<&FittingState<'a>>,
     prepared: Option<&PreparedInput<'_>>,
@@ -53,6 +56,7 @@ pub(super) fn fit_consensus_bag<'a>(
         .map(|(tree_id, &seed)| Member {
             tree_id,
             rng: StdRng::seed_from_u64(seed),
+            next_iteration: 0,
             state: Some(in_context(tree_id, epoch, || match initial_state {
                 Some(initial_state) => initial_state.clone(),
                 None => initialize_state_with_input(x, y, tg_params, prepared),
@@ -60,7 +64,13 @@ pub(super) fn fit_consensus_bag<'a>(
         })
         .collect();
 
-    fit_members(&mut members, tg_params, consensus, epoch);
+    fit_members(
+        &mut members,
+        tg_params,
+        consensus,
+        consensus_interval,
+        epoch,
+    );
 
     members
         .into_iter()
@@ -80,12 +90,14 @@ fn fit_members<'a>(
     members: &mut [Member<'a>],
     tg_params: &GridTensorParams,
     consensus: f64,
+    consensus_interval: usize,
     epoch: Option<usize>,
 ) {
     fit_members_with_candidate_refresh(
         members,
         tg_params,
         consensus,
+        consensus_interval,
         epoch,
         CandidateRefresh::Deferred,
     );
@@ -95,9 +107,14 @@ fn fit_members_with_candidate_refresh<'a>(
     members: &mut [Member<'a>],
     tg_params: &GridTensorParams,
     consensus: f64,
+    consensus_interval: usize,
     epoch: Option<usize>,
     candidate_refresh: CandidateRefresh,
 ) {
+    assert!(
+        consensus_interval > 0,
+        "consensus_interval must be positive"
+    );
     let refinement = tg_params
         .refinement_strategy_params
         .get_refinement_strategy();
@@ -108,7 +125,8 @@ fn fit_members_with_candidate_refresh<'a>(
         .map_or(0, |member| member.state.as_ref().expect("member state").n);
     let mut total_plus = Array1::<f64>::zeros(n);
     let mut total_minus = Array1::<f64>::zeros(n);
-    for iter in 0..max_iterations(tg_params.n_iter) {
+    let iteration_budget = max_iterations(tg_params.n_iter);
+    for _ in 0..iteration_budget {
         total_plus.fill(0.0);
         total_minus.fill(0.0);
         for member in members.iter() {
@@ -119,7 +137,8 @@ fn fit_members_with_candidate_refresh<'a>(
         let (total_plus, total_minus) = (total_plus.view(), total_minus.view());
         let advance = |member: &mut Member<'a>| {
             let current = member.state.as_ref().expect("member state");
-            if current.terminated
+            if member.next_iteration >= iteration_budget
+                || current.terminated
                 || (!current.split_strategy_state.merge_enabled
                     && current.loop_state.fineness >= tg_params.n_iter)
             {
@@ -129,6 +148,7 @@ fn fit_members_with_candidate_refresh<'a>(
                 tree_id,
                 rng,
                 state,
+                next_iteration,
             } = member;
             in_context(*tree_id, epoch, || {
                 let mut current = state.take().expect("member state");
@@ -137,17 +157,39 @@ fn fit_members_with_candidate_refresh<'a>(
                     plus: (&total_plus - &current.f_plus) / others,
                     minus: (&total_minus - &current.f_minus) / others,
                 });
-                let current = refinement.refresh_statistics(current);
-                // References change each round, so every proposal uses a full refresh.
-                let (current, advanced) = fit_step_with_candidate_refresh(
-                    current,
-                    iter,
-                    tg_params.n_iter,
-                    &refinement,
-                    &split,
-                    rng,
-                    candidate_refresh,
-                );
+                let mut current = refinement.refresh_statistics(current);
+                let batch_size = consensus_interval.min(iteration_budget - *next_iteration);
+                let mut advanced = false;
+                for offset in 0..batch_size {
+                    if current.terminated
+                        || (!current.split_strategy_state.merge_enabled
+                            && current.loop_state.fineness >= tg_params.n_iter)
+                    {
+                        break;
+                    }
+                    // Intermediate proposals consume scores for the same frozen reference.
+                    let refresh = if offset + 1 == batch_size {
+                        candidate_refresh
+                    } else {
+                        CandidateRefresh::Eager
+                    };
+                    let iter = *next_iteration;
+                    *next_iteration += 1;
+                    let step_advanced;
+                    (current, step_advanced) = fit_step_with_candidate_refresh(
+                        current,
+                        iter,
+                        tg_params.n_iter,
+                        &refinement,
+                        &split,
+                        rng,
+                        refresh,
+                    );
+                    advanced |= step_advanced;
+                    if !step_advanced {
+                        break;
+                    }
+                }
                 *state = Some(current);
                 advanced
             })
@@ -180,13 +222,19 @@ fn in_context<R>(tree_id: usize, epoch: Option<usize>, f: impl FnOnce() -> R) ->
 mod tests {
     use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 
-    use super::{fit_members, fit_members_with_candidate_refresh, Member};
+    use super::{
+        fit_members, fit_members_with_candidate_refresh, in_context, max_iterations, Member,
+    };
     use rand::{rngs::StdRng, RngCore, SeedableRng};
+    #[cfg(feature = "use-rayon")]
+    use rayon::prelude::*;
 
     use crate::{
         grid_tensor::{
             action::FittingAction,
-            fit::{finish_fit, fit_step, initialize_state_with_input},
+            fit::{
+                finish_fit, fit_step, fit_step_with_candidate_refresh, initialize_state_with_input,
+            },
             params::{
                 GridTensorParamsBuilder, RefinementStrategyParamsBuilder,
                 SplitStrategyParamsBuilder,
@@ -254,6 +302,85 @@ mod tests {
         total / pairs
     }
 
+    fn fit_members_single_action_reference<'a>(
+        members: &mut [Member<'a>],
+        tg_params: &GridTensorParams,
+        consensus: f64,
+        epoch: Option<usize>,
+        candidate_refresh: CandidateRefresh,
+    ) {
+        let refinement = tg_params
+            .refinement_strategy_params
+            .get_refinement_strategy();
+        let split = tg_params.split_strategy_params.get_split_strategy();
+        let others = (members.len().max(2) - 1) as f64;
+        let n = members
+            .first()
+            .map_or(0, |member| member.state.as_ref().expect("member state").n);
+        let mut total_plus = Array1::<f64>::zeros(n);
+        let mut total_minus = Array1::<f64>::zeros(n);
+        for iter in 0..max_iterations(tg_params.n_iter) {
+            total_plus.fill(0.0);
+            total_minus.fill(0.0);
+            for member in members.iter() {
+                let state = member.state.as_ref().expect("member state");
+                total_plus += &state.f_plus;
+                total_minus += &state.f_minus;
+            }
+            let (total_plus, total_minus) = (total_plus.view(), total_minus.view());
+            let advance = |member: &mut Member<'a>| {
+                let current = member.state.as_ref().expect("member state");
+                if current.terminated
+                    || (!current.split_strategy_state.merge_enabled
+                        && current.loop_state.fineness >= tg_params.n_iter)
+                {
+                    return false;
+                }
+                let Member {
+                    tree_id,
+                    rng,
+                    state,
+                    ..
+                } = member;
+                in_context(*tree_id, epoch, || {
+                    let mut current = state.take().expect("member state");
+                    current.branch_consensus = Some(BranchConsensus {
+                        weight: consensus,
+                        plus: (&total_plus - &current.f_plus) / others,
+                        minus: (&total_minus - &current.f_minus) / others,
+                    });
+                    let current = refinement.refresh_statistics(current);
+                    // References change each round, so every proposal uses a full refresh.
+                    let (current, advanced) = fit_step_with_candidate_refresh(
+                        current,
+                        iter,
+                        tg_params.n_iter,
+                        &refinement,
+                        &split,
+                        rng,
+                        candidate_refresh,
+                    );
+                    *state = Some(current);
+                    advanced
+                })
+            };
+            // Every member sees the round's frozen reference before progress is combined.
+            #[cfg(feature = "use-rayon")]
+            let advanced = members
+                .par_iter_mut()
+                .map(advance)
+                .reduce(|| false, |left, right| left | right);
+            #[cfg(not(feature = "use-rayon"))]
+            let advanced = members
+                .iter_mut()
+                .map(advance)
+                .fold(false, |left, right| left | right);
+            if !advanced {
+                break;
+            }
+        }
+    }
+
     fn members_from_state<'a>(initial: &FittingState<'a>) -> Vec<Member<'a>> {
         (0..4)
             .map(|tree_id| {
@@ -266,6 +393,7 @@ mod tests {
                 }
                 Member {
                     tree_id,
+                    next_iteration: 0,
                     rng: StdRng::seed_from_u64(17 + tree_id as u64),
                     state: Some(state),
                 }
@@ -276,6 +404,7 @@ mod tests {
     fn assert_candidate_refresh_parity(
         initial: &FittingState<'_>,
         params: &GridTensorParams,
+        consensus_interval: usize,
     ) -> [usize; 3] {
         let mut eager = members_from_state(initial);
         let mut deferred = members_from_state(initial);
@@ -283,6 +412,7 @@ mod tests {
             &mut eager,
             params,
             0.3,
+            consensus_interval,
             None,
             CandidateRefresh::Eager,
         );
@@ -290,9 +420,19 @@ mod tests {
             &mut deferred,
             params,
             0.3,
+            consensus_interval,
             None,
             CandidateRefresh::Deferred,
         );
+        assert_members_equal(initial, params, eager, deferred)
+    }
+
+    fn assert_members_equal<'a>(
+        initial: &FittingState<'a>,
+        params: &GridTensorParams,
+        mut eager: Vec<Member<'a>>,
+        mut deferred: Vec<Member<'a>>,
+    ) -> [usize; 3] {
         let refinement = params.refinement_strategy_params.get_refinement_strategy();
         let mut counts = [0; 3];
         for (a, b) in eager.iter_mut().zip(&mut deferred) {
@@ -364,7 +504,14 @@ mod tests {
         GridTensorParamsBuilder::new()
             .n_iter(8)
             .max_bins(max_bins)
-            .refinement_strategy(if huber { refinement.huber() } else { refinement.l2() }.build())
+            .refinement_strategy(
+                if huber {
+                    refinement.huber()
+                } else {
+                    refinement.l2()
+                }
+                .build(),
+            )
             .split_strategy(
                 SplitStrategyParamsBuilder::new()
                     .random_split()
@@ -374,6 +521,147 @@ mod tests {
                     .build(),
             )
             .build()
+    }
+
+    #[test]
+    fn interval_one_matches_single_action_consensus_reference() {
+        let (x, y) = data();
+        for huber in [false, true] {
+            for max_bins in [None, Some(16)] {
+                for penalty in [0.0, 0.001] {
+                    let params = parity_params(huber, max_bins, penalty);
+                    let initial = initialize_state_with_input(x.view(), y.view(), &params, None);
+                    let mut reference = members_from_state(&initial);
+                    let mut batched = members_from_state(&initial);
+                    fit_members_single_action_reference(
+                        &mut reference,
+                        &params,
+                        0.3,
+                        None,
+                        CandidateRefresh::Deferred,
+                    );
+                    fit_members(&mut batched, &params, 0.3, 1, None);
+                    assert_members_equal(&initial, &params, reference, batched);
+                }
+            }
+        }
+    }
+
+    fn assert_member_budget_and_logging(member: &Member<'_>, params: &GridTensorParams) {
+        let state = member.state.as_ref().unwrap();
+        let actions = state.loop_state.split_count
+            + state.loop_state.resplit_count
+            + state.loop_state.merge_count;
+        assert!(actions <= member.next_iteration);
+        assert!(member.next_iteration <= max_iterations(params.n_iter));
+        assert!(state.loop_state.fineness <= params.n_iter);
+        assert_eq!(state.iteration + 1, member.next_iteration);
+        assert!(state
+            .f_plus
+            .iter()
+            .chain(&state.f_minus)
+            .all(|value| value.is_finite() && *value >= 0.0));
+        let mut finished = state.clone();
+        finished.branch_consensus = None;
+        let (_, grid) = finish_fit(finished);
+        assert!(grid.lambda_plus.is_finite() && grid.lambda_plus >= 0.0);
+        assert!(grid.lambda_minus.is_finite() && grid.lambda_minus >= 0.0);
+        assert!(grid
+            .backbone_values
+            .iter()
+            .flatten()
+            .all(|value| value.is_finite() && *value > 0.0));
+        assert!(grid
+            .tilt_values
+            .iter()
+            .flatten()
+            .all(|value| value.is_finite()));
+        let (plus, minus) = extract_two_tensor_predictions_unscaled(&grid, state.x);
+        for (&cached, &rebuilt) in state
+            .f_plus
+            .iter()
+            .chain(&state.f_minus)
+            .zip(plus.iter().chain(&minus))
+        {
+            assert!((cached - rebuilt).abs() <= 1e-10 * (1.0 + cached.abs()));
+        }
+        #[cfg(feature = "evo-logging")]
+        {
+            use crate::grid_tensor::logging_helpers::RawLoggingEvent;
+            let logging = state.logging_state.as_ref().unwrap();
+            let iterations: Vec<_> = logging
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    RawLoggingEvent::Split(event) => Some(event.iter_no),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(iterations.len(), actions);
+            assert!(iterations.windows(2).all(|pair| pair[0] < pair[1]));
+            assert!(iterations.iter().all(|&iter| iter < member.next_iteration));
+            assert_eq!(
+                iterations,
+                logging
+                    .f_component_stats
+                    .iter()
+                    .map(|stats| stats.0)
+                    .collect::<Vec<_>>()
+            );
+            let snapshot_iterations: Vec<_> = logging
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    RawLoggingEvent::Component(snapshot) => Some(snapshot.iter_no),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                snapshot_iterations,
+                iterations
+                    .iter()
+                    .flat_map(|&iter| std::iter::repeat_n(iter, state.p))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn consensus_batches_preserve_budgets_branches_and_reproducibility() {
+        let (x, y) = data();
+        let mut reached_attempt_cap = false;
+        for interval in [2, 4, usize::MAX] {
+            for huber in [false, true] {
+                for max_bins in [None, Some(16)] {
+                    for penalty in [0.0, 0.001] {
+                        let params = parity_params(huber, max_bins, penalty);
+                        let initial =
+                            initialize_state_with_input(x.view(), y.view(), &params, None);
+                        let mut first = members_from_state(&initial);
+                        let mut repeated = members_from_state(&initial);
+                        fit_members(&mut first, &params, 0.3, interval, None);
+                        fit_members(&mut repeated, &params, 0.3, interval, None);
+                        for member in &first {
+                            assert_member_budget_and_logging(member, &params);
+                            reached_attempt_cap |=
+                                member.next_iteration == max_iterations(params.n_iter);
+                        }
+                        assert_members_equal(&initial, &params, first, repeated);
+                        assert_candidate_refresh_parity(&initial, &params, interval);
+                    }
+                }
+            }
+        }
+        assert!(
+            reached_attempt_cap,
+            "fixture must exercise the per-member attempt limit"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "consensus_interval must be positive")]
+    fn consensus_interval_must_be_positive() {
+        fit_members(&mut [], &lifecycle_params(0), 0.3, 0, None);
     }
 
     #[test]
@@ -392,7 +680,7 @@ mod tests {
                 for penalty in [0.0, 0.001] {
                     let params = parity_params(huber, max_bins, penalty);
                     let initial = initialize_state_with_input(x.view(), y.view(), &params, None);
-                    let actions = assert_candidate_refresh_parity(&initial, &params);
+                    let actions = assert_candidate_refresh_parity(&initial, &params, 1);
                     for (count, actions) in counts.iter_mut().zip(actions) {
                         *count += actions;
                     }
@@ -427,7 +715,7 @@ mod tests {
                     &refinement,
                     &split_strategy,
                 );
-                let counts = assert_candidate_refresh_parity(&initial, &params);
+                let counts = assert_candidate_refresh_parity(&initial, &params, 1);
                 assert_eq!(counts[2], 4, "each member must merge its initial boundary");
             }
         }
@@ -507,6 +795,7 @@ mod tests {
                 });
                 Member {
                     tree_id,
+                    next_iteration: 0,
                     rng: StdRng::seed_from_u64(tree_id as u64 + 1),
                     state: Some(refinement.refresh_statistics(state)),
                 }
@@ -521,7 +810,7 @@ mod tests {
         let params = lifecycle_params(2);
         let refinement = params.refinement_strategy_params.get_refinement_strategy();
         let split = params.split_strategy_params.get_split_strategy();
-        let mut members = constant_members(x.view(), y.view(), &params, &[(3.0, 2.0), (4.0, 1.0)]);
+        let members = constant_members(x.view(), y.view(), &params, &[(3.0, 2.0), (4.0, 1.0)]);
 
         // A=(3,2) is stationary against B=(4,1), but B improves against A.
         let mut rng = members[0].rng.clone();
@@ -565,34 +854,38 @@ mod tests {
             assert!((minus - 22.0 / 9.0).abs() < 1e-12);
         }
 
-        fit_members(&mut members, &params, 1.0, None);
-        for member in members {
-            let mut state = member.state.unwrap();
-            assert!(
-                state.loop_state.fineness > 0,
-                "member {} must advance",
-                member.tree_id
-            );
-            assert!(state.loop_state.fineness <= params.n_iter);
-            let actions = state.loop_state.split_count
-                + state.loop_state.resplit_count
-                + state.loop_state.merge_count;
-            assert!(actions <= super::max_iterations(params.n_iter));
-            assert!(state.iteration < super::max_iterations(params.n_iter));
-            let cached_plus = state.f_plus.clone();
-            let cached_minus = state.f_minus.clone();
-            state.branch_consensus = None;
-            let (_, grid) = finish_fit(state);
-            let (plus, minus) = extract_two_tensor_predictions_unscaled(&grid, x.view());
-            for ((&actual_plus, &actual_minus), (&expected_plus, &expected_minus)) in plus
-                .iter()
-                .zip(minus.iter())
-                .zip(cached_plus.iter().zip(cached_minus.iter()))
-            {
-                assert!(actual_plus.is_finite() && actual_plus > 0.0);
-                assert!(actual_minus.is_finite() && actual_minus > 0.0);
-                assert!((actual_plus - expected_plus).abs() < 1e-12);
-                assert!((actual_minus - expected_minus).abs() < 1e-12);
+        for interval in [1, 2, usize::MAX] {
+            let mut members =
+                constant_members(x.view(), y.view(), &params, &[(3.0, 2.0), (4.0, 1.0)]);
+            fit_members(&mut members, &params, 1.0, interval, None);
+            for member in members {
+                let mut state = member.state.unwrap();
+                assert!(
+                    state.loop_state.fineness > 0,
+                    "member {} must advance",
+                    member.tree_id
+                );
+                assert!(state.loop_state.fineness <= params.n_iter);
+                let actions = state.loop_state.split_count
+                    + state.loop_state.resplit_count
+                    + state.loop_state.merge_count;
+                assert!(actions <= super::max_iterations(params.n_iter));
+                assert!(state.iteration < super::max_iterations(params.n_iter));
+                let cached_plus = state.f_plus.clone();
+                let cached_minus = state.f_minus.clone();
+                state.branch_consensus = None;
+                let (_, grid) = finish_fit(state);
+                let (plus, minus) = extract_two_tensor_predictions_unscaled(&grid, x.view());
+                for ((&actual_plus, &actual_minus), (&expected_plus, &expected_minus)) in plus
+                    .iter()
+                    .zip(minus.iter())
+                    .zip(cached_plus.iter().zip(cached_minus.iter()))
+                {
+                    assert!(actual_plus.is_finite() && actual_plus > 0.0);
+                    assert!(actual_minus.is_finite() && actual_minus > 0.0);
+                    assert!((actual_plus - expected_plus).abs() < 1e-12);
+                    assert!((actual_minus - expected_minus).abs() < 1e-12);
+                }
             }
         }
     }
@@ -602,13 +895,17 @@ mod tests {
         let x = Array2::from_shape_fn((16, 1), |(row, _)| row as f64);
         let y = Array1::zeros(x.nrows());
         let params = lifecycle_params(5);
-        let mut members = constant_members(x.view(), y.view(), &params, &[(2.0, 2.0), (2.0, 2.0)]);
-        fit_members(&mut members, &params, 1.0, None);
-        for member in members {
-            let state = member.state.unwrap();
-            assert_eq!(state.iteration, 0);
-            assert_eq!(state.loop_state.fineness, 0);
-            assert!(state.f.iter().all(|&prediction| prediction == 0.0));
+        for interval in [1, 3, usize::MAX] {
+            let mut members =
+                constant_members(x.view(), y.view(), &params, &[(2.0, 2.0), (2.0, 2.0)]);
+            fit_members(&mut members, &params, 1.0, interval, None);
+            for member in members {
+                assert_eq!(member.next_iteration, 1);
+                let state = member.state.unwrap();
+                assert_eq!(state.iteration, 0);
+                assert_eq!(state.loop_state.fineness, 0);
+                assert!(state.f.iter().all(|&prediction| prediction == 0.0));
+            }
         }
     }
 
@@ -623,7 +920,7 @@ mod tests {
         for member in &mut members {
             member.state.as_mut().unwrap().iteration = 7;
         }
-        fit_members(&mut members, &params, 1.0, None);
+        fit_members(&mut members, &params, 1.0, 1, None);
         for (member, (plus, minus)) in members.into_iter().zip([(3.0, 2.0), (4.0, 1.0)]) {
             let state = member.state.unwrap();
             assert_eq!(state.iteration, 7);

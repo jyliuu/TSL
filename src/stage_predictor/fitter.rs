@@ -90,6 +90,7 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
         n_trees,
         tg_params,
         consensus,
+        consensus_interval,
         ..
     } = hyperparameters;
 
@@ -112,6 +113,7 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
             y.view(),
             tg_params,
             *consensus,
+            *consensus_interval,
             &seeds,
             initial_state.as_ref(),
             prepared,

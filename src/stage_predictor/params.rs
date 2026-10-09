@@ -15,6 +15,8 @@ pub struct StagePredictorParams {
     /// Strength ρ of the pull of each grid's branches toward the mean branches of the
     /// other grids; 0 fits the grids independently.
     pub consensus: f64,
+    /// Maximum local action attempts between peer-reference updates.
+    pub consensus_interval: usize,
 }
 
 #[derive(Debug)]
@@ -24,6 +26,7 @@ pub struct StagePredictorParamsBuilder {
     similarity_threshold: f64,
     aggregation_method: Aggregation,
     consensus: f64,
+    consensus_interval: usize,
 }
 
 impl StagePredictorParamsBuilder {
@@ -34,6 +37,7 @@ impl StagePredictorParamsBuilder {
             similarity_threshold: 0.0,
             aggregation_method: Aggregation::Combined,
             consensus: 0.0,
+            consensus_interval: 1,
         }
     }
 
@@ -56,6 +60,12 @@ impl StagePredictorParamsBuilder {
     /// objective, where `c±` are the mean branches of the other grids and `ρ = consensus`.
     pub fn consensus(mut self, consensus: f64) -> Self {
         self.consensus = consensus;
+        self
+    }
+
+    pub fn consensus_interval(mut self, consensus_interval: usize) -> Self {
+        assert!(consensus_interval >= 1, "consensus_interval must be at least 1");
+        self.consensus_interval = consensus_interval;
         self
     }
 
@@ -86,6 +96,7 @@ impl StagePredictorParamsBuilder {
             similarity_threshold: self.similarity_threshold,
             aggregation_method: self.aggregation_method,
             consensus: self.consensus,
+            consensus_interval: self.consensus_interval,
         }
     }
 }

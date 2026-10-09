@@ -823,7 +823,9 @@ impl TSLPy {
         verbosity=1,
         visualdb=None,
         *,
-        max_bins=None
+        max_bins=None,
+        consensus_interval=1,
+        nonnegative_scaling=false
     ))]
     #[allow(clippy::too_many_arguments)]
     pub fn _fit<'py>(
@@ -855,6 +857,8 @@ impl TSLPy {
         verbosity: u8,
         visualdb: Option<String>,
         max_bins: Option<u16>,
+        consensus_interval: usize,
+        nonnegative_scaling: bool,
     ) -> PyResult<(TSLPy, FitResultPy)> {
         if !(consensus.is_finite() && consensus >= 0.0) {
             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -864,6 +868,11 @@ impl TSLPy {
         if max_bins.is_some_and(|bins| bins < 2) {
             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
                 "max_bins must be at least 2",
+            ));
+        }
+        if consensus_interval == 0 {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "consensus_interval must be at least 1",
             ));
         }
         let x = x.as_array();
@@ -934,6 +943,8 @@ impl TSLPy {
             .refinement_strategy(refinement_strategy_params)
             .similarity_threshold(similarity_threshold)
             .consensus(consensus)
+            .consensus_interval(consensus_interval)
+            .nonnegative_scaling(nonnegative_scaling)
             .max_bins(max_bins)
             .seed(seed)
             .log_level(match verbosity {

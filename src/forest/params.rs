@@ -15,6 +15,8 @@ pub struct TSLBoostedParams {
     pub seed: u64,
     pub log_level: String,
     pub visualdb_path: Option<String>,
+    /// Constrain the coefficients of the positive and negative branch columns to be nonnegative.
+    pub nonnegative_scaling: bool,
 }
 
 #[derive(Debug)]
@@ -25,6 +27,7 @@ pub struct TSLBoostedParamsBuilder {
     seed: u64,
     log_level: String,
     visualdb_path: Option<String>,
+    nonnegative_scaling: bool,
 }
 
 impl TSLBoostedParamsBuilder {
@@ -36,6 +39,7 @@ impl TSLBoostedParamsBuilder {
             seed: 42,
             log_level: "info".to_string(),
             visualdb_path: None,
+            nonnegative_scaling: false,
         }
     }
 
@@ -99,6 +103,16 @@ impl TSLBoostedParamsBuilder {
         self
     }
 
+    pub fn consensus_interval(mut self, consensus_interval: usize) -> Self {
+        self.sp_params_builder = self.sp_params_builder.consensus_interval(consensus_interval);
+        self
+    }
+
+    pub fn nonnegative_scaling(mut self, nonnegative_scaling: bool) -> Self {
+        self.nonnegative_scaling = nonnegative_scaling;
+        self
+    }
+
     pub fn max_bins(mut self, max_bins: Option<u16>) -> Self {
         self.sp_params_builder = self.sp_params_builder.max_bins(max_bins);
         self
@@ -112,6 +126,7 @@ impl TSLBoostedParamsBuilder {
             seed: self.seed,
             log_level: self.log_level,
             visualdb_path: self.visualdb_path,
+            nonnegative_scaling: self.nonnegative_scaling,
         }
     }
 }
