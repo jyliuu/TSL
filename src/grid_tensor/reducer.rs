@@ -84,10 +84,11 @@ fn reduce_apply_transformation<'a>(
     split_strategy: &SplitStrategy,
     candidate_refresh: CandidateRefresh,
 ) -> FittingState<'a> {
-    // Capture state for logging (always capture, reducer handles None)
-    let old_error = state.current_error;
-    // Clone the action before transformation to avoid borrowing issues
-    let action_for_logging = transformation.clone();
+    #[cfg(feature = "evo-logging")]
+    let logging_event = state
+        .logging_state
+        .as_ref()
+        .map(|_| (transformation.clone(), state.current_error));
     let fused_binned_curvature = candidate_refresh == CandidateRefresh::Deferred
         && matches!(refinement_strategy, RefinementStrategy::L2Refinement { .. })
         && state
@@ -341,12 +342,8 @@ fn reduce_apply_transformation<'a>(
         _ => unreachable!(),
     };
 
-    // Last step: apply logging reducer for transformation event
-    // Reducer pattern: logging is integrated as last step
-    // Takes ownership of logging_state, returns updated state (no cloning)
-    // Feature flag is encapsulated inside the reducer
     #[cfg(feature = "evo-logging")]
-    {
+    if let Some((action_for_logging, old_error)) = logging_event {
         let split_event = create_simple_split_event(&state, &action_for_logging, old_error);
         state.logging_state = log_split_reducer(state.logging_state.take(), split_event);
     }
@@ -474,31 +471,17 @@ fn reduce_grid_predictions_and_residuals_two_tensor_factors<'a>(
 ) -> FittingState<'a> {
     let &(start, end) = original_affected_interval;
 
-    let left_grid_points = &state.precomputed_statistics.sorted_indices[col][start..index];
-    let right_grid_points = &state.precomputed_statistics.sorted_indices[col][index..end];
-
     let ratio_plus_left = g_plus_new_l / g_plus_old;
     let ratio_minus_left = g_minus_new_l / g_minus_old;
     let ratio_plus_right = g_plus_new_r / g_plus_old;
     let ratio_minus_right = g_minus_new_r / g_minus_old;
 
-    for &i in left_grid_points {
-        state.f_plus[i] *= ratio_plus_left;
-        state.f_minus[i] *= ratio_minus_left;
-        state.f[i] = state.f_plus[i] - state.f_minus[i];
-        state.y_hat[i] = state.f[i];
-        state.residuals[i] = state.labels[i] - state.y_hat[i];
-        state.r_tilde[i] = state.residuals[i];
-    }
-
-    for &i in right_grid_points {
-        state.f_plus[i] *= ratio_plus_right;
-        state.f_minus[i] *= ratio_minus_right;
-        state.f[i] = state.f_plus[i] - state.f_minus[i];
-        state.y_hat[i] = state.f[i];
-        state.residuals[i] = state.labels[i] - state.y_hat[i];
-        state.r_tilde[i] = state.residuals[i];
-    }
+    update_prediction_caches(&mut state, col, start, index, |_, plus, minus| {
+        (plus * ratio_plus_left, minus * ratio_minus_left)
+    });
+    update_prediction_caches(&mut state, col, index, end, |_, plus, minus| {
+        (plus * ratio_plus_right, minus * ratio_minus_right)
+    });
 
     state
 }
@@ -520,31 +503,17 @@ fn reduce_grid_predictions_and_residuals_resplit_two_tensor_factors<'a>(
 ) -> FittingState<'a> {
     let &(start, end) = original_affected_interval;
 
-    let left_grid_points = &state.precomputed_statistics.sorted_indices[col][start..index];
-    let right_grid_points = &state.precomputed_statistics.sorted_indices[col][index..end];
-
     let ratio_plus_left = g_plus_new_l / g_plus_old_l;
     let ratio_minus_left = g_minus_new_l / g_minus_old_l;
     let ratio_plus_right = g_plus_new_r / g_plus_old_r;
     let ratio_minus_right = g_minus_new_r / g_minus_old_r;
 
-    for &i in left_grid_points {
-        state.f_plus[i] *= ratio_plus_left;
-        state.f_minus[i] *= ratio_minus_left;
-        state.f[i] = state.f_plus[i] - state.f_minus[i];
-        state.y_hat[i] = state.f[i];
-        state.residuals[i] = state.labels[i] - state.y_hat[i];
-        state.r_tilde[i] = state.residuals[i];
-    }
-
-    for &i in right_grid_points {
-        state.f_plus[i] *= ratio_plus_right;
-        state.f_minus[i] *= ratio_minus_right;
-        state.f[i] = state.f_plus[i] - state.f_minus[i];
-        state.y_hat[i] = state.f[i];
-        state.residuals[i] = state.labels[i] - state.y_hat[i];
-        state.r_tilde[i] = state.residuals[i];
-    }
+    update_prediction_caches(&mut state, col, start, index, |_, plus, minus| {
+        (plus * ratio_plus_left, minus * ratio_minus_left)
+    });
+    update_prediction_caches(&mut state, col, index, end, |_, plus, minus| {
+        (plus * ratio_plus_right, minus * ratio_minus_right)
+    });
 
     state
 }
@@ -655,16 +624,67 @@ fn reduce_grid_predictions_and_residuals_merge_from_partial_products<'a>(
     g_minus_new: f64,
 ) -> FittingState<'a> {
     let &(start, end) = original_affected_interval;
-    for &row in &state.precomputed_statistics.sorted_indices[col][start..end] {
-        state.f_plus[row] = partial_plus[row] * g_plus_new;
-        state.f_minus[row] = partial_minus[row] * g_minus_new;
-        state.f[row] = state.f_plus[row] - state.f_minus[row];
-        state.y_hat[row] = state.f[row];
-        state.residuals[row] = state.labels[row] - state.y_hat[row];
-        state.r_tilde[row] = state.residuals[row];
-    }
+    update_prediction_caches(&mut state, col, start, end, |row, _, _| {
+        (
+            partial_plus[row] * g_plus_new,
+            partial_minus[row] * g_minus_new,
+        )
+    });
 
     state
+}
+
+/// Scatter branch predictions and their dependent caches in sorted-row order.
+fn update_prediction_caches(
+    state: &mut FittingState<'_>,
+    col: usize,
+    start: usize,
+    end: usize,
+    update_branches: impl Fn(usize, f64, f64) -> (f64, f64),
+) {
+    let rows = &state.precomputed_statistics.sorted_indices[col][start..end];
+    if let (
+        Some(f_plus),
+        Some(f_minus),
+        Some(f),
+        Some(y_hat),
+        Some(residuals),
+        Some(r_tilde),
+        Some(labels),
+    ) = (
+        state.f_plus.as_slice_mut(),
+        state.f_minus.as_slice_mut(),
+        state.f.as_slice_mut(),
+        state.y_hat.as_slice_mut(),
+        state.residuals.as_slice_mut(),
+        state.r_tilde.as_slice_mut(),
+        state.labels.as_slice(),
+    ) {
+        for &row in rows {
+            let (plus, minus) = update_branches(row, f_plus[row], f_minus[row]);
+            let prediction = plus - minus;
+            let residual = labels[row] - prediction;
+            f_plus[row] = plus;
+            f_minus[row] = minus;
+            f[row] = prediction;
+            y_hat[row] = prediction;
+            residuals[row] = residual;
+            r_tilde[row] = residual;
+        }
+    } else {
+        // Views and externally supplied state arrays may have non-unit strides.
+        for &row in rows {
+            let (plus, minus) = update_branches(row, state.f_plus[row], state.f_minus[row]);
+            let prediction = plus - minus;
+            let residual = state.labels[row] - prediction;
+            state.f_plus[row] = plus;
+            state.f_minus[row] = minus;
+            state.f[row] = prediction;
+            state.y_hat[row] = prediction;
+            state.residuals[row] = residual;
+            state.r_tilde[row] = residual;
+        }
+    }
 }
 
 /// Forbid splits around the given position (ported from SplitStrategy::forbid_around_split)
@@ -820,3 +840,6 @@ pub(crate) fn compute_partial_products_for_axis(
 
     (g_plus, g_minus)
 }
+
+#[cfg(test)]
+mod prediction_cache_tests;

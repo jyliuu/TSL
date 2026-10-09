@@ -962,21 +962,26 @@ impl RefinementStrategy {
                 &state.precomputed_statistics.consensus_anchors,
                 &consensus_anchors,
             );
-        let points: Vec<PrefixStats> = (0..n)
-            .map(|i| state.point_statistics(i, self.weight(state.residuals[i])))
-            .collect();
-        let statistics = &mut state.precomputed_statistics;
-        statistics.consensus_weight = consensus_weight;
-        statistics.consensus_anchors = consensus_anchors;
-        for (i, point) in points.iter().enumerate() {
-            if !weights_fixed {
+        if weights_fixed {
+            for i in 0..n {
+                let point = state.point_statistics(i, self.weight(state.residuals[i]));
+                state.precomputed_statistics.c_t1[i] = point.t1;
+                state.precomputed_statistics.c_t2[i] = point.t2;
+            }
+        } else {
+            for i in 0..n {
+                let point = state.point_statistics(i, self.weight(state.residuals[i]));
+                let statistics = &mut state.precomputed_statistics;
                 statistics.c_s11[i] = point.s11;
                 statistics.c_s22[i] = point.s22;
                 statistics.c_s12[i] = point.s12;
+                statistics.c_t1[i] = point.t1;
+                statistics.c_t2[i] = point.t2;
             }
-            statistics.c_t1[i] = point.t1;
-            statistics.c_t2[i] = point.t2;
         }
+        let statistics = &mut state.precomputed_statistics;
+        statistics.consensus_weight = consensus_weight;
+        statistics.consensus_anchors = consensus_anchors;
         let mut bins_t1 = Vec::new();
         let mut bins_t2 = Vec::new();
         for col in 0..state.p {
@@ -2008,3 +2013,6 @@ mod deferred_review_tests;
 
 #[cfg(test)]
 mod cycle4_review_tests;
+
+#[cfg(test)]
+mod cycle5_refresh_tests;
