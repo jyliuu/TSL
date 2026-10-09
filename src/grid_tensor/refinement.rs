@@ -198,8 +198,7 @@ fn canonical_merge_factors(a_plus: f64, a_minus: f64, is_stage1: bool) -> (f64, 
     let max_axis_factor = MAX_BACKBONE * MAX_TILT.exp();
     let log_plus = a_plus.clamp(min_axis_factor, max_axis_factor).ln();
     let log_minus = a_minus.clamp(min_axis_factor, max_axis_factor).ln();
-    let log_backbone =
-        (0.5 * (log_plus + log_minus)).clamp(MIN_BACKBONE.ln(), MAX_BACKBONE.ln());
+    let log_backbone = (0.5 * (log_plus + log_minus)).clamp(MIN_BACKBONE.ln(), MAX_BACKBONE.ln());
     let tilt = (0.5 * (log_plus - log_minus)).clamp(-MAX_TILT, MAX_TILT);
     let backbone = log_backbone.exp();
     (backbone * tilt.exp(), backbone * (-tilt).exp())
@@ -276,7 +275,8 @@ impl RefinementStrategy {
                 prepared.sorted_indices[col].clone()
             } else {
                 let mut indices = (0..state.n).collect::<Vec<_>>();
-                indices.sort_by(|&a, &b| state.x[[a, col]].partial_cmp(&state.x[[b, col]]).unwrap());
+                indices
+                    .sort_by(|&a, &b| state.x[[a, col]].partial_cmp(&state.x[[b, col]]).unwrap());
                 for (pos, &i) in indices.iter().enumerate() {
                     state.precomputed_statistics.sort_order[col][i] = pos;
                 }
@@ -366,7 +366,8 @@ impl RefinementStrategy {
         }
 
         state = super::histogram_binning::apply_histogram_binning_mask_with_input(
-            state, max_bins, prepared);
+            state, max_bins, prepared,
+        );
         state = self.update_error_reductions_split_for_all_cols(state);
 
         state.precomputed_statistics.initialized = true;
@@ -390,52 +391,51 @@ impl RefinementStrategy {
         // Precomputing deltas avoids re-loading old c_* values for every affected column.
         let residuals = &state.residuals;
 
-        let (c_s11_new, c_s22_new, c_s12_new, c_t1_new, c_t2_new, d_s11, d_s22, d_s12, d_t1, d_t2) =
-            {
-                let old_s11 = &state.precomputed_statistics.c_s11;
-                let old_s22 = &state.precomputed_statistics.c_s22;
-                let old_s12 = &state.precomputed_statistics.c_s12;
-                let old_t1 = &state.precomputed_statistics.c_t1;
-                let old_t2 = &state.precomputed_statistics.c_t2;
+        let (c_s11_new, c_s22_new, c_s12_new, c_t1_new, c_t2_new, d_s11, d_s22, d_s12, d_t1, d_t2) = {
+            let old_s11 = &state.precomputed_statistics.c_s11;
+            let old_s22 = &state.precomputed_statistics.c_s22;
+            let old_s12 = &state.precomputed_statistics.c_s12;
+            let old_t1 = &state.precomputed_statistics.c_t1;
+            let old_t2 = &state.precomputed_statistics.c_t2;
 
-                let mut c_s11_new = Vec::with_capacity(updated_points.len());
-                let mut c_s22_new = Vec::with_capacity(updated_points.len());
-                let mut c_s12_new = Vec::with_capacity(updated_points.len());
-                let mut c_t1_new = Vec::with_capacity(updated_points.len());
-                let mut c_t2_new = Vec::with_capacity(updated_points.len());
-                let mut d_s11 = Vec::with_capacity(updated_points.len());
-                let mut d_s22 = Vec::with_capacity(updated_points.len());
-                let mut d_s12 = Vec::with_capacity(updated_points.len());
-                let mut d_t1 = Vec::with_capacity(updated_points.len());
-                let mut d_t2 = Vec::with_capacity(updated_points.len());
+            let mut c_s11_new = Vec::with_capacity(updated_points.len());
+            let mut c_s22_new = Vec::with_capacity(updated_points.len());
+            let mut c_s12_new = Vec::with_capacity(updated_points.len());
+            let mut c_t1_new = Vec::with_capacity(updated_points.len());
+            let mut c_t2_new = Vec::with_capacity(updated_points.len());
+            let mut d_s11 = Vec::with_capacity(updated_points.len());
+            let mut d_s22 = Vec::with_capacity(updated_points.len());
+            let mut d_s12 = Vec::with_capacity(updated_points.len());
+            let mut d_t1 = Vec::with_capacity(updated_points.len());
+            let mut d_t2 = Vec::with_capacity(updated_points.len());
 
-                for &pt in updated_points.iter() {
-                    let PrefixStats {
-                        s11: new_s11,
-                        s22: new_s22,
-                        s12: new_s12,
-                        t1: new_t1,
-                        t2: new_t2,
-                    } = state.point_statistics(pt, self.weight(residuals[pt]));
+            for &pt in updated_points.iter() {
+                let PrefixStats {
+                    s11: new_s11,
+                    s22: new_s22,
+                    s12: new_s12,
+                    t1: new_t1,
+                    t2: new_t2,
+                } = state.point_statistics(pt, self.weight(residuals[pt]));
 
-                    c_s11_new.push(new_s11);
-                    c_s22_new.push(new_s22);
-                    c_s12_new.push(new_s12);
-                    c_t1_new.push(new_t1);
-                    c_t2_new.push(new_t2);
+                c_s11_new.push(new_s11);
+                c_s22_new.push(new_s22);
+                c_s12_new.push(new_s12);
+                c_t1_new.push(new_t1);
+                c_t2_new.push(new_t2);
 
-                    d_s11.push(new_s11 - old_s11[pt]);
-                    d_s22.push(new_s22 - old_s22[pt]);
-                    d_s12.push(new_s12 - old_s12[pt]);
-                    d_t1.push(new_t1 - old_t1[pt]);
-                    d_t2.push(new_t2 - old_t2[pt]);
-                }
+                d_s11.push(new_s11 - old_s11[pt]);
+                d_s22.push(new_s22 - old_s22[pt]);
+                d_s12.push(new_s12 - old_s12[pt]);
+                d_t1.push(new_t1 - old_t1[pt]);
+                d_t2.push(new_t2 - old_t2[pt]);
+            }
 
-                (
-                    c_s11_new, c_s22_new, c_s12_new, c_t1_new, c_t2_new, d_s11, d_s22, d_s12,
-                    d_t1, d_t2,
-                )
-            };
+            (
+                c_s11_new, c_s22_new, c_s12_new, c_t1_new, c_t2_new, d_s11, d_s22, d_s12, d_t1,
+                d_t2,
+            )
+        };
 
         // 2) For other (non-split) columns, apply delta updates.
         //    Binned columns: scatter deltas into B-length bin buckets and
@@ -532,8 +532,7 @@ impl RefinementStrategy {
         //    Binned path uses the same bin-indexed delta scatter as above.
         //    Exact path keeps the original rebuild-from-new-values logic for
         //    parity with the prior implementation.
-        let split_is_binned =
-            !state.precomputed_statistics.bin_edges[col].is_empty();
+        let split_is_binned = !state.precomputed_statistics.bin_edges[col].is_empty();
 
         if split_is_binned {
             // Binned split column: bin-indexed delta scatter, identical to
@@ -640,6 +639,81 @@ impl RefinementStrategy {
         state
     }
 
+    /// Change only the peer reference while retaining current all-row data statistics.
+    /// Binned, merge-free fits update anchor contributions in O(p(m + bins)) work.
+    pub(crate) fn refresh_consensus_reference<'a>(
+        &self,
+        mut state: FittingState<'a>,
+        reference: crate::grid_tensor::state::BranchConsensus,
+    ) -> FittingState<'a> {
+        use crate::grid_tensor::state::same_consensus_support;
+        let sparse = reference.anchors.is_some()
+            && !state.split_strategy_state.merge_enabled
+            && state
+                .precomputed_statistics
+                .bin_edges
+                .iter()
+                .all(|edges| !edges.is_empty())
+            && state.precomputed_statistics.consensus_weight == reference.weight
+            && same_consensus_support(
+                &state.precomputed_statistics.consensus_anchors,
+                &reference.anchors,
+            )
+            && state.branch_consensus.as_ref().is_some_and(|old| {
+                old.weight == reference.weight
+                    && same_consensus_support(&old.anchors, &reference.anchors)
+            });
+        if !sparse {
+            state.branch_consensus = Some(reference);
+            return self.refresh_statistics(state);
+        }
+        let anchors = reference.anchors.as_ref().unwrap().clone();
+        state.branch_consensus = Some(reference);
+        let mut deltas = Vec::with_capacity(anchors.rows.len());
+        for &row in &anchors.rows {
+            // Re-evaluate these row totals to bound drift from repeated reference updates.
+            let point = state.point_statistics(row, self.weight(state.residuals[row]));
+            let statistics = &mut state.precomputed_statistics;
+            deltas.push((
+                point.t1 - statistics.c_t1[row],
+                point.t2 - statistics.c_t2[row],
+            ));
+            statistics.c_t1[row] = point.t1;
+            statistics.c_t2[row] = point.t2;
+        }
+        let mut bins = Vec::new();
+        for col in 0..state.p {
+            let statistics = &mut state.precomputed_statistics;
+            let prefix = &mut statistics.binned_prefix_sums[col];
+            bins.clear();
+            bins.resize(prefix.len(), (0.0, 0.0));
+            for (&row, &(delta_t1, delta_t2)) in anchors.rows.iter().zip(&deltas) {
+                let bin = statistics.bin_indices[col][row] as usize;
+                bins[bin].0 += delta_t1;
+                bins[bin].1 += delta_t2;
+            }
+            let (mut t1, mut t2) = (0.0, 0.0);
+            for (slot, &(delta_t1, delta_t2)) in prefix.iter_mut().zip(&bins) {
+                t1 += delta_t1;
+                t2 += delta_t2;
+                slot.t1 += t1;
+                slot.t2 += t2;
+            }
+        }
+        for col in 0..state.p {
+            let last_interval = state.boundaries[col].len();
+            Self::update_interval_stats_for_col_range(&mut state, col, 0, last_interval);
+        }
+        let ranges: Vec<AffectedRange> = (0..state.p)
+            .map(|col| AffectedRange {
+                col,
+                point_range: (0, state.n - 1),
+                interval_range: (0, 0),
+            })
+            .collect();
+        self.refresh_error_reduction_caches_for_affected(state, &ranges)
+    }
+
     /// Rebuild every statistic that depends on the residuals or the branch consensus.
     ///
     /// The partition and factors are kept; per-point sufficient statistics, prefix sums,
@@ -649,13 +723,22 @@ impl RefinementStrategy {
         // L2 weights are constant, so while the consensus weight is unchanged only the
         // reference-dependent t1/t2 sums move.
         let consensus_weight = state.branch_consensus.as_ref().map_or(0.0, |c| c.weight);
+        let consensus_anchors = state
+            .branch_consensus
+            .as_ref()
+            .and_then(|c| c.anchors.clone());
         let weights_fixed = matches!(self, RefinementStrategy::L2Refinement { .. })
-            && state.precomputed_statistics.consensus_weight == consensus_weight;
+            && state.precomputed_statistics.consensus_weight == consensus_weight
+            && crate::grid_tensor::state::same_consensus_support(
+                &state.precomputed_statistics.consensus_anchors,
+                &consensus_anchors,
+            );
         let points: Vec<PrefixStats> = (0..n)
             .map(|i| state.point_statistics(i, self.weight(state.residuals[i])))
             .collect();
         let statistics = &mut state.precomputed_statistics;
         statistics.consensus_weight = consensus_weight;
+        statistics.consensus_anchors = consensus_anchors;
         for (i, point) in points.iter().enumerate() {
             if !weights_fixed {
                 statistics.c_s11[i] = point.s11;
@@ -1034,10 +1117,7 @@ impl RefinementStrategy {
             let mut current_loss = 0.0;
             let mut reference_loss = 0.0;
 
-            for (range, factors) in [
-                (start..index, left_factors),
-                (index..end, right_factors),
-            ] {
+            for (range, factors) in [(start..index, left_factors), (index..end, right_factors)] {
                 for &row in &sorted_indices[range] {
                     let weight = self.weight(state.residuals[row]);
                     let partial_plus = state.f_plus[row] / factors.0;
@@ -1052,9 +1132,11 @@ impl RefinementStrategy {
                     t2 += weight * reference_residual * phi_minus;
                     current_loss += weight * state.residuals[row] * state.residuals[row];
                     reference_loss += weight * reference_residual * reference_residual;
-                    if let Some(consensus) = &state.branch_consensus {
-                        let rho = consensus.weight;
-                        let (target_plus, target_minus) = (consensus.plus[row], consensus.minus[row]);
+                    if let Some((rho, target_plus, target_minus)) = state
+                        .branch_consensus
+                        .as_ref()
+                        .and_then(|consensus| consensus.target(row))
+                    {
                         s11 += rho * phi_plus * phi_plus;
                         s22 += rho * phi_minus * phi_minus;
                         t1 += rho * (target_plus - phi_plus) * phi_plus;
@@ -1063,7 +1145,8 @@ impl RefinementStrategy {
                             * ((state.f_plus[row] - target_plus).powi(2)
                                 + (state.f_minus[row] - target_minus).powi(2));
                         reference_loss += rho
-                            * ((phi_plus - target_plus).powi(2) + (phi_minus + target_minus).powi(2));
+                            * ((phi_plus - target_plus).powi(2)
+                                + (phi_minus + target_minus).powi(2));
                     }
                 }
             }
@@ -1071,11 +1154,7 @@ impl RefinementStrategy {
             let merged_factors = if is_stage1 {
                 let (u, _, _) = l2_update_unanchored(self.alpha(), t1, s11);
                 let multiplier = (1.0 + u).clamp(v_min, v_max);
-                canonical_merge_factors(
-                    reference.0 * multiplier,
-                    reference.0 * multiplier,
-                    true,
-                )
+                canonical_merge_factors(reference.0 * multiplier, reference.0 * multiplier, true)
             } else {
                 let (u_plus, u_minus, _) = solve_two_tensor(
                     s11,
@@ -1091,11 +1170,7 @@ impl RefinementStrategy {
                 );
                 let v_plus = 1.0 + u_plus;
                 let v_minus = 1.0 + u_minus;
-                canonical_merge_factors(
-                    reference.0 * v_plus,
-                    reference.1 * v_minus,
-                    false,
-                )
+                canonical_merge_factors(reference.0 * v_plus, reference.1 * v_minus, false)
             };
             let parameter_penalty = log_coordinate_penalty(
                 merged_factors.0 / reference.0,
@@ -1107,9 +1182,7 @@ impl RefinementStrategy {
             let u_plus = merged_factors.0 / reference.0 - 1.0;
             let u_minus = merged_factors.1 / reference.1 - 1.0;
             // The reference-centered quadratic gives the merged loss without a second row scan.
-            let reference_to_merged_gain = data_loss_gain(
-                u_plus, u_minus, s11, s22, s12, t1, t2,
-            );
+            let reference_to_merged_gain = data_loss_gain(u_plus, u_minus, s11, s22, s12, t1, t2);
             let merged_loss = reference_loss - reference_to_merged_gain;
 
             let merge_gain = current_loss - merged_loss - parameter_penalty;
@@ -1160,20 +1233,20 @@ impl RefinementStrategy {
         // Closed over the output slices + total stats. Shared between the
         // exact and binned iteration paths.
         let eval_pos = |pos: usize,
-                            s11_l: f64,
-                            s22_l: f64,
-                            s12_l: f64,
-                            t1_l: f64,
-                            t2_l: f64,
-                            total_s11: f64,
-                            total_s22: f64,
-                            total_s12: f64,
-                            total_t1: f64,
-                            total_t2: f64,
-                            update_left: &mut [(f64, f64)],
-                            update_right: &mut [(f64, f64)],
-                            error_reductions: &mut [f64],
-                            error_reductions_pairs: &mut [(f64, f64)]| {
+                        s11_l: f64,
+                        s22_l: f64,
+                        s12_l: f64,
+                        t1_l: f64,
+                        t2_l: f64,
+                        total_s11: f64,
+                        total_s22: f64,
+                        total_s12: f64,
+                        total_t1: f64,
+                        total_t2: f64,
+                        update_left: &mut [(f64, f64)],
+                        update_right: &mut [(f64, f64)],
+                        error_reductions: &mut [f64],
+                        error_reductions_pairs: &mut [(f64, f64)]| {
             if error_reductions[pos].is_nan() {
                 update_left[pos] = (f64::NAN, f64::NAN);
                 update_right[pos] = (f64::NAN, f64::NAN);
@@ -1388,8 +1461,15 @@ mod refresh_tests {
         max_bins: Option<u16>,
         huber: bool,
     ) -> (FittingState<'a>, super::RefinementStrategy) {
-        let refinement = RefinementStrategyParamsBuilder::new().alpha(0.01).tilt_tau(0.01);
-        let refinement = if huber { refinement.huber() } else { refinement.l2() }.build();
+        let refinement = RefinementStrategyParamsBuilder::new()
+            .alpha(0.01)
+            .tilt_tau(0.01);
+        let refinement = if huber {
+            refinement.huber()
+        } else {
+            refinement.l2()
+        }
+        .build();
         let params = GridTensorParamsBuilder::new()
             .n_iter(12)
             .max_bins(max_bins)
@@ -1411,7 +1491,10 @@ mod refresh_tests {
 
     fn assert_close(actual: &[Vec<f64>], expected: &[Vec<f64>]) {
         for (a, e) in actual.iter().zip(expected) {
-            let scale = e.iter().filter(|v| v.is_finite()).fold(1e-300_f64, |m, v| m.max(v.abs()));
+            let scale = e
+                .iter()
+                .filter(|v| v.is_finite())
+                .fold(1e-300_f64, |m, v| m.max(v.abs()));
             for (a, e) in a.iter().zip(e) {
                 assert_eq!(a.is_nan(), e.is_nan());
                 if e.is_finite() {
@@ -1422,7 +1505,10 @@ mod refresh_tests {
     }
 
     fn assert_caches_close(actual: &FittingState, expected: &FittingState) {
-        let (a, e) = (&actual.precomputed_statistics, &expected.precomputed_statistics);
+        let (a, e) = (
+            &actual.precomputed_statistics,
+            &expected.precomputed_statistics,
+        );
         assert_close(&a.error_reductions_split, &e.error_reductions_split);
         assert_close(&a.error_reductions_resplit, &e.error_reductions_resplit);
         assert_close(&a.error_reductions_merge, &e.error_reductions_merge);
@@ -1433,17 +1519,25 @@ mod refresh_tests {
                 .iter()
                 .zip(&expected.boundaries)
                 .filter(|(_, boundaries)| !boundaries.is_empty())
-                .map(|(col, _)| col.iter().flat_map(|i| [i.sum_s11, i.sum_t1, i.sum_t2]).collect())
+                .map(|(col, _)| {
+                    col.iter()
+                        .flat_map(|i| [i.sum_s11, i.sum_t1, i.sum_t2])
+                        .collect()
+                })
                 .collect()
         };
         assert_close(&sums(actual), &sums(expected));
-        assert!((actual.current_error - expected.current_error).abs() <= 1e-9 * expected.current_error);
+        assert!(
+            (actual.current_error - expected.current_error).abs() <= 1e-9 * expected.current_error
+        );
     }
 
     fn data(signed: bool) -> (Array2<f64>, Array1<f64>, Array1<f64>) {
         let x = Array2::from_shape_fn((240, 3), |(i, j)| ((i * (2 * j + 3) + j) % 61) as f64 / 7.0);
         let offset = if signed { 0.0 } else { 6.0 };
-        let y = Array1::from_shape_fn(240, |i| (x[[i, 0]]).sin() * x[[i, 1]] - 0.3 * x[[i, 2]] + offset);
+        let y = Array1::from_shape_fn(240, |i| {
+            (x[[i, 0]]).sin() * x[[i, 1]] - 0.3 * x[[i, 2]] + offset
+        });
         let other = Array1::from_shape_fn(240, |i| x[[i, 2]].cos() + 0.2 * x[[i, 0]] + offset);
         (x, y, other)
     }
@@ -1468,9 +1562,11 @@ mod refresh_tests {
         (0..state.n)
             .map(|i| {
                 (state.labels[i] - state.f[i]).powi(2)
-                    + consensus.weight
-                        * ((state.f_plus[i] - consensus.plus[i]).powi(2)
-                            + (state.f_minus[i] - consensus.minus[i]).powi(2))
+                    + consensus.target(i).map_or(0.0, |(weight, plus, minus)| {
+                        weight
+                            * ((state.f_plus[i] - plus).powi(2)
+                                + (state.f_minus[i] - minus).powi(2))
+                    })
             })
             .sum()
     }
@@ -1497,6 +1593,7 @@ mod refresh_tests {
             let mut rng = StdRng::seed_from_u64(1);
             for iter in 0..4 {
                 state.branch_consensus = Some(BranchConsensus {
+                    anchors: None,
                     weight: 0.7,
                     plus: other.mapv(|v| 1.5 + 0.2 * v.abs()),
                     minus: other.mapv(|v| 0.8 + 0.1 * v * v),
@@ -1507,12 +1604,19 @@ mod refresh_tests {
                     .error_reductions_split
                     .iter()
                     .flatten()
-                    .chain(state.precomputed_statistics.error_reductions_resplit.iter().flatten())
+                    .chain(
+                        state
+                            .precomputed_statistics
+                            .error_reductions_resplit
+                            .iter()
+                            .flatten(),
+                    )
                     .filter(|v| v.is_finite())
                     .fold(f64::NEG_INFINITY, |m, &v| m.max(v));
                 let before = branch_objective(&state);
                 let advanced;
-                (state, advanced) = fit_step(state, iter, params.n_iter, &strategy, &split, &mut rng);
+                (state, advanced) =
+                    fit_step(state, iter, params.n_iter, &strategy, &split, &mut rng);
                 assert!(advanced);
                 let realized = before - branch_objective(&state);
                 assert!(
@@ -1529,8 +1633,15 @@ mod refresh_tests {
         for max_bins in [None, Some(16)] {
             for huber in [false, true] {
                 let (x, y, other) = data(true);
-                let refinement = RefinementStrategyParamsBuilder::new().alpha(0.01).tilt_tau(0.01);
-                let refinement = if huber { refinement.huber() } else { refinement.l2() }.build();
+                let refinement = RefinementStrategyParamsBuilder::new()
+                    .alpha(0.01)
+                    .tilt_tau(0.01);
+                let refinement = if huber {
+                    refinement.huber()
+                } else {
+                    refinement.l2()
+                }
+                .build();
                 let params = GridTensorParamsBuilder::new()
                     .n_iter(12)
                     .max_bins(max_bins)
@@ -1540,6 +1651,7 @@ mod refresh_tests {
                 let split = params.split_strategy_params.get_split_strategy();
                 let mut state = initialize_state_with_input(x.view(), y.view(), &params, None);
                 state.branch_consensus = Some(BranchConsensus {
+                    anchors: None,
                     weight: 2.0,
                     plus: other.mapv(|v| 1.0 + 0.3 * v.abs()),
                     minus: other.mapv(|v| 0.5 + 0.05 * v * v),
@@ -1568,6 +1680,7 @@ mod refresh_tests {
             let (state, strategy) = fitted_state(&x, &y, max_bins, false);
             let mut pulled = state.clone();
             pulled.branch_consensus = Some(BranchConsensus {
+                anchors: None,
                 weight: 1.5,
                 plus: other.mapv(|v| 1.0 + v.abs()),
                 minus: other.mapv(|v| 0.5 + 0.1 * v * v),
@@ -1578,7 +1691,12 @@ mod refresh_tests {
                     .error_reductions_split
                     .iter()
                     .flatten()
-                    .zip(b.precomputed_statistics.error_reductions_split.iter().flatten())
+                    .zip(
+                        b.precomputed_statistics
+                            .error_reductions_split
+                            .iter()
+                            .flatten(),
+                    )
                     .any(|(u, v)| u.is_finite() && (u - v).abs() > 1e-6 * v.abs().max(1.0))
             };
             assert!(moved(&pulled, &state));
@@ -1588,3 +1706,6 @@ mod refresh_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod anchor_review_tests;

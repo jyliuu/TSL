@@ -79,12 +79,16 @@ impl TSLBoostedParamsBuilder {
     }
 
     pub fn aggregation_method(mut self, aggregation_method: Aggregation) -> Self {
-        self.sp_params_builder = self.sp_params_builder.aggregation_method(aggregation_method);
+        self.sp_params_builder = self
+            .sp_params_builder
+            .aggregation_method(aggregation_method);
         self
     }
 
     pub fn similarity_threshold(mut self, similarity_threshold: f64) -> Self {
-        self.sp_params_builder = self.sp_params_builder.similarity_threshold(similarity_threshold);
+        self.sp_params_builder = self
+            .sp_params_builder
+            .similarity_threshold(similarity_threshold);
         self
     }
 
@@ -104,12 +108,19 @@ impl TSLBoostedParamsBuilder {
     }
 
     pub fn consensus_interval(mut self, consensus_interval: usize) -> Self {
-        self.sp_params_builder = self.sp_params_builder.consensus_interval(consensus_interval);
+        self.sp_params_builder = self
+            .sp_params_builder
+            .consensus_interval(consensus_interval);
         self
     }
 
     pub fn nonnegative_scaling(mut self, nonnegative_scaling: bool) -> Self {
         self.nonnegative_scaling = nonnegative_scaling;
+        self
+    }
+
+    pub fn consensus_anchors(mut self, consensus_anchors: Option<usize>) -> Self {
+        self.sp_params_builder = self.sp_params_builder.consensus_anchors(consensus_anchors);
         self
     }
 

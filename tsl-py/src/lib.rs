@@ -825,7 +825,8 @@ impl TSLPy {
         *,
         max_bins=None,
         consensus_interval=1,
-        nonnegative_scaling=false
+        nonnegative_scaling=false,
+        consensus_anchors=None
     ))]
     #[allow(clippy::too_many_arguments)]
     pub fn _fit<'py>(
@@ -859,6 +860,7 @@ impl TSLPy {
         max_bins: Option<u16>,
         consensus_interval: usize,
         nonnegative_scaling: bool,
+        consensus_anchors: Option<usize>,
     ) -> PyResult<(TSLPy, FitResultPy)> {
         if !(consensus.is_finite() && consensus >= 0.0) {
             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -873,6 +875,11 @@ impl TSLPy {
         if consensus_interval == 0 {
             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
                 "consensus_interval must be at least 1",
+            ));
+        }
+        if consensus_anchors == Some(0) {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "consensus_anchors must be positive",
             ));
         }
         let x = x.as_array();
@@ -945,6 +952,7 @@ impl TSLPy {
             .consensus(consensus)
             .consensus_interval(consensus_interval)
             .nonnegative_scaling(nonnegative_scaling)
+            .consensus_anchors(consensus_anchors)
             .max_bins(max_bins)
             .seed(seed)
             .log_level(match verbosity {

@@ -8,7 +8,8 @@
 //! Agreement on `f = f₊ − f₋` alone leaves common changes of the two branches unpenalized.
 
 use ndarray::{Array1, ArrayView1, ArrayView2};
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{rngs::StdRng, seq::index::sample, SeedableRng};
+use std::sync::Arc;
 
 #[cfg(feature = "use-rayon")]
 use rayon::prelude::*;
@@ -21,7 +22,7 @@ use crate::{
         },
         prepared_input::PreparedInput,
         reducer::CandidateRefresh,
-        state::{BranchConsensus, FittingState},
+        state::{BranchConsensus, ConsensusAnchors, FittingState},
         GridTensor, GridTensorParams,
     },
     logging, FitResult,
@@ -41,6 +42,7 @@ pub(super) fn fit_consensus_bag<'a>(
     tg_params: &GridTensorParams,
     consensus: f64,
     consensus_interval: usize,
+    consensus_anchors: Option<usize>,
     seeds: &[u64],
     initial_state: Option<&FittingState<'a>>,
     prepared: Option<&PreparedInput<'_>>,
@@ -64,13 +66,30 @@ pub(super) fn fit_consensus_bag<'a>(
         })
         .collect();
 
-    fit_members(
-        &mut members,
-        tg_params,
-        consensus,
-        consensus_interval,
-        epoch,
+    let anchors = sample_consensus_anchors(
+        x.nrows(),
+        consensus_anchors,
+        seeds.first().copied().unwrap_or(0),
     );
+    if anchors.is_some() {
+        fit_members_with_candidate_refresh(
+            &mut members,
+            tg_params,
+            consensus,
+            consensus_interval,
+            anchors.as_ref(),
+            epoch,
+            CandidateRefresh::Deferred,
+        );
+    } else {
+        fit_members(
+            &mut members,
+            tg_params,
+            consensus,
+            consensus_interval,
+            epoch,
+        );
+    }
 
     members
         .into_iter()
@@ -86,6 +105,23 @@ pub(super) fn fit_consensus_bag<'a>(
         .collect()
 }
 
+fn sample_consensus_anchors(
+    n: usize,
+    count: Option<usize>,
+    seed: u64,
+) -> Option<Arc<ConsensusAnchors>> {
+    let count = count?;
+    assert!(count > 0, "consensus_anchors must be positive");
+    if count >= n {
+        return None;
+    }
+    // A separate stream leaves every bag's proposal RNG unchanged.
+    let mut rng = StdRng::seed_from_u64(seed ^ 0x414E_4348_4F52_535F);
+    let mut rows = sample(&mut rng, n, count).into_vec();
+    rows.sort_unstable();
+    Some(Arc::new(ConsensusAnchors::new(n, rows)))
+}
+
 fn fit_members<'a>(
     members: &mut [Member<'a>],
     tg_params: &GridTensorParams,
@@ -98,6 +134,7 @@ fn fit_members<'a>(
         tg_params,
         consensus,
         consensus_interval,
+        None,
         epoch,
         CandidateRefresh::Deferred,
     );
@@ -108,6 +145,7 @@ fn fit_members_with_candidate_refresh<'a>(
     tg_params: &GridTensorParams,
     consensus: f64,
     consensus_interval: usize,
+    anchors: Option<&Arc<ConsensusAnchors>>,
     epoch: Option<usize>,
     candidate_refresh: CandidateRefresh,
 ) {
@@ -123,16 +161,24 @@ fn fit_members_with_candidate_refresh<'a>(
     let n = members
         .first()
         .map_or(0, |member| member.state.as_ref().expect("member state").n);
-    let mut total_plus = Array1::<f64>::zeros(n);
-    let mut total_minus = Array1::<f64>::zeros(n);
+    let reference_len = anchors.map_or(n, |anchors| anchors.rows.len());
+    let mut total_plus = Array1::<f64>::zeros(reference_len);
+    let mut total_minus = Array1::<f64>::zeros(reference_len);
     let iteration_budget = max_iterations(tg_params.n_iter);
     for _ in 0..iteration_budget {
         total_plus.fill(0.0);
         total_minus.fill(0.0);
         for member in members.iter() {
             let state = member.state.as_ref().expect("member state");
-            total_plus += &state.f_plus;
-            total_minus += &state.f_minus;
+            if let Some(anchors) = anchors {
+                for (index, &row) in anchors.rows.iter().enumerate() {
+                    total_plus[index] += state.f_plus[row];
+                    total_minus[index] += state.f_minus[row];
+                }
+            } else {
+                total_plus += &state.f_plus;
+                total_minus += &state.f_minus;
+            }
         }
         let (total_plus, total_minus) = (total_plus.view(), total_minus.view());
         let advance = |member: &mut Member<'a>| {
@@ -152,12 +198,27 @@ fn fit_members_with_candidate_refresh<'a>(
             } = member;
             in_context(*tree_id, epoch, || {
                 let mut current = state.take().expect("member state");
-                current.branch_consensus = Some(BranchConsensus {
-                    weight: consensus,
-                    plus: (&total_plus - &current.f_plus) / others,
-                    minus: (&total_minus - &current.f_minus) / others,
-                });
-                let mut current = refinement.refresh_statistics(current);
+                let mut current = if let Some(anchors) = anchors {
+                    let reference = BranchConsensus {
+                        weight: consensus * (n as f64 / reference_len as f64),
+                        plus: Array1::from_shape_fn(reference_len, |index| {
+                            (total_plus[index] - current.f_plus[anchors.rows[index]]) / others
+                        }),
+                        minus: Array1::from_shape_fn(reference_len, |index| {
+                            (total_minus[index] - current.f_minus[anchors.rows[index]]) / others
+                        }),
+                        anchors: Some(anchors.clone()),
+                    };
+                    refinement.refresh_consensus_reference(current, reference)
+                } else {
+                    current.branch_consensus = Some(BranchConsensus {
+                        weight: consensus,
+                        plus: (&total_plus - &current.f_plus) / others,
+                        minus: (&total_minus - &current.f_minus) / others,
+                        anchors: None,
+                    });
+                    refinement.refresh_statistics(current)
+                };
                 let batch_size = consensus_interval.min(iteration_budget - *next_iteration);
                 let mut advanced = false;
                 for offset in 0..batch_size {
@@ -223,7 +284,8 @@ mod tests {
     use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 
     use super::{
-        fit_members, fit_members_with_candidate_refresh, in_context, max_iterations, Member,
+        fit_consensus_bag, fit_members, fit_members_with_candidate_refresh, in_context,
+        max_iterations, sample_consensus_anchors, Member,
     };
     use rand::{rngs::StdRng, RngCore, SeedableRng};
     #[cfg(feature = "use-rayon")]
@@ -345,6 +407,7 @@ mod tests {
                 in_context(*tree_id, epoch, || {
                     let mut current = state.take().expect("member state");
                     current.branch_consensus = Some(BranchConsensus {
+                        anchors: None,
                         weight: consensus,
                         plus: (&total_plus - &current.f_plus) / others,
                         minus: (&total_minus - &current.f_minus) / others,
@@ -414,6 +477,7 @@ mod tests {
             0.3,
             consensus_interval,
             None,
+            None,
             CandidateRefresh::Eager,
         );
         fit_members_with_candidate_refresh(
@@ -421,6 +485,7 @@ mod tests {
             params,
             0.3,
             consensus_interval,
+            None,
             None,
             CandidateRefresh::Deferred,
         );
@@ -521,6 +586,106 @@ mod tests {
                     .build(),
             )
             .build()
+    }
+
+    #[test]
+    fn training_anchor_sampling_is_shared_reproducible_and_optional() {
+        let first = sample_consensus_anchors(100, Some(17), 42).unwrap();
+        let repeated = sample_consensus_anchors(100, Some(17), 42).unwrap();
+        let other_seed = sample_consensus_anchors(100, Some(17), 43).unwrap();
+        assert_eq!(first.rows, repeated.rows);
+        assert_ne!(first.rows, other_seed.rows);
+        assert_eq!(first.rows.len(), 17);
+        assert!(first.rows.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(first.rows.iter().all(|&row| row < 100));
+        assert!(sample_consensus_anchors(100, None, 42).is_none());
+        assert!(sample_consensus_anchors(100, Some(100), 42).is_none());
+        assert!(sample_consensus_anchors(100, Some(usize::MAX), 42).is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "consensus_anchors must be positive")]
+    fn training_anchor_count_must_be_positive() {
+        sample_consensus_anchors(100, Some(0), 42);
+    }
+
+    #[test]
+    fn all_training_anchors_match_the_full_row_model_exactly() {
+        let (x, y) = data();
+        for interval in [1, 4] {
+            for huber in [false, true] {
+                let params = parity_params(huber, Some(16), 0.0);
+                let initial = initialize_state_with_input(x.view(), y.view(), &params, None);
+                let fit = |anchors| {
+                    fit_consensus_bag(
+                        x.view(),
+                        y.view(),
+                        &params,
+                        0.3,
+                        interval,
+                        anchors,
+                        &[17, 18, 19, 20],
+                        Some(&initial),
+                        None,
+                        None,
+                    )
+                };
+                let baseline = fit(None);
+                for count in [x.nrows(), x.nrows() + 5] {
+                    let requested = fit(Some(count));
+                    for ((a_fit, a_grid), (b_fit, b_grid)) in baseline.iter().zip(requested.iter())
+                    {
+                        assert_eq!(
+                            bincode::serialize(a_grid).unwrap(),
+                            bincode::serialize(b_grid).unwrap()
+                        );
+                        assert_eq!(a_fit.y_hat, b_fit.y_hat);
+                        assert_eq!(a_fit.residuals, b_fit.residuals);
+                        assert_eq!(a_fit.err.to_bits(), b_fit.err.to_bits());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn anchored_consensus_preserves_budgets_branches_and_reproducibility() {
+        let (x, y) = data();
+        let anchors = sample_consensus_anchors(x.nrows(), Some(17), 17).unwrap();
+        for interval in [1, 4] {
+            for huber in [false, true] {
+                for (max_bins, penalty) in [(Some(16), 0.0), (None, 0.0), (Some(16), 0.001)] {
+                    let params = parity_params(huber, max_bins, penalty);
+                    let initial = initialize_state_with_input(x.view(), y.view(), &params, None);
+                    let mut first = members_from_state(&initial);
+                    let mut repeated = members_from_state(&initial);
+                    for members in [&mut first, &mut repeated] {
+                        fit_members_with_candidate_refresh(
+                            members,
+                            &params,
+                            0.3,
+                            interval,
+                            Some(&anchors),
+                            None,
+                            CandidateRefresh::Deferred,
+                        );
+                    }
+                    for member in &first {
+                        assert_member_budget_and_logging(member, &params);
+                        let state = member.state.as_ref().unwrap();
+                        let reference = state.branch_consensus.as_ref().unwrap();
+                        assert_eq!(reference.plus.len(), anchors.rows.len());
+                        assert_eq!(reference.minus.len(), anchors.rows.len());
+                        assert_eq!(reference.weight, 0.3 * (x.nrows() as f64 / 17.0));
+                        assert!(std::sync::Arc::ptr_eq(
+                            reference.anchors.as_ref().unwrap(),
+                            &anchors
+                        ));
+                    }
+                    assert_members_equal(&initial, &params, first, repeated);
+                }
+            }
+        }
     }
 
     #[test]
@@ -789,6 +954,7 @@ mod tests {
                 state.r_tilde.assign(&state.residuals);
                 state.current_error = state.residuals.iter().map(|r| r * r).sum();
                 state.branch_consensus = Some(BranchConsensus {
+                    anchors: None,
                     weight: 1.0,
                     plus: Array1::from_elem(y.len(), (total_plus - plus) / others),
                     minus: Array1::from_elem(y.len(), (total_minus - minus) / others),
@@ -841,6 +1007,7 @@ mod tests {
 
         let mut retried = stalled;
         retried.branch_consensus = Some(BranchConsensus {
+            anchors: None,
             weight: 1.0,
             plus: peer.f_plus.clone(),
             minus: peer.f_minus.clone(),

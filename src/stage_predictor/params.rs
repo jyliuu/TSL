@@ -17,6 +17,8 @@ pub struct StagePredictorParams {
     pub consensus: f64,
     /// Maximum local action attempts between peer-reference updates.
     pub consensus_interval: usize,
+    /// Optional uniform training-row sample for the branch-consensus penalty.
+    pub consensus_anchors: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -27,6 +29,7 @@ pub struct StagePredictorParamsBuilder {
     aggregation_method: Aggregation,
     consensus: f64,
     consensus_interval: usize,
+    consensus_anchors: Option<usize>,
 }
 
 impl StagePredictorParamsBuilder {
@@ -38,6 +41,7 @@ impl StagePredictorParamsBuilder {
             aggregation_method: Aggregation::Combined,
             consensus: 0.0,
             consensus_interval: 1,
+            consensus_anchors: None,
         }
     }
 
@@ -64,8 +68,20 @@ impl StagePredictorParamsBuilder {
     }
 
     pub fn consensus_interval(mut self, consensus_interval: usize) -> Self {
-        assert!(consensus_interval >= 1, "consensus_interval must be at least 1");
+        assert!(
+            consensus_interval >= 1,
+            "consensus_interval must be at least 1"
+        );
         self.consensus_interval = consensus_interval;
+        self
+    }
+
+    pub fn consensus_anchors(mut self, consensus_anchors: Option<usize>) -> Self {
+        assert!(
+            consensus_anchors != Some(0),
+            "consensus_anchors must be positive"
+        );
+        self.consensus_anchors = consensus_anchors;
         self
     }
 
@@ -97,6 +113,7 @@ impl StagePredictorParamsBuilder {
             aggregation_method: self.aggregation_method,
             consensus: self.consensus,
             consensus_interval: self.consensus_interval,
+            consensus_anchors: self.consensus_anchors,
         }
     }
 }

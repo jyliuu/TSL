@@ -2,6 +2,7 @@
 use crate::grid_tensor::logging_helpers::LoggingState;
 use crate::grid_tensor::splitting::SplitStrategyState;
 use ndarray::{Array1, ArrayView1, ArrayView2};
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct FittingState<'a> {
@@ -173,12 +174,15 @@ impl<'a> FittingState<'a> {
             t1: weight * rt * fp,
             t2: weight * rt * fm,
         };
-        if let Some(consensus) = &self.branch_consensus {
-            let rho = consensus.weight;
+        if let Some((rho, target_plus, target_minus)) = self
+            .branch_consensus
+            .as_ref()
+            .and_then(|consensus| consensus.target(row))
+        {
             stats.s11 += rho * fp * fp;
             stats.s22 += rho * fm * fm;
-            stats.t1 += rho * (consensus.plus[row] - fp) * fp;
-            stats.t2 += rho * (fm - consensus.minus[row]) * fm;
+            stats.t1 += rho * (target_plus - fp) * fp;
+            stats.t2 += rho * (fm - target_minus) * fm;
         }
         stats
     }
@@ -399,13 +403,70 @@ impl<'a> FittingState<'a> {
     }
 }
 
-/// Reference branch functions on the training rows and the strength `ρ` of the
-/// proximal pull toward them.
+/// Fixed training rows on which branch consensus is evaluated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsensusAnchors {
+    pub rows: Vec<usize>,
+    pub row_to_anchor: Vec<usize>,
+}
+
+impl ConsensusAnchors {
+    pub fn new(n: usize, rows: Vec<usize>) -> Self {
+        assert!(!rows.is_empty(), "consensus anchors must not be empty");
+        assert!(
+            rows.windows(2).all(|pair| pair[0] < pair[1]),
+            "anchor rows must be sorted and unique"
+        );
+        assert!(
+            rows.last().is_some_and(|&row| row < n),
+            "anchor row is outside the training data"
+        );
+        let mut row_to_anchor = vec![usize::MAX; n];
+        for (index, &row) in rows.iter().enumerate() {
+            row_to_anchor[row] = index;
+        }
+        Self {
+            rows,
+            row_to_anchor,
+        }
+    }
+}
+
+pub(crate) fn same_consensus_support(
+    left: &Option<Arc<ConsensusAnchors>>,
+    right: &Option<Arc<ConsensusAnchors>>,
+) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+        _ => false,
+    }
+}
+
+/// Reference branches and their per-row penalty weight.
+/// Anchored references have one entry per anchor and weight `ρ n / m`.
 #[derive(Debug, Clone)]
 pub struct BranchConsensus {
     pub weight: f64,
     pub plus: Array1<f64>,
     pub minus: Array1<f64>,
+    pub anchors: Option<Arc<ConsensusAnchors>>,
+}
+
+impl BranchConsensus {
+    pub fn target(&self, row: usize) -> Option<(f64, f64, f64)> {
+        let index = match &self.anchors {
+            Some(anchors) => {
+                let index = anchors.row_to_anchor[row];
+                if index == usize::MAX {
+                    return None;
+                }
+                index
+            }
+            None => row,
+        };
+        Some((self.weight, self.plus[index], self.minus[index]))
+    }
 }
 
 /// Per-interval aggregate statistics for O(1) resplit/merge lookups
@@ -570,6 +631,8 @@ pub struct PrecomputedStatistics {
     pub initialized: bool,
     /// Branch-consensus weight folded into the stored `s11`/`s22` statistics.
     pub consensus_weight: f64,
+    /// Anchor support folded into the stored curvature statistics.
+    pub consensus_anchors: Option<Arc<ConsensusAnchors>>,
 }
 
 impl PrecomputedStatistics {
@@ -600,6 +663,7 @@ impl PrecomputedStatistics {
             binned_prefix_sums: vec![vec![]; p],
             initialized: false,
             consensus_weight: 0.0,
+            consensus_anchors: None,
         }
     }
 }
