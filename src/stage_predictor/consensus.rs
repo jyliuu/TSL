@@ -15,8 +15,11 @@ use rayon::prelude::*;
 
 use crate::{
     grid_tensor::{
-        fit::{finish_fit, fit_step, initialize_state_with_input, max_iterations},
+        fit::{
+            finish_fit, fit_step_with_candidate_refresh, initialize_state_with_input, max_iterations,
+        },
         prepared_input::PreparedInput,
+        reducer::CandidateRefresh,
         state::{BranchConsensus, FittingState},
         GridTensor, GridTensorParams,
     },
@@ -79,6 +82,22 @@ fn fit_members<'a>(
     consensus: f64,
     epoch: Option<usize>,
 ) {
+    fit_members_with_candidate_refresh(
+        members,
+        tg_params,
+        consensus,
+        epoch,
+        CandidateRefresh::Deferred,
+    );
+}
+
+fn fit_members_with_candidate_refresh<'a>(
+    members: &mut [Member<'a>],
+    tg_params: &GridTensorParams,
+    consensus: f64,
+    epoch: Option<usize>,
+    candidate_refresh: CandidateRefresh,
+) {
     let refinement = tg_params
         .refinement_strategy_params
         .get_refinement_strategy();
@@ -119,8 +138,16 @@ fn fit_members<'a>(
                     minus: (&total_minus - &current.f_minus) / others,
                 });
                 let current = refinement.refresh_statistics(current);
-                let (current, advanced) =
-                    fit_step(current, iter, tg_params.n_iter, &refinement, &split, rng);
+                // References change each round, so every proposal uses a full refresh.
+                let (current, advanced) = fit_step_with_candidate_refresh(
+                    current,
+                    iter,
+                    tg_params.n_iter,
+                    &refinement,
+                    &split,
+                    rng,
+                    candidate_refresh,
+                );
                 *state = Some(current);
                 advanced
             })
@@ -153,22 +180,25 @@ fn in_context<R>(tree_id: usize, epoch: Option<usize>, f: impl FnOnce() -> R) ->
 mod tests {
     use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 
-    use super::{fit_members, Member};
-    use rand::{rngs::StdRng, SeedableRng};
+    use super::{fit_members, fit_members_with_candidate_refresh, Member};
+    use rand::{rngs::StdRng, RngCore, SeedableRng};
 
     use crate::{
         grid_tensor::{
+            action::FittingAction,
             fit::{finish_fit, fit_step, initialize_state_with_input},
             params::{
                 GridTensorParamsBuilder, RefinementStrategyParamsBuilder,
                 SplitStrategyParamsBuilder,
             },
-            state::BranchConsensus,
+            reducer::{fitting_reducer, CandidateRefresh},
+            splitting::SplitCandidate,
+            state::{BranchConsensus, FittingState},
             GridTensor, GridTensorParams,
         },
         stage_predictor::{
-            extract_two_tensor_predictions_unscaled, fit_grid_bag,
-            params::StagePredictorParamsBuilder,
+            aggregate_bagged_two_tensor, extract_two_tensor_predictions_unscaled, fit_grid_bag,
+            params::StagePredictorParamsBuilder, Aggregation, StagePredictor,
         },
     };
 
@@ -222,6 +252,185 @@ mod tests {
             }
         }
         total / pairs
+    }
+
+    fn members_from_state<'a>(initial: &FittingState<'a>) -> Vec<Member<'a>> {
+        (0..4)
+            .map(|tree_id| {
+                #[allow(unused_mut)]
+                let mut state = initial.clone();
+                #[cfg(feature = "evo-logging")]
+                {
+                    state.logging_state =
+                        Some(crate::grid_tensor::logging_helpers::LoggingState::new());
+                }
+                Member {
+                    tree_id,
+                    rng: StdRng::seed_from_u64(17 + tree_id as u64),
+                    state: Some(state),
+                }
+            })
+            .collect()
+    }
+
+    fn assert_candidate_refresh_parity(
+        initial: &FittingState<'_>,
+        params: &GridTensorParams,
+    ) -> [usize; 3] {
+        let mut eager = members_from_state(initial);
+        let mut deferred = members_from_state(initial);
+        fit_members_with_candidate_refresh(
+            &mut eager,
+            params,
+            0.3,
+            None,
+            CandidateRefresh::Eager,
+        );
+        fit_members_with_candidate_refresh(
+            &mut deferred,
+            params,
+            0.3,
+            None,
+            CandidateRefresh::Deferred,
+        );
+        let refinement = params.refinement_strategy_params.get_refinement_strategy();
+        let mut counts = [0; 3];
+        for (a, b) in eager.iter_mut().zip(&mut deferred) {
+            assert_eq!(a.rng.next_u64(), b.rng.next_u64());
+            let a = a.state.as_ref().unwrap();
+            let b = b.state.as_ref().unwrap();
+            assert_eq!(a.f_plus, b.f_plus);
+            assert_eq!(a.f_minus, b.f_minus);
+            assert_eq!(a.residuals, b.residuals);
+            assert_eq!(a.current_error.to_bits(), b.current_error.to_bits());
+            assert_eq!(a.boundaries, b.boundaries);
+            assert_eq!(a.backbone_values, b.backbone_values);
+            assert_eq!(a.tilt_values, b.tilt_values);
+            assert_eq!(a.iteration, b.iteration);
+            assert_eq!(a.terminated, b.terminated);
+            assert_eq!(format!("{:?}", a.loop_state), format!("{:?}", b.loop_state));
+            counts[0] += a.loop_state.split_count - initial.loop_state.split_count;
+            counts[1] += a.loop_state.resplit_count - initial.loop_state.resplit_count;
+            counts[2] += a.loop_state.merge_count - initial.loop_state.merge_count;
+
+            // Buffered events include the ordered actions, gains, row updates, and snapshots.
+            #[cfg(feature = "evo-logging")]
+            assert_eq!(
+                format!("{:?}", a.logging_state),
+                format!("{:?}", b.logging_state)
+            );
+            // The next full refresh must reconstruct identical candidate and interval caches.
+            let refreshed_a = refinement.refresh_statistics(a.clone());
+            let refreshed_b = refinement.refresh_statistics(b.clone());
+            assert_eq!(
+                format!("{:?}", refreshed_a.precomputed_statistics),
+                format!("{:?}", refreshed_b.precomputed_statistics)
+            );
+        }
+        let finish_model = |members: Vec<Member<'_>>| {
+            let grids: Vec<_> = members
+                .into_iter()
+                .map(|member| {
+                    let mut state = member.state.unwrap();
+                    state.branch_consensus = None;
+                    finish_fit(state).1
+                })
+                .collect();
+            let primary = aggregate_bagged_two_tensor(&grids, initial.x, None, 1.0);
+            let indices = (0..grids.len()).collect();
+            crate::forest::TSL::new(vec![StagePredictor::new_ensemble(
+                grids,
+                primary,
+                indices,
+                Aggregation::Combined,
+            )])
+        };
+        // Finalization operates directly on the final states, including a deferred final round.
+        let eager = finish_model(eager);
+        let deferred = finish_model(deferred);
+        assert_eq!(
+            bincode::serialize(&eager).unwrap(),
+            bincode::serialize(&deferred).unwrap()
+        );
+        assert_eq!(eager.predict(initial.x), deferred.predict(initial.x));
+        counts
+    }
+
+    fn parity_params(huber: bool, max_bins: Option<u16>, penalty: f64) -> GridTensorParams {
+        let refinement = RefinementStrategyParamsBuilder::new()
+            .alpha(0.1)
+            .tilt_tau(0.01)
+            .tilt_rho(0.001);
+        GridTensorParamsBuilder::new()
+            .n_iter(8)
+            .max_bins(max_bins)
+            .refinement_strategy(if huber { refinement.huber() } else { refinement.l2() }.build())
+            .split_strategy(
+                SplitStrategyParamsBuilder::new()
+                    .random_split()
+                    .split_try(7)
+                    .min_interval_samples(2)
+                    .complexity_penalty(penalty)
+                    .build(),
+            )
+            .build()
+    }
+
+    #[test]
+    fn deferred_consensus_matches_eager_models_actions_and_caches() {
+        let x = Array2::from_shape_fn((128, 3), |(row, col)| {
+            ((row * (2 * col + 3) + col * 11) % 127) as f64 / 32.0 - 2.0
+        });
+        let y = Array1::from_shape_fn(x.nrows(), |row| {
+            let a = x[[row, 0]];
+            let b = x[[row, 1]];
+            a.sin() * b.exp() + 0.4 * x[[row, 2]] + if row % 23 == 0 { 3.0 } else { 0.0 }
+        });
+        let mut counts = [0; 3];
+        for huber in [false, true] {
+            for max_bins in [None, Some(16)] {
+                for penalty in [0.0, 0.001] {
+                    let params = parity_params(huber, max_bins, penalty);
+                    let initial = initialize_state_with_input(x.view(), y.view(), &params, None);
+                    let actions = assert_candidate_refresh_parity(&initial, &params);
+                    for (count, actions) in counts.iter_mut().zip(actions) {
+                        *count += actions;
+                    }
+                }
+            }
+        }
+        assert!(counts[0] > 0 && counts[1] > 0);
+    }
+
+    #[test]
+    fn deferred_consensus_matches_eager_merges() {
+        let x = Array2::from_shape_fn((32, 1), |(row, _)| row as f64);
+        let y = Array1::from_shape_fn(32, |row| if row < 16 { -1.0 } else { 2.0 });
+        for huber in [false, true] {
+            for max_bins in [None, Some(8)] {
+                let params = parity_params(huber, max_bins, 1e6);
+                let refinement = params.refinement_strategy_params.get_refinement_strategy();
+                let split_strategy = params.split_strategy_params.get_split_strategy();
+                let mut initial = initialize_state_with_input(x.view(), y.view(), &params, None);
+                // A pre-existing boundary exposes a beneficial complexity-reducing merge.
+                let split = SplitCandidate {
+                    col: 0,
+                    index: 16,
+                    allowed_interval_idx: 0,
+                    error_reduction: initial.precomputed_statistics.error_reductions_split[0][16],
+                    update_left: initial.precomputed_statistics.update_pairs_split_left[0][16],
+                    update_right: initial.precomputed_statistics.update_pairs_split_right[0][16],
+                };
+                initial = fitting_reducer(
+                    initial,
+                    FittingAction::ApplySplit { split },
+                    &refinement,
+                    &split_strategy,
+                );
+                let counts = assert_candidate_refresh_parity(&initial, &params);
+                assert_eq!(counts[2], 4, "each member must merge its initial boundary");
+            }
+        }
     }
 
     #[test]

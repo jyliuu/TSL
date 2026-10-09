@@ -4,7 +4,7 @@ use rand::Rng;
 use crate::{
     grid_tensor::{
         identification::l2_identify,
-        reducer::fitting_reducer,
+        reducer::{fitting_reducer_with_candidate_refresh, CandidateRefresh},
         refinement::RefinementStrategy,
         splitting::SplitStrategy,
         state::FittingState,
@@ -114,12 +114,34 @@ pub(crate) fn max_iterations(n_iter: usize) -> usize {
 /// Returns `false` once the grid is finished: the split budget is exhausted with merges
 /// disabled, no objective-improving action remains, or the reducer terminated the fit.
 pub(crate) fn fit_step<'a, R: Rng + ?Sized>(
+    state: FittingState<'a>,
+    iter: usize,
+    n_iter: usize,
+    refinement_strategy: &RefinementStrategy,
+    split_strategy: &SplitStrategy,
+    rng: &mut R,
+) -> (FittingState<'a>, bool) {
+    fit_step_with_candidate_refresh(
+        state,
+        iter,
+        n_iter,
+        refinement_strategy,
+        split_strategy,
+        rng,
+        CandidateRefresh::Eager,
+    )
+}
+
+/// Take one action, retaining row and prefix statistics under either refresh policy.
+/// Deferred candidate scores require a full statistics refresh before the next proposal.
+pub(crate) fn fit_step_with_candidate_refresh<'a, R: Rng + ?Sized>(
     mut state: FittingState<'a>,
     iter: usize,
     n_iter: usize,
     refinement_strategy: &RefinementStrategy,
     split_strategy: &SplitStrategy,
     rng: &mut R,
+    candidate_refresh: CandidateRefresh,
 ) -> (FittingState<'a>, bool) {
     state.iteration = iter;
 
@@ -138,7 +160,13 @@ pub(crate) fn fit_step<'a, R: Rng + ?Sized>(
     };
 
     // Apply action through reducer (which calls logging reducer internally)
-    state = fitting_reducer(state, action, refinement_strategy, split_strategy);
+    state = fitting_reducer_with_candidate_refresh(
+        state,
+        action,
+        refinement_strategy,
+        split_strategy,
+        candidate_refresh,
+    );
     if state.terminated {
         return (state, false);
     }

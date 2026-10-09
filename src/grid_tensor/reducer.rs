@@ -10,6 +10,14 @@ use crate::grid_tensor::{
 #[cfg(feature = "evo-logging")]
 use crate::logging::reducer::log_split_reducer;
 
+/// Whether candidate scores are needed before the next full statistics refresh.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CandidateRefresh {
+    Eager,
+    /// Requires `refresh_statistics` before another action is proposed.
+    Deferred,
+}
+
 /// Central reducer function that consumes state and action
 /// Returns the new state (using move semantics, no cloning)
 pub fn fitting_reducer<'a>(
@@ -18,16 +26,39 @@ pub fn fitting_reducer<'a>(
     refinement_strategy: &RefinementStrategy,
     split_strategy: &SplitStrategy,
 ) -> FittingState<'a> {
+    fitting_reducer_with_candidate_refresh(
+        state,
+        action,
+        refinement_strategy,
+        split_strategy,
+        CandidateRefresh::Eager,
+    )
+}
+
+pub(crate) fn fitting_reducer_with_candidate_refresh<'a>(
+    state: FittingState<'a>,
+    action: FittingAction,
+    refinement_strategy: &RefinementStrategy,
+    split_strategy: &SplitStrategy,
+    candidate_refresh: CandidateRefresh,
+) -> FittingState<'a> {
     match action {
         FittingAction::ApplyScaling { factor } => reduce_apply_scaling(state, factor),
         FittingAction::Terminate { reason } => reduce_terminate(state, reason),
         FittingAction::Composite { actions } => {
+            // Consecutive subactions can consume the candidate caches.
             reduce_composite(state, actions, refinement_strategy, split_strategy)
         }
         FittingAction::ApplyMerge { .. }
         | FittingAction::ApplyResplit { .. }
         | FittingAction::ApplySplit { .. } => {
-            reduce_apply_transformation(state, action, refinement_strategy, split_strategy)
+            reduce_apply_transformation(
+                state,
+                action,
+                refinement_strategy,
+                split_strategy,
+                candidate_refresh,
+            )
         }
     }
 }
@@ -39,6 +70,7 @@ fn reduce_apply_transformation<'a>(
     transformation: FittingAction,
     refinement_strategy: &RefinementStrategy,
     split_strategy: &SplitStrategy,
+    candidate_refresh: CandidateRefresh,
 ) -> FittingState<'a> {
     // Capture state for logging (always capture, reducer handles None)
     let old_error = state.current_error;
@@ -124,6 +156,7 @@ fn reduce_apply_transformation<'a>(
                 &original_affected_interval,
                 &affected_ranges,
                 refinement_strategy,
+                candidate_refresh,
             );
 
             state = reduce_forbid_around_split(state, &split_candidate, split_strategy);
@@ -174,6 +207,7 @@ fn reduce_apply_transformation<'a>(
                 &original_affected_interval,
                 &affected_ranges,
                 refinement_strategy,
+                candidate_refresh,
             );
 
             state.current_error = refinement_strategy.weighted_squared_error(&state.residuals);
@@ -271,6 +305,7 @@ fn reduce_apply_transformation<'a>(
                 &original_affected_interval,
                 &affected_ranges,
                 refinement_strategy,
+                candidate_refresh,
             );
 
             state.current_error = refinement_strategy.weighted_squared_error(&state.residuals);
@@ -621,6 +656,7 @@ fn reduce_grid_statistics_and_refresh_caches<'a>(
     original_affected_interval: &(usize, usize),
     affected_ranges: &[AffectedRange],
     refinement: &RefinementStrategy,
+    candidate_refresh: CandidateRefresh,
 ) -> FittingState<'a> {
     let &(start, end) = original_affected_interval;
     // Convert AffectedRange to point ranges for update_statistics
@@ -631,7 +667,9 @@ fn reduce_grid_statistics_and_refresh_caches<'a>(
         affected_points_range[affected_range.col] = affected_range.point_range;
     }
     state = refinement.update_statistics(state, col, start, end, &affected_points_range);
-    state = refinement.refresh_error_reduction_caches_for_affected(state, affected_ranges);
+    if candidate_refresh == CandidateRefresh::Eager {
+        state = refinement.refresh_error_reduction_caches_for_affected(state, affected_ranges);
+    }
     state
 }
 
