@@ -58,6 +58,8 @@ pub struct FittingState<'a> {
     pub(crate) sampled_split_scoring: bool,
     /// Some split scores require evaluation against the current prefix statistics.
     pub(crate) split_scores_stale: bool,
+    /// Linear row/prefix statistics require a full rebuild before another action.
+    pub(crate) linear_statistics_stale: bool,
 
     // Logging state (optional: only when logging enabled)
     // Note: LoggingState is not Clone (contains Sender), so FittingState is not Clone
@@ -95,6 +97,7 @@ impl<'a> Clone for FittingState<'a> {
             branch_consensus: self.branch_consensus.clone(),
             sampled_split_scoring: self.sampled_split_scoring,
             split_scores_stale: self.split_scores_stale,
+            linear_statistics_stale: self.linear_statistics_stale,
             #[cfg(feature = "evo-logging")]
             logging_state: None, // Can't clone LoggingState (contains Sender)
         }
@@ -164,6 +167,7 @@ impl<'a> FittingState<'a> {
             branch_consensus: None,
             sampled_split_scoring: false,
             split_scores_stale: false,
+            linear_statistics_stale: false,
             #[cfg(feature = "evo-logging")]
             logging_state: None,
         }
@@ -175,13 +179,23 @@ impl<'a> FittingState<'a> {
     /// `ρ (f₊ − c₊)² + ρ (f₋ − c₋)²` per row, which contributes to `s11`, `s22`, `t1` and `t2`.
     #[inline]
     pub(crate) fn point_statistics(&self, row: usize, weight: f64) -> PrefixStats {
+        self.point_statistics_impl::<true>(row, weight)
+    }
+
+    #[inline]
+    pub(crate) fn point_curvature_statistics(&self, row: usize, weight: f64) -> PrefixStats {
+        self.point_statistics_impl::<false>(row, weight)
+    }
+
+    #[inline]
+    fn point_statistics_impl<const LINEAR: bool>(&self, row: usize, weight: f64) -> PrefixStats {
         let (fp, fm, rt) = (self.f_plus[row], self.f_minus[row], self.r_tilde[row]);
         let mut stats = PrefixStats {
             s11: weight * fp * fp,
             s22: weight * fm * fm,
             s12: weight * fp * fm,
-            t1: weight * rt * fp,
-            t2: weight * rt * fm,
+            t1: if LINEAR { weight * rt * fp } else { 0.0 },
+            t2: if LINEAR { weight * rt * fm } else { 0.0 },
         };
         if let Some((rho, target_plus, target_minus)) = self
             .branch_consensus
@@ -190,10 +204,19 @@ impl<'a> FittingState<'a> {
         {
             stats.s11 += rho * fp * fp;
             stats.s22 += rho * fm * fm;
-            stats.t1 += rho * (target_plus - fp) * fp;
-            stats.t2 += rho * (fm - target_minus) * fm;
+            if LINEAR {
+                stats.t1 += rho * (target_plus - fp) * fp;
+                stats.t2 += rho * (fm - target_minus) * fm;
+            }
         }
         stats
+    }
+
+    pub(crate) fn require_current_statistics(&self) {
+        assert!(
+            !self.linear_statistics_stale,
+            "linear statistics require a full refresh"
+        );
     }
 
     /// Check if we're in Stage 1 positive-only mode

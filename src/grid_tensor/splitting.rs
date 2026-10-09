@@ -339,6 +339,7 @@ impl SplitStrategy {
         rng: &mut R,
         allow_split: bool,
     ) -> Option<FittingAction> {
+        state.require_current_statistics();
         let best_split_candidate = allow_split
             .then(|| self.propose_best_split(state, rng))
             .flatten();
@@ -352,6 +353,7 @@ impl SplitStrategy {
         rng: &mut R,
         allow_split: bool,
     ) -> Option<FittingAction> {
+        state.require_current_statistics();
         let Self::Random {
             colsample_bytree,
             split_try,
@@ -443,6 +445,7 @@ impl SplitStrategy {
 
     /// Propose the highest-scoring merge under the same action threshold.
     pub fn propose_next_merge(&self, state: &FittingState) -> Option<FittingAction> {
+        state.require_current_statistics();
         let merge = self.propose_best_merge(state)?;
         let score = merge.error_reduction + state.split_strategy_state.boundary_penalty;
         let tolerance = self

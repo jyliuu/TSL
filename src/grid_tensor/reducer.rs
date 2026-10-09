@@ -42,6 +42,7 @@ pub(crate) fn fitting_reducer_with_candidate_refresh<'a>(
     split_strategy: &SplitStrategy,
     candidate_refresh: CandidateRefresh,
 ) -> FittingState<'a> {
+    state.require_current_statistics();
     let sampled_split_scoring = state.sampled_split_scoring;
     let eager = candidate_refresh == CandidateRefresh::Eager
         || matches!(&action, FittingAction::Composite { .. });
@@ -678,7 +679,17 @@ fn reduce_grid_statistics_and_refresh_caches<'a>(
     for affected_range in affected_ranges {
         affected_points_range[affected_range.col] = affected_range.point_range;
     }
-    state = refinement.update_statistics(state, col, start, end, &affected_points_range);
+    state = if candidate_refresh == CandidateRefresh::Deferred
+        && matches!(refinement, RefinementStrategy::L2Refinement { .. })
+        && state
+            .branch_consensus
+            .as_ref()
+            .is_some_and(|reference| reference.anchors.is_none())
+    {
+        refinement.update_curvature_statistics(state, col, start, end, &affected_points_range)
+    } else {
+        refinement.update_statistics(state, col, start, end, &affected_points_range)
+    };
     if candidate_refresh == CandidateRefresh::Eager {
         state = refinement.refresh_error_reduction_caches_for_affected(state, affected_ranges);
     }

@@ -34,6 +34,17 @@ pub enum RefinementStrategy {
     },
 }
 
+#[inline]
+fn add_statistics<const LINEAR: bool>(target: &mut PrefixStats, value: PrefixStats) {
+    target.s11 += value.s11;
+    target.s22 += value.s22;
+    target.s12 += value.s12;
+    if LINEAR {
+        target.t1 += value.t1;
+        target.t2 += value.t2;
+    }
+}
+
 struct SplitEvaluator {
     alpha: f64,
     tau: f64,
@@ -456,18 +467,47 @@ impl RefinementStrategy {
 
     pub fn update_statistics<'a>(
         &self,
+        state: FittingState<'a>,
+        col: usize,
+        start: usize,
+        end: usize,
+        affected_points_range: &[(usize, usize)],
+    ) -> FittingState<'a> {
+        self.update_statistics_impl::<true>(state, col, start, end, affected_points_range)
+    }
+
+    /// Retain exact incremental curvature before a full-row reference rebuild.
+    pub(crate) fn update_curvature_statistics<'a>(
+        &self,
+        state: FittingState<'a>,
+        col: usize,
+        start: usize,
+        end: usize,
+        affected_points_range: &[(usize, usize)],
+    ) -> FittingState<'a> {
+        assert!(matches!(self, Self::L2Refinement { .. }));
+        assert!(state
+            .branch_consensus
+            .as_ref()
+            .is_some_and(|reference| reference.anchors.is_none()));
+        self.update_statistics_impl::<false>(state, col, start, end, affected_points_range)
+    }
+
+    fn update_statistics_impl<'a, const LINEAR: bool>(
+        &self,
         mut state: FittingState<'a>,
         col: usize,
         start: usize,
         end: usize,
         affected_points_range: &[(usize, usize)],
     ) -> FittingState<'a> {
+        state.require_current_statistics();
         let updated_points = &state.precomputed_statistics.sorted_indices[col][start..end];
         if updated_points.is_empty() {
             return state;
         }
 
-        // 1) Compute new per-point two-tensor statistics and their deltas vs stored c_*.
+        // 1) Compute the retained per-point statistics and their deltas vs stored c_*.
         // Precomputing deltas avoids re-loading old c_* values for every affected column.
         let residuals = &state.residuals;
 
@@ -481,13 +521,13 @@ impl RefinementStrategy {
             let mut c_s11_new = Vec::with_capacity(updated_points.len());
             let mut c_s22_new = Vec::with_capacity(updated_points.len());
             let mut c_s12_new = Vec::with_capacity(updated_points.len());
-            let mut c_t1_new = Vec::with_capacity(updated_points.len());
-            let mut c_t2_new = Vec::with_capacity(updated_points.len());
+            let mut c_t1_new = Vec::with_capacity(if LINEAR { updated_points.len() } else { 0 });
+            let mut c_t2_new = Vec::with_capacity(if LINEAR { updated_points.len() } else { 0 });
             let mut d_s11 = Vec::with_capacity(updated_points.len());
             let mut d_s22 = Vec::with_capacity(updated_points.len());
             let mut d_s12 = Vec::with_capacity(updated_points.len());
-            let mut d_t1 = Vec::with_capacity(updated_points.len());
-            let mut d_t2 = Vec::with_capacity(updated_points.len());
+            let mut d_t1 = Vec::with_capacity(if LINEAR { updated_points.len() } else { 0 });
+            let mut d_t2 = Vec::with_capacity(if LINEAR { updated_points.len() } else { 0 });
 
             for &pt in updated_points.iter() {
                 let PrefixStats {
@@ -496,19 +536,27 @@ impl RefinementStrategy {
                     s12: new_s12,
                     t1: new_t1,
                     t2: new_t2,
-                } = state.point_statistics(pt, self.weight(residuals[pt]));
+                } = if LINEAR {
+                    state.point_statistics(pt, self.weight(residuals[pt]))
+                } else {
+                    state.point_curvature_statistics(pt, self.weight(residuals[pt]))
+                };
 
                 c_s11_new.push(new_s11);
                 c_s22_new.push(new_s22);
                 c_s12_new.push(new_s12);
-                c_t1_new.push(new_t1);
-                c_t2_new.push(new_t2);
+                if LINEAR {
+                    c_t1_new.push(new_t1);
+                    c_t2_new.push(new_t2);
+                }
 
                 d_s11.push(new_s11 - old_s11[pt]);
                 d_s22.push(new_s22 - old_s22[pt]);
                 d_s12.push(new_s12 - old_s12[pt]);
-                d_t1.push(new_t1 - old_t1[pt]);
-                d_t2.push(new_t2 - old_t2[pt]);
+                if LINEAR {
+                    d_t1.push(new_t1 - old_t1[pt]);
+                    d_t2.push(new_t2 - old_t2[pt]);
+                }
             }
 
             (
@@ -524,8 +572,8 @@ impl RefinementStrategy {
         //    Exact columns: original O(span) scatter + sweep over length-n
         //    prefix sums (parity path).
         //
-        //    The bucket scatter feeds 5 deltas at offset `off`; we coalesce
-        //    those into one `PrefixStats` per bucket slot so the prefix-sum
+        //    The bucket scatter groups the retained deltas at offset `off`
+        //    into one `PrefixStats` per bucket slot so the prefix-sum
         //    sweep touches a single 40-byte struct per index instead of
         //    five independent `Vec<f64>`. Order of additions is unchanged.
         let mut bucket_d: Vec<PrefixStats> = Vec::new();
@@ -557,19 +605,21 @@ impl RefinementStrategy {
                     slot.s11 += d_s11[j];
                     slot.s22 += d_s22[j];
                     slot.s12 += d_s12[j];
-                    slot.t1 += d_t1[j];
-                    slot.t2 += d_t2[j];
+                    if LINEAR {
+                        slot.t1 += d_t1[j];
+                        slot.t2 += d_t2[j];
+                    }
                 }
 
                 let b = &mut state.precomputed_statistics.binned_prefix_sums[c];
                 let mut acc_d = PrefixStats::ZERO;
                 for off in 0..bin_span {
-                    acc_d += bucket_d[off];
-                    b[min_bin + off] += acc_d;
+                    add_statistics::<LINEAR>(&mut acc_d, bucket_d[off]);
+                    add_statistics::<LINEAR>(&mut b[min_bin + off], acc_d);
                 }
                 if let Some(tail) = b.get_mut((max_bin + 1)..) {
                     for v in tail {
-                        *v += acc_d;
+                        add_statistics::<LINEAR>(v, acc_d);
                     }
                 }
             } else {
@@ -588,20 +638,22 @@ impl RefinementStrategy {
                     slot.s11 += d_s11[j];
                     slot.s22 += d_s22[j];
                     slot.s12 += d_s12[j];
-                    slot.t1 += d_t1[j];
-                    slot.t2 += d_t2[j];
+                    if LINEAR {
+                        slot.t1 += d_t1[j];
+                        slot.t2 += d_t2[j];
+                    }
                 }
 
                 let mut acc_d = PrefixStats::ZERO;
                 let range = &mut prefix_sums[min_pos..=max_pos];
                 for off in 0..span {
-                    acc_d += bucket_d[off];
-                    range[off] += acc_d;
+                    add_statistics::<LINEAR>(&mut acc_d, bucket_d[off]);
+                    add_statistics::<LINEAR>(&mut range[off], acc_d);
                 }
 
                 if let Some(tail) = prefix_sums.get_mut((max_pos + 1)..) {
                     for v in tail {
-                        *v += acc_d;
+                        add_statistics::<LINEAR>(v, acc_d);
                     }
                 }
             }
@@ -636,19 +688,21 @@ impl RefinementStrategy {
                 slot.s11 += d_s11[j];
                 slot.s22 += d_s22[j];
                 slot.s12 += d_s12[j];
-                slot.t1 += d_t1[j];
-                slot.t2 += d_t2[j];
+                if LINEAR {
+                    slot.t1 += d_t1[j];
+                    slot.t2 += d_t2[j];
+                }
             }
 
             let b = &mut state.precomputed_statistics.binned_prefix_sums[col];
             let mut acc_d = PrefixStats::ZERO;
             for off in 0..bin_span {
-                acc_d += bucket_d[off];
-                b[min_bin + off] += acc_d;
+                add_statistics::<LINEAR>(&mut acc_d, bucket_d[off]);
+                add_statistics::<LINEAR>(&mut b[min_bin + off], acc_d);
             }
             if let Some(tail) = b.get_mut((max_bin + 1)..) {
                 for v in tail {
-                    *v += acc_d;
+                    add_statistics::<LINEAR>(v, acc_d);
                 }
             }
         } else {
@@ -692,10 +746,20 @@ impl RefinementStrategy {
                 prefix_sums[min_pos + k].t2 = acc.t2;
             }
 
-            let diff = sub_stats(prefix_sums[max_pos], old_last);
+            let diff = if LINEAR {
+                sub_stats(prefix_sums[max_pos], old_last)
+            } else {
+                PrefixStats {
+                    s11: prefix_sums[max_pos].s11 - old_last.s11,
+                    s22: prefix_sums[max_pos].s22 - old_last.s22,
+                    s12: prefix_sums[max_pos].s12 - old_last.s12,
+                    t1: 0.0,
+                    t2: 0.0,
+                }
+            };
             if let Some(tail) = prefix_sums.get_mut((max_pos + 1)..) {
                 for v in tail {
-                    *v += diff;
+                    add_statistics::<LINEAR>(v, diff);
                 }
             }
         }
@@ -711,11 +775,14 @@ impl RefinementStrategy {
                 c_s11[pt] = c_s11_new[j];
                 c_s22[pt] = c_s22_new[j];
                 c_s12[pt] = c_s12_new[j];
-                c_t1[pt] = c_t1_new[j];
-                c_t2[pt] = c_t2_new[j];
+                if LINEAR {
+                    c_t1[pt] = c_t1_new[j];
+                    c_t2[pt] = c_t2_new[j];
+                }
             }
         }
 
+        state.linear_statistics_stale = !LINEAR;
         state
     }
 
@@ -727,7 +794,8 @@ impl RefinementStrategy {
         reference: crate::grid_tensor::state::BranchConsensus,
     ) -> FittingState<'a> {
         use crate::grid_tensor::state::same_consensus_support;
-        let sparse = reference.anchors.is_some()
+        let sparse = !state.linear_statistics_stale
+            && reference.anchors.is_some()
             && !state.split_strategy_state.merge_enabled
             && state
                 .precomputed_statistics
@@ -885,6 +953,7 @@ impl RefinementStrategy {
             }
         }
 
+        state.linear_statistics_stale = false;
         for col in 0..state.p {
             let last_interval = state.boundaries[col].len();
             Self::update_interval_stats_for_col_range(&mut state, col, 0, last_interval);
@@ -904,6 +973,7 @@ impl RefinementStrategy {
         mut state: FittingState<'a>,
         affected_ranges: &[AffectedRange],
     ) -> FittingState<'a> {
+        state.require_current_statistics();
         if state.split_scores_stale
             && (!state.sampled_split_scoring || state.is_stage1_positive_only())
         {
@@ -1067,6 +1137,7 @@ impl RefinementStrategy {
 
     /// Rebuild split scores before an eager consumer or scoring-mode transition.
     pub(crate) fn refresh_all_split_scores(&self, state: &mut FittingState) {
+        state.require_current_statistics();
         let sampled = state.sampled_split_scoring;
         state.sampled_split_scoring = false;
         for col in 0..state.p {
@@ -1078,6 +1149,7 @@ impl RefinementStrategy {
 
     /// Evaluate one sampled coordinate against its current structural interval.
     pub(crate) fn refresh_sampled_split(&self, state: &mut FittingState, col: usize, pos: usize) {
+        state.require_current_statistics();
         let statistics = &state.precomputed_statistics;
         let Some(gain) = statistics.error_reductions_split[col].get(pos) else {
             return;
@@ -1849,3 +1921,6 @@ mod refresh_tests {
 
 #[cfg(test)]
 mod anchor_review_tests;
+
+#[cfg(test)]
+mod deferred_review_tests;
