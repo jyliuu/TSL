@@ -597,6 +597,9 @@ impl std::ops::AddAssign for PrefixStats {
     }
 }
 
+/// Entry budget for the rank-ordered bin streams (32 MiB of `u16`).
+pub const MAX_RANK_STREAM_ENTRIES: usize = 1 << 24;
+
 /// Working buffers containing pre-computed performance caches
 #[derive(Debug, Clone)]
 pub struct PrecomputedStatistics {
@@ -653,6 +656,13 @@ pub struct PrecomputedStatistics {
     /// Immutable row-to-bin mappings shared by cloned grid fitting states.
     /// Exact and constant columns have empty mappings.
     pub bin_indices: Vec<std::sync::Arc<[u16]>>,
+    /// Every feature's bin mapping in each column's sorted-row order,
+    /// `bin_ranks[col][feature * n + rank]`, so an action's affected ranks read each
+    /// feature's bins as one contiguous stream. Empty unless every column is binned and
+    /// the `p * p * n` entries fit [`MAX_RANK_STREAM_ENTRIES`].
+    pub bin_ranks: Vec<std::sync::Arc<[u16]>>,
+    /// Reusable per-action curvature deltas in affected-row order; empty between actions.
+    pub curvature_deltas: Vec<[f64; 3]>,
 
     /// Bin-cumulative prefix sums (length B = bin_edges[col].len() + 1) used in
     /// the binned path. `binned_prefix_sums[col][k]` equals the cumulative
@@ -692,6 +702,8 @@ impl PrecomputedStatistics {
             sort_order: vec![vec![0; n]; p],
             bin_edges: vec![vec![]; p],
             bin_indices: vec![std::sync::Arc::from([]); p],
+            bin_ranks: Vec::new(),
+            curvature_deltas: Vec::new(),
             binned_prefix_sums: vec![vec![]; p],
             initialized: false,
             consensus_weight: 0.0,

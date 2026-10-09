@@ -517,7 +517,94 @@ impl RefinementStrategy {
             return state;
         }
 
-        let deltas = self.collect_binned_curvature_deltas(&mut state, col, start, end);
+        let mut deltas = self.collect_binned_curvature_deltas(&mut state, col, start, end);
+        let n = state.n;
+        if let Some(streams) = state.precomputed_statistics.bin_ranks.get(col).cloned() {
+            // Each feature's bins over the affected ranks form one contiguous stream. Features
+            // are scattered in pairs, and every histogram receives its additions in
+            // affected-row order.
+            assert_eq!(streams.len(), state.p * n);
+            let prefixes = &mut state.precomputed_statistics.binned_prefix_sums;
+            let mut buckets = Vec::new();
+            let mut feature = 0;
+            while feature < state.p {
+                let paired = feature + 1 < state.p;
+                let first_count = prefixes[feature].len();
+                let second_count = if paired {
+                    prefixes[feature + 1].len()
+                } else {
+                    0
+                };
+                buckets.clear();
+                buckets.resize(first_count + second_count, [0.0; 3]);
+                let (first_buckets, second_buckets) = buckets.split_at_mut(first_count);
+                let first_stream = &streams[feature * n + start..feature * n + end];
+                let (mut first_min, mut first_max) = (usize::MAX, 0);
+                let (mut second_min, mut second_max) = (usize::MAX, 0);
+                if paired {
+                    let second_stream =
+                        &streams[(feature + 1) * n + start..(feature + 1) * n + end];
+                    for ((&first_bin, &second_bin), delta) in
+                        first_stream.iter().zip(second_stream).zip(&deltas)
+                    {
+                        let first_bin = first_bin as usize;
+                        let second_bin = second_bin as usize;
+                        first_min = first_min.min(first_bin);
+                        first_max = first_max.max(first_bin);
+                        second_min = second_min.min(second_bin);
+                        second_max = second_max.max(second_bin);
+                        let first_slot = &mut first_buckets[first_bin];
+                        first_slot[0] += delta[0];
+                        first_slot[1] += delta[1];
+                        first_slot[2] += delta[2];
+                        let second_slot = &mut second_buckets[second_bin];
+                        second_slot[0] += delta[0];
+                        second_slot[1] += delta[1];
+                        second_slot[2] += delta[2];
+                    }
+                } else {
+                    for (&bin, delta) in first_stream.iter().zip(&deltas) {
+                        let bin = bin as usize;
+                        // Every touched row contributes to the range, including zero deltas.
+                        first_min = first_min.min(bin);
+                        first_max = first_max.max(bin);
+                        let slot = &mut first_buckets[bin];
+                        slot[0] += delta[0];
+                        slot[1] += delta[1];
+                        slot[2] += delta[2];
+                    }
+                }
+                // Bin membership is monotone in sorted rank. These bounds equal the bins
+                // of the minimum and maximum affected ranks, without a separate rank scan.
+                let histograms = [
+                    (feature, &*first_buckets, first_min, first_max),
+                    (feature + 1, &*second_buckets, second_min, second_max),
+                ];
+                for &(feature, buckets, first, last) in histograms.iter().take(1 + paired as usize)
+                {
+                    let prefix = &mut prefixes[feature];
+                    let mut accumulated = [0.0; 3];
+                    for bin in first..=last {
+                        accumulated[0] += buckets[bin][0];
+                        accumulated[1] += buckets[bin][1];
+                        accumulated[2] += buckets[bin][2];
+                        prefix[bin].s11 += accumulated[0];
+                        prefix[bin].s22 += accumulated[1];
+                        prefix[bin].s12 += accumulated[2];
+                    }
+                    for slot in &mut prefix[(last + 1)..] {
+                        slot.s11 += accumulated[0];
+                        slot.s22 += accumulated[1];
+                        slot.s12 += accumulated[2];
+                    }
+                }
+                feature += 1 + paired as usize;
+            }
+            deltas.clear();
+            state.precomputed_statistics.curvature_deltas = deltas;
+            state.linear_statistics_stale = true;
+            return state;
+        }
         let updated_points = &state.precomputed_statistics.sorted_indices[col][start..end];
 
         let mut buckets = Vec::new();
@@ -610,6 +697,8 @@ impl RefinementStrategy {
                 slot.s12 += accumulated[2];
             }
         }
+        deltas.clear();
+        state.precomputed_statistics.curvature_deltas = deltas;
         state.linear_statistics_stale = true;
         state
     }
@@ -623,7 +712,10 @@ impl RefinementStrategy {
         end: usize,
     ) -> Vec<[f64; 3]> {
         let updated_points = &state.precomputed_statistics.sorted_indices[col][start..end];
-        let mut deltas = Vec::with_capacity(updated_points.len());
+        // The scratch keeps its capacity across actions; it is returned empty afterwards.
+        let mut deltas = std::mem::take(&mut state.precomputed_statistics.curvature_deltas);
+        deltas.clear();
+        deltas.reserve(updated_points.len());
         let n = state.n;
         if let (Some(f_plus), Some(f_minus), Some(r_tilde), Some(residuals), Some(reference)) = (
             state.f_plus.as_slice(),
@@ -2216,3 +2308,5 @@ mod cycle11_linear_bin_slice_tests;
 
 #[cfg(test)]
 mod cycle13_curvature_delta_tests;
+#[cfg(test)]
+mod rank_stream_scatter_tests;

@@ -103,6 +103,52 @@ pub(crate) fn row_bin_indices(sorted_indices: &[usize], edges: &[usize]) -> std:
     membership.into()
 }
 
+/// Per-column rank-ordered bin streams for every feature.
+///
+/// Empty unless every column maps all `n` rows and `p * p * n` entries fit `budget`.
+pub(crate) fn rank_ordered_bin_streams_within(
+    sorted_indices: &[Vec<usize>],
+    bin_indices: &[std::sync::Arc<[u16]>],
+    n: usize,
+    budget: usize,
+) -> Vec<std::sync::Arc<[u16]>> {
+    let p = bin_indices.len();
+    if p == 0
+        || sorted_indices.len() != p
+        || p.saturating_mul(p).saturating_mul(n) > budget
+        || bin_indices.iter().any(|column| column.len() != n)
+        || sorted_indices.iter().any(|order| order.len() != n)
+    {
+        return Vec::new();
+    }
+    sorted_indices
+        .iter()
+        .map(|order| {
+            let mut table = vec![0u16; p * n];
+            for (feature, bins) in bin_indices.iter().enumerate() {
+                let stream = &mut table[feature * n..(feature + 1) * n];
+                for (slot, &row) in stream.iter_mut().zip(order) {
+                    *slot = bins[row];
+                }
+            }
+            table.into()
+        })
+        .collect()
+}
+
+pub(crate) fn rank_ordered_bin_streams(
+    sorted_indices: &[Vec<usize>],
+    bin_indices: &[std::sync::Arc<[u16]>],
+    n: usize,
+) -> Vec<std::sync::Arc<[u16]>> {
+    rank_ordered_bin_streams_within(
+        sorted_indices,
+        bin_indices,
+        n,
+        super::state::MAX_RANK_STREAM_ENTRIES,
+    )
+}
+
 pub(crate) fn apply_histogram_binning_mask_with_input<'a>(
     mut state: FittingState<'a>,
     max_bins: Option<u16>,
@@ -183,6 +229,14 @@ pub(crate) fn apply_histogram_binning_mask_with_input<'a>(
         state.precomputed_statistics.bin_edges[col] = edges;
     }
 
+    state.precomputed_statistics.bin_ranks = match prepared {
+        Some(prepared) => prepared.bin_ranks.clone(),
+        None => rank_ordered_bin_streams(
+            &state.precomputed_statistics.sorted_indices,
+            &state.precomputed_statistics.bin_indices,
+            n,
+        ),
+    };
     state
 }
 

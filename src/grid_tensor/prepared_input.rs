@@ -10,6 +10,7 @@ pub(crate) struct PreparedInput<'a> {
     pub(crate) sort_order: Vec<Vec<usize>>,
     pub(crate) bin_edges: BinEdges,
     pub(crate) bin_indices: Vec<std::sync::Arc<[u16]>>,
+    pub(crate) bin_ranks: Vec<std::sync::Arc<[u16]>>,
 }
 
 #[cfg(test)]
@@ -129,6 +130,11 @@ impl<'a> PreparedInput<'a> {
             sort_order.push(ranks);
             bin_edges.push(edges);
         }
+        let bin_ranks = super::histogram_binning::rank_ordered_bin_streams(
+            &sorted_indices,
+            &bin_indices,
+            x.nrows(),
+        );
         Self {
             x,
             max_bins,
@@ -136,6 +142,7 @@ impl<'a> PreparedInput<'a> {
             sort_order,
             bin_edges,
             bin_indices,
+            bin_ranks,
         }
     }
 
