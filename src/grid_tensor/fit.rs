@@ -13,7 +13,6 @@ use crate::{
     FitResult,
 };
 
-
 const MAX_ITERATIONS_MULTIPLIER: usize = 3;
 
 /// Fit a tree grid model using the action-based reducer pattern
@@ -63,14 +62,15 @@ pub(crate) fn initialize_state_with_input<'a>(
     // Initialize logging state if logging is enabled
     #[cfg(feature = "evo-logging")]
     {
-        use crate::logging::is_logging_enabled;
         use crate::grid_tensor::logging_helpers::LoggingState;
+        use crate::logging::is_logging_enabled;
         if is_logging_enabled() {
             state.logging_state = Some(LoggingState::new());
         }
     }
 
-    let state = refinement_strategy.initialize_with_input(state, prepared, hyperparameters.max_bins);
+    let state =
+        refinement_strategy.initialize_with_input(state, prepared, hyperparameters.max_bins);
     let mut state = state;
     state.current_error = refinement_strategy.weighted_squared_error(&state.residuals);
     split_strategy.initialize(state)
@@ -152,9 +152,17 @@ pub(crate) fn fit_step_with_candidate_refresh<'a, R: Rng + ?Sized>(
     // The fineness budget excludes new splits but leaves resplits and merges
     // available under the same objective. A merge frees capacity for a later split.
     let allow_split = state.loop_state.fineness < n_iter;
-    let Some(action) =
+    let action = if state.sampled_split_scoring || state.split_scores_stale {
+        split_strategy.propose_next_action_with_sampled_scores(
+            &mut state,
+            refinement_strategy,
+            rng,
+            allow_split,
+        )
+    } else {
         split_strategy.propose_next_action_with_split_budget(&state, rng, allow_split)
-    else {
+    };
+    let Some(action) = action else {
         log::debug!("No objective-improving structural action remains, stopping");
         return (state, false);
     };
@@ -297,9 +305,7 @@ fn compute_observation_counts(
 }
 
 /// Convert FittingState into the final output types
-fn convert_state_to_result(
-    state: FittingState,
-) -> (FitResult, GridTensor) {
+fn convert_state_to_result(state: FittingState) -> (FitResult, GridTensor) {
     let x = state.x;
     let labels = state.labels;
     let boundaries = state.boundaries;
@@ -360,16 +366,14 @@ mod tests {
     use ndarray::{Array1, Array2};
     use rand::{rngs::StdRng, SeedableRng};
 
-    use crate::{
-        grid_tensor::{
-            action::FittingAction,
-            fit,
-            reducer::fitting_reducer,
-            refinement::RefinementStrategy,
-            splitting::{MergeCandidate, SplitCandidate, SplitStrategy},
-            state::FittingState,
-            GridTensorParamsBuilder,
-        },
+    use crate::grid_tensor::{
+        action::FittingAction,
+        fit,
+        reducer::fitting_reducer,
+        refinement::RefinementStrategy,
+        splitting::{MergeCandidate, SplitCandidate, SplitStrategy},
+        state::FittingState,
+        GridTensorParamsBuilder,
     };
 
     pub fn setup_data_hardcoded() -> (Array2<f64>, Array1<f64>) {
@@ -1067,9 +1071,9 @@ mod tests {
 
         // Resplitting again should do nothing (idempotence)
         let gain = state.precomputed_statistics.error_reductions_resplit[0][0];
-        
+
         // NOTE: Resplit idempotence doesn't hold exactly when clamping occurs!
-        // 
+        //
         // Why resplit idempotence fails:
         // 1. During split, the solver computes optimal parameters, but they get clamped
         //    (e.g., backbone clamped to MIN_BACKBONE/MAX_BACKBONE, tilt to MAX_TILT)
@@ -1082,13 +1086,15 @@ mod tests {
         //
         // The gain is typically small (O(1e-4) or less) when clamping is minimal,
         // but can be larger when parameters are heavily clamped.
-        
+
         // Use a lenient tolerance that accounts for clamping effects
         // In practice, if parameters aren't heavily clamped, gain should be very small
-        assert!(gain.abs() < 1e-3, 
+        assert!(
+            gain.abs() < 1e-3,
             "Resplit gain should be small after split (idempotence). gain={}. \
-             Note: Non-zero gain is expected when parameters are clamped during split application.", 
-             gain);
+             Note: Non-zero gain is expected when parameters are clamped during split application.",
+            gain
+        );
     }
 
     #[test]
@@ -1169,8 +1175,7 @@ mod tests {
 
     #[test]
     fn interval_ids_follow_inserted_and_removed_boundaries() {
-        let x = Array2::from_shape_vec((6, 1), vec![5.0, 0.0, 3.0, 1.0, 4.0, 2.0])
-            .unwrap();
+        let x = Array2::from_shape_vec((6, 1), vec![5.0, 0.0, 3.0, 1.0, 4.0, 2.0]).unwrap();
         let y = Array1::from_vec(vec![6.0, 1.0, 4.0, 2.0, 5.0, 3.0]);
         let refinement_strategy = RefinementStrategy::L2Refinement {
             alpha: 0.1,
@@ -1245,8 +1250,7 @@ mod tests {
 
     #[test]
     fn repeated_merges_refresh_every_remaining_merge_cache() {
-        let x = Array2::from_shape_vec((8, 1), (0..8).map(|value| value as f64).collect())
-            .unwrap();
+        let x = Array2::from_shape_vec((8, 1), (0..8).map(|value| value as f64).collect()).unwrap();
         let y = Array1::from_vec(vec![1.0, 2.0, 1.0, 2.0, 3.0, 4.0, 3.0, 4.0]);
         let refinement_strategy = RefinementStrategy::L2Refinement {
             alpha: 0.1,
@@ -1291,12 +1295,7 @@ mod tests {
         let mut merge_count = 0;
         while let Some(action) = split_strategy.propose_next_merge(&state) {
             let old_boundary_count = state.boundaries[0].len();
-            state = fitting_reducer(
-                state,
-                action,
-                &refinement_strategy,
-                &split_strategy,
-            );
+            state = fitting_reducer(state, action, &refinement_strategy, &split_strategy);
             merge_count += 1;
 
             assert_eq!(state.boundaries[0].len() + 1, old_boundary_count);
@@ -1314,8 +1313,7 @@ mod tests {
             );
 
             for (interval_idx, &index) in state.boundaries[0].iter().enumerate() {
-                let raw_gain =
-                    state.precomputed_statistics.error_reductions_merge[0][interval_idx];
+                let raw_gain = state.precomputed_statistics.error_reductions_merge[0][interval_idx];
                 let merged_factors =
                     state.precomputed_statistics.update_pairs_merge[0][interval_idx];
                 assert!(raw_gain.is_finite());
@@ -1374,8 +1372,7 @@ mod tests {
 
     #[test]
     fn penalty_enabled_huber_actions_track_the_current_irls_surrogate() {
-        let x = Array2::from_shape_vec((6, 1), (0..6).map(|value| value as f64).collect())
-            .unwrap();
+        let x = Array2::from_shape_vec((6, 1), (0..6).map(|value| value as f64).collect()).unwrap();
         let y = Array1::from_vec(vec![0.0, 2.0, -20.0, 1.0, 3.0, 20.0]);
         let refinement_strategy = RefinementStrategy::HuberRefinement {
             alpha: 0.0,
@@ -1396,8 +1393,7 @@ mod tests {
         state = split_strategy.initialize(state);
         state.current_error = refinement_strategy.weighted_squared_error(&state.residuals);
         assert!(
-            (state.current_error - state.residuals.iter().map(|r| r * r).sum::<f64>()).abs()
-                > 1.0
+            (state.current_error - state.residuals.iter().map(|r| r * r).sum::<f64>()).abs() > 1.0
         );
 
         let index = 3;
@@ -1420,9 +1416,8 @@ mod tests {
             &split_strategy,
         );
         assert!(
-            (state.current_error
-                - refinement_strategy.weighted_squared_error(&state.residuals))
-            .abs()
+            (state.current_error - refinement_strategy.weighted_squared_error(&state.residuals))
+                .abs()
                 < 1e-12
         );
 
@@ -1439,13 +1434,11 @@ mod tests {
             &split_strategy,
         );
         assert!(
-            (state.current_error
-                - refinement_strategy.weighted_squared_error(&state.residuals))
-            .abs()
+            (state.current_error - refinement_strategy.weighted_squared_error(&state.residuals))
+                .abs()
                 < 1e-12
         );
     }
-
 }
 
 #[cfg(test)]
@@ -1637,3 +1630,6 @@ mod two_tensor_invariant_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod lazy_review_tests;

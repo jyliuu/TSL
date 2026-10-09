@@ -72,7 +72,7 @@ pub(super) fn fit_consensus_bag<'a>(
         seeds.first().copied().unwrap_or(0),
     );
     if anchors.is_some() {
-        fit_members_with_candidate_refresh(
+        fit_members_with_split_scoring(
             &mut members,
             tg_params,
             consensus,
@@ -80,6 +80,7 @@ pub(super) fn fit_consensus_bag<'a>(
             anchors.as_ref(),
             epoch,
             CandidateRefresh::Deferred,
+            true,
         );
     } else {
         fit_members(
@@ -129,7 +130,7 @@ fn fit_members<'a>(
     consensus_interval: usize,
     epoch: Option<usize>,
 ) {
-    fit_members_with_candidate_refresh(
+    fit_members_with_split_scoring(
         members,
         tg_params,
         consensus,
@@ -137,9 +138,11 @@ fn fit_members<'a>(
         None,
         epoch,
         CandidateRefresh::Deferred,
+        true,
     );
 }
 
+#[cfg(test)]
 fn fit_members_with_candidate_refresh<'a>(
     members: &mut [Member<'a>],
     tg_params: &GridTensorParams,
@@ -148,6 +151,28 @@ fn fit_members_with_candidate_refresh<'a>(
     anchors: Option<&Arc<ConsensusAnchors>>,
     epoch: Option<usize>,
     candidate_refresh: CandidateRefresh,
+) {
+    fit_members_with_split_scoring(
+        members,
+        tg_params,
+        consensus,
+        consensus_interval,
+        anchors,
+        epoch,
+        candidate_refresh,
+        false,
+    );
+}
+
+fn fit_members_with_split_scoring<'a>(
+    members: &mut [Member<'a>],
+    tg_params: &GridTensorParams,
+    consensus: f64,
+    consensus_interval: usize,
+    anchors: Option<&Arc<ConsensusAnchors>>,
+    epoch: Option<usize>,
+    candidate_refresh: CandidateRefresh,
+    sampled_split_scoring: bool,
 ) {
     assert!(
         consensus_interval > 0,
@@ -198,6 +223,11 @@ fn fit_members_with_candidate_refresh<'a>(
             } = member;
             in_context(*tree_id, epoch, || {
                 let mut current = state.take().expect("member state");
+                current.sampled_split_scoring = sampled_split_scoring
+                    && matches!(
+                        split,
+                        crate::grid_tensor::splitting::SplitStrategy::Random { .. }
+                    );
                 let mut current = if let Some(anchors) = anchors {
                     let reference = BranchConsensus {
                         weight: consensus * (n as f64 / reference_len as f64),
@@ -284,8 +314,9 @@ mod tests {
     use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 
     use super::{
-        fit_consensus_bag, fit_members, fit_members_with_candidate_refresh, in_context,
-        max_iterations, sample_consensus_anchors, Member,
+        fit_consensus_bag, fit_members, fit_members_with_candidate_refresh,
+        fit_members_with_split_scoring, in_context, max_iterations, sample_consensus_anchors,
+        Member,
     };
     use rand::{rngs::StdRng, RngCore, SeedableRng};
     #[cfg(feature = "use-rayon")]
@@ -525,8 +556,12 @@ mod tests {
                 format!("{:?}", b.logging_state)
             );
             // The next full refresh must reconstruct identical candidate and interval caches.
-            let refreshed_a = refinement.refresh_statistics(a.clone());
-            let refreshed_b = refinement.refresh_statistics(b.clone());
+            let mut a = a.clone();
+            let mut b = b.clone();
+            a.sampled_split_scoring = false;
+            b.sampled_split_scoring = false;
+            let refreshed_a = refinement.refresh_statistics(a);
+            let refreshed_b = refinement.refresh_statistics(b);
             assert_eq!(
                 format!("{:?}", refreshed_a.precomputed_statistics),
                 format!("{:?}", refreshed_b.precomputed_statistics)
@@ -586,6 +621,52 @@ mod tests {
                     .build(),
             )
             .build()
+    }
+
+    #[test]
+    fn sampled_random_consensus_matches_eager_models_actions_and_logs() {
+        let (x, y) = data();
+        let anchors = sample_consensus_anchors(x.nrows(), Some(17), 17).unwrap();
+        let mut counts = [0; 3];
+        for interval in [1, 4] {
+            for huber in [false, true] {
+                for max_bins in [None, Some(16)] {
+                    for penalty in [0.0, 0.001] {
+                        for anchors in [None, Some(&anchors)] {
+                            let params = parity_params(huber, max_bins, penalty);
+                            let initial =
+                                initialize_state_with_input(x.view(), y.view(), &params, None);
+                            let mut eager = members_from_state(&initial);
+                            let mut sampled = members_from_state(&initial);
+                            fit_members_with_candidate_refresh(
+                                &mut eager,
+                                &params,
+                                0.3,
+                                interval,
+                                anchors,
+                                None,
+                                CandidateRefresh::Deferred,
+                            );
+                            fit_members_with_split_scoring(
+                                &mut sampled,
+                                &params,
+                                0.3,
+                                interval,
+                                anchors,
+                                None,
+                                CandidateRefresh::Deferred,
+                                true,
+                            );
+                            let current = assert_members_equal(&initial, &params, eager, sampled);
+                            for (total, current) in counts.iter_mut().zip(current) {
+                                *total += current;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(counts[0] > 0 && counts[1] > 0);
     }
 
     #[test]
@@ -882,6 +963,63 @@ mod tests {
                 );
                 let counts = assert_candidate_refresh_parity(&initial, &params, 1);
                 assert_eq!(counts[2], 4, "each member must merge its initial boundary");
+            }
+        }
+    }
+
+    #[test]
+    fn sampled_consensus_matches_eager_actual_merges() {
+        let x = Array2::from_shape_fn((32, 1), |(row, _)| row as f64);
+        let y = Array1::from_shape_fn(32, |row| if row < 16 { -1.0 } else { 2.0 });
+        for huber in [false, true] {
+            for max_bins in [None, Some(8)] {
+                let params = parity_params(huber, max_bins, 1e6);
+                let refinement = params.refinement_strategy_params.get_refinement_strategy();
+                let split_strategy = params.split_strategy_params.get_split_strategy();
+                let mut initial = initialize_state_with_input(x.view(), y.view(), &params, None);
+                // A pre-existing boundary exposes a beneficial complexity-reducing merge.
+                let split = SplitCandidate {
+                    col: 0,
+                    index: 16,
+                    allowed_interval_idx: 0,
+                    error_reduction: initial.precomputed_statistics.error_reductions_split[0][16],
+                    update_left: initial.precomputed_statistics.update_pairs_split_left[0][16],
+                    update_right: initial.precomputed_statistics.update_pairs_split_right[0][16],
+                };
+                initial = fitting_reducer(
+                    initial,
+                    FittingAction::ApplySplit { split },
+                    &refinement,
+                    &split_strategy,
+                );
+                let anchors = sample_consensus_anchors(x.nrows(), Some(8), 17).unwrap();
+                for interval in [1, 4] {
+                    for anchors in [None, Some(&anchors)] {
+                        let mut eager = members_from_state(&initial);
+                        let mut sampled = members_from_state(&initial);
+                        fit_members_with_candidate_refresh(
+                            &mut eager,
+                            &params,
+                            0.3,
+                            interval,
+                            anchors,
+                            None,
+                            CandidateRefresh::Deferred,
+                        );
+                        fit_members_with_split_scoring(
+                            &mut sampled,
+                            &params,
+                            0.3,
+                            interval,
+                            anchors,
+                            None,
+                            CandidateRefresh::Deferred,
+                            true,
+                        );
+                        let counts = assert_members_equal(&initial, &params, eager, sampled);
+                        assert_eq!(counts[2], 4, "each member must merge its initial boundary");
+                    }
+                }
             }
         }
     }

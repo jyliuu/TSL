@@ -36,13 +36,24 @@ pub fn fitting_reducer<'a>(
 }
 
 pub(crate) fn fitting_reducer_with_candidate_refresh<'a>(
-    state: FittingState<'a>,
+    mut state: FittingState<'a>,
     action: FittingAction,
     refinement_strategy: &RefinementStrategy,
     split_strategy: &SplitStrategy,
     candidate_refresh: CandidateRefresh,
 ) -> FittingState<'a> {
-    match action {
+    let sampled_split_scoring = state.sampled_split_scoring;
+    let eager = candidate_refresh == CandidateRefresh::Eager
+        || matches!(&action, FittingAction::Composite { .. });
+    if eager {
+        // Untouched intervals retain scores computed before prefix-tail shifts.
+        // Materialize pending scores before an action that permits another local proposal.
+        if state.split_scores_stale {
+            refinement_strategy.refresh_all_split_scores(&mut state);
+        }
+        state.sampled_split_scoring = false;
+    }
+    let mut state = match action {
         FittingAction::ApplyScaling { factor } => reduce_apply_scaling(state, factor),
         FittingAction::Terminate { reason } => reduce_terminate(state, reason),
         FittingAction::Composite { actions } => {
@@ -51,16 +62,16 @@ pub(crate) fn fitting_reducer_with_candidate_refresh<'a>(
         }
         FittingAction::ApplyMerge { .. }
         | FittingAction::ApplyResplit { .. }
-        | FittingAction::ApplySplit { .. } => {
-            reduce_apply_transformation(
-                state,
-                action,
-                refinement_strategy,
-                split_strategy,
-                candidate_refresh,
-            )
-        }
-    }
+        | FittingAction::ApplySplit { .. } => reduce_apply_transformation(
+            state,
+            action,
+            refinement_strategy,
+            split_strategy,
+            candidate_refresh,
+        ),
+    };
+    state.sampled_split_scoring = sampled_split_scoring;
+    state
 }
 
 /// Apply a split/resplit/merge with all associated side effects
@@ -417,13 +428,14 @@ fn reduce_grid_split_two_tensor(
     state.precomputed_statistics.error_reductions_resplit_pairs[col]
         .insert(insert_at, (f64::NAN, f64::NAN));
     state.precomputed_statistics.error_reductions_merge[col].insert(insert_at, f64::NAN);
-    state.precomputed_statistics.update_pairs_merge[col]
-        .insert(insert_at, (f64::NAN, f64::NAN));
+    state.precomputed_statistics.update_pairs_merge[col].insert(insert_at, (f64::NAN, f64::NAN));
 
     // Split interval stats: insert placeholder for the new right interval
     // (actual values will be computed in update_statistics)
-    state.precomputed_statistics.interval_stats[col]
-        .insert(insert_at + 1, crate::grid_tensor::state::IntervalStats::default());
+    state.precomputed_statistics.interval_stats[col].insert(
+        insert_at + 1,
+        crate::grid_tensor::state::IntervalStats::default(),
+    );
 
     state
 }

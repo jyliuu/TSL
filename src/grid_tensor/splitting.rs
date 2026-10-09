@@ -4,6 +4,7 @@ use rand::{seq::index::sample, Rng};
 
 use crate::grid_tensor::{
     action::FittingAction,
+    refinement::RefinementStrategy,
     state::{FittingState, MAX_CONSECUTIVE_RESPLIT},
 };
 
@@ -32,21 +33,20 @@ fn sample_best_split(
     best_split_candidate
 }
 
-fn sample_random_split<R: Rng + ?Sized>(
+fn sample_random_split_positions<R: Rng + ?Sized>(
     allowed_intervals: &[Vec<Interval>],
     total_positions: &[usize],
     colsample_bytree: f64,
     split_try: usize,
     rng: &mut R,
-    error_reductions: &[Vec<f64>],
-) -> Option<(usize, usize, usize, f64)> {
+    ncols: usize,
+) -> Vec<(usize, usize, usize)> {
     let cols_can_be_sampled: Vec<usize> = total_positions
         .iter()
         .enumerate()
         .filter_map(|(idx, &positions)| if positions == 0 { None } else { Some(idx) })
         .collect();
 
-    let ncols = error_reductions.len();
     let ncols_to_sample = (colsample_bytree * ncols as f64) as usize;
 
     let cols = if cols_can_be_sampled.len() < ncols_to_sample {
@@ -55,7 +55,7 @@ fn sample_random_split<R: Rng + ?Sized>(
         cols_can_be_sampled
     };
 
-    let mut best_split: Option<(usize, usize, usize, f64)> = None;
+    let mut positions = Vec::new();
     for col in cols {
         // Use cached total positions for this feature
         let total_positions = total_positions[col];
@@ -71,24 +71,46 @@ fn sample_random_split<R: Rng + ?Sized>(
             let (split_position, interval_idx) =
                 map_abstract_to_position(allowed_intervals, col, abstract_idx);
 
-            // Check if this position has a valid error reduction
-            if split_position < error_reductions[col].len()
-                && !error_reductions[col][split_position].is_nan()
-                && best_split
-                    .as_ref()
-                    .is_none_or(|candidate| error_reductions[col][split_position] > candidate.3)
-            {
-                best_split = Some((
-                    col,
-                    split_position,
-                    interval_idx,
-                    error_reductions[col][split_position],
-                ));
+            positions.push((col, split_position, interval_idx));
+        }
+    }
+    positions
+}
+
+fn sample_random_split<R: Rng + ?Sized>(
+    allowed_intervals: &[Vec<Interval>],
+    total_positions: &[usize],
+    colsample_bytree: f64,
+    split_try: usize,
+    rng: &mut R,
+    error_reductions: &[Vec<f64>],
+) -> Option<(usize, usize, usize, f64)> {
+    let positions = sample_random_split_positions(
+        allowed_intervals,
+        total_positions,
+        colsample_bytree,
+        split_try,
+        rng,
+        error_reductions.len(),
+    );
+    best_scored_random_position(positions, |col, index| {
+        error_reductions[col].get(index).copied()
+    })
+}
+
+fn best_scored_random_position(
+    positions: Vec<(usize, usize, usize)>,
+    mut score: impl FnMut(usize, usize) -> Option<f64>,
+) -> Option<(usize, usize, usize, f64)> {
+    let mut best: Option<(usize, usize, usize, f64)> = None;
+    for (col, index, interval_idx) in positions {
+        if let Some(gain) = score(col, index) {
+            if !gain.is_nan() && best.as_ref().is_none_or(|candidate| gain > candidate.3) {
+                best = Some((col, index, interval_idx, gain));
             }
         }
     }
-
-    best_split
+    best
 }
 
 fn sample_top_k_split<R: Rng + ?Sized>(
@@ -320,6 +342,70 @@ impl SplitStrategy {
         let best_split_candidate = allow_split
             .then(|| self.propose_best_split(state, rng))
             .flatten();
+        self.action_from_candidates(state, best_split_candidate)
+    }
+
+    pub(crate) fn propose_next_action_with_sampled_scores<R: Rng + ?Sized>(
+        &self,
+        state: &mut FittingState,
+        refinement: &RefinementStrategy,
+        rng: &mut R,
+        allow_split: bool,
+    ) -> Option<FittingAction> {
+        let Self::Random {
+            colsample_bytree,
+            split_try,
+            ..
+        } = self
+        else {
+            if state.split_scores_stale {
+                refinement.refresh_all_split_scores(state);
+            }
+            return self.propose_next_action_with_split_budget(state, rng, allow_split);
+        };
+        if !state.sampled_split_scoring
+            || !state.split_scores_stale
+            || state.is_stage1_positive_only()
+        {
+            if state.split_scores_stale {
+                refinement.refresh_all_split_scores(state);
+            }
+            return self.propose_next_action_with_split_budget(state, rng, allow_split);
+        }
+        let best_split = if allow_split {
+            let positions = sample_random_split_positions(
+                &state.split_strategy_state.allowed_intervals,
+                &state.split_strategy_state.total_positions,
+                *colsample_bytree,
+                *split_try,
+                rng,
+                state.p,
+            );
+            best_scored_random_position(positions, |col, index| {
+                refinement.refresh_sampled_split(state, col, index);
+                state.precomputed_statistics.error_reductions_split[col]
+                    .get(index)
+                    .copied()
+            })
+            .map(|(col, index, interval_idx, gain)| SplitCandidate {
+                col,
+                index,
+                allowed_interval_idx: interval_idx,
+                error_reduction: gain,
+                update_left: state.precomputed_statistics.update_pairs_split_left[col][index],
+                update_right: state.precomputed_statistics.update_pairs_split_right[col][index],
+            })
+        } else {
+            None
+        };
+        self.action_from_candidates(state, best_split)
+    }
+
+    fn action_from_candidates(
+        &self,
+        state: &FittingState,
+        best_split_candidate: Option<SplitCandidate>,
+    ) -> Option<FittingAction> {
         let best_resplit_candidate = self.propose_best_resplit(state);
         let best_merge_candidate = self.propose_best_merge(state);
 

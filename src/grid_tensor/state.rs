@@ -54,6 +54,11 @@ pub struct FittingState<'a> {
     /// Proximal pull of each branch toward reference branch functions.
     pub branch_consensus: Option<BranchConsensus>,
 
+    /// Consensus Random proposals evaluate split scores at their sampled positions.
+    pub(crate) sampled_split_scoring: bool,
+    /// Some split scores require evaluation against the current prefix statistics.
+    pub(crate) split_scores_stale: bool,
+
     // Logging state (optional: only when logging enabled)
     // Note: LoggingState is not Clone (contains Sender), so FittingState is not Clone
     #[cfg(feature = "evo-logging")]
@@ -88,6 +93,8 @@ impl<'a> Clone for FittingState<'a> {
             iteration: self.iteration,
             terminated: self.terminated,
             branch_consensus: self.branch_consensus.clone(),
+            sampled_split_scoring: self.sampled_split_scoring,
+            split_scores_stale: self.split_scores_stale,
             #[cfg(feature = "evo-logging")]
             logging_state: None, // Can't clone LoggingState (contains Sender)
         }
@@ -155,6 +162,8 @@ impl<'a> FittingState<'a> {
             iteration: 0,
             terminated: false,
             branch_consensus: None,
+            sampled_split_scoring: false,
+            split_scores_stale: false,
             #[cfg(feature = "evo-logging")]
             logging_state: None,
         }

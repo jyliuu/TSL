@@ -34,6 +34,86 @@ pub enum RefinementStrategy {
     },
 }
 
+struct SplitEvaluator {
+    alpha: f64,
+    tau: f64,
+    rho: f64,
+    v_min: f64,
+    v_max: f64,
+    is_stage1: bool,
+}
+
+impl SplitEvaluator {
+    fn new(strategy: &RefinementStrategy, is_stage1: bool) -> Self {
+        let (v_min, v_max) = strategy.multiplier_bounds();
+        Self {
+            alpha: strategy.alpha(),
+            tau: strategy.tilt_tau(),
+            rho: strategy.tilt_rho(),
+            v_min,
+            v_max,
+            is_stage1,
+        }
+    }
+
+    fn evaluate(
+        &self,
+        left: PrefixStats,
+        total: PrefixStats,
+    ) -> ((f64, f64), (f64, f64), (f64, f64)) {
+        let Self {
+            alpha,
+            tau,
+            rho,
+            v_min,
+            v_max,
+            is_stage1,
+        } = *self;
+        if is_stage1 {
+            let h_l = left.s11;
+            let g_l = left.t1;
+            let h_r = total.s11 - h_l;
+            let g_r = total.t1 - g_l;
+            let (u_l, _, _) = l2_update_unanchored(alpha, g_l, h_l);
+            let v_b_l = (1.0 + u_l).clamp(v_min, v_max);
+            let u_l_clamped = v_b_l - 1.0;
+            let gain_l = backbone_regularized_gain(u_l_clamped, g_l, h_l, alpha);
+            let (u_r, _, _) = l2_update_unanchored(alpha, g_r, h_r);
+            let v_b_r = (1.0 + u_r).clamp(v_min, v_max);
+            let u_r_clamped = v_b_r - 1.0;
+            let gain_r = backbone_regularized_gain(u_r_clamped, g_r, h_r, alpha);
+            ((u_l_clamped, 0.0), (u_r_clamped, 0.0), (gain_l, gain_r))
+        } else {
+            let s11_r = total.s11 - left.s11;
+            let s22_r = total.s22 - left.s22;
+            let s12_r = total.s12 - left.s12;
+            let t1_r = total.t1 - left.t1;
+            let t2_r = total.t2 - left.t2;
+            let (u_plus_l, u_minus_l, gain_l) = solve_two_tensor(
+                left.s11, left.s22, left.s12, left.t1, left.t2, alpha, tau, rho, v_min, v_max,
+            );
+            let (u_plus_r, u_minus_r, gain_r) = solve_two_tensor(
+                s11_r, s22_r, s12_r, t1_r, t2_r, alpha, tau, rho, v_min, v_max,
+            );
+            (
+                (u_plus_l, u_minus_l),
+                (u_plus_r, u_minus_r),
+                (gain_l, gain_r),
+            )
+        }
+    }
+}
+
+fn solver_stats(value: PrefixStats, base: PrefixStats) -> PrefixStats {
+    PrefixStats {
+        s11: value.s11 - base.s11,
+        s22: value.s22 - base.s22,
+        s12: -(value.s12 - base.s12),
+        t1: value.t1 - base.t1,
+        t2: -(value.t2 - base.t2),
+    }
+}
+
 impl RefinementStrategy {
     /// Multiplier limits combine the numerical box with the configured log-step cap.
     #[inline]
@@ -824,6 +904,11 @@ impl RefinementStrategy {
         mut state: FittingState<'a>,
         affected_ranges: &[AffectedRange],
     ) -> FittingState<'a> {
+        if state.split_scores_stale
+            && (!state.sampled_split_scoring || state.is_stage1_positive_only())
+        {
+            self.refresh_all_split_scores(&mut state);
+        }
         for affected_range in affected_ranges {
             let c = affected_range.col;
             let (lo, hi) = affected_range.point_range;
@@ -944,7 +1029,23 @@ impl RefinementStrategy {
             // Computes the error reductions for any interval that intersects with the updated points range
 
             let end = b;
-            if end > lo {
+            if end > lo && state.sampled_split_scoring && !is_stage1 {
+                // solve_two_tensor returns finite gains, so summing the two sides cannot
+                // create NaN eligibility masks. Positive-only scoring uses the eager path.
+                // Preserve every historical mask, including endpoints of past intervals.
+                if end.saturating_sub(start) >= 2 {
+                    for pos in [start, end - 1] {
+                        state.precomputed_statistics.error_reductions_split[col][pos] = f64::NAN;
+                        state.precomputed_statistics.update_pairs_split_left[col][pos] =
+                            (f64::NAN, f64::NAN);
+                        state.precomputed_statistics.update_pairs_split_right[col][pos] =
+                            (f64::NAN, f64::NAN);
+                        state.precomputed_statistics.error_reductions_split_pairs[col][pos] =
+                            (f64::NAN, f64::NAN);
+                    }
+                }
+                state.split_scores_stale = true;
+            } else if end > lo {
                 self.update_error_reductions_split_single_interval(
                     &state.precomputed_statistics.prefix_sums[col],
                     &state.precomputed_statistics.binned_prefix_sums[col],
@@ -962,6 +1063,67 @@ impl RefinementStrategy {
                 break;
             }
         }
+    }
+
+    /// Rebuild split scores before an eager consumer or scoring-mode transition.
+    pub(crate) fn refresh_all_split_scores(&self, state: &mut FittingState) {
+        let sampled = state.sampled_split_scoring;
+        state.sampled_split_scoring = false;
+        for col in 0..state.p {
+            self.update_error_reductions_split_for_col_range(state, col, 0, state.n);
+        }
+        state.sampled_split_scoring = sampled;
+        state.split_scores_stale = false;
+    }
+
+    /// Evaluate one sampled coordinate against its current structural interval.
+    pub(crate) fn refresh_sampled_split(&self, state: &mut FittingState, col: usize, pos: usize) {
+        let statistics = &state.precomputed_statistics;
+        let Some(gain) = statistics.error_reductions_split[col].get(pos) else {
+            return;
+        };
+        if gain.is_nan() {
+            return;
+        }
+        let interval = state.boundaries[col].partition_point(|&boundary| boundary <= pos);
+        let (start, end) = state.interval_range(col, interval);
+        if pos <= start || pos >= end.saturating_sub(1) {
+            return;
+        }
+        let bin_edges = &statistics.bin_edges[col];
+        let (base, left, total) = if bin_edges.is_empty() {
+            let ps = &statistics.prefix_sums[col];
+            (
+                if start == 0 {
+                    PrefixStats::ZERO
+                } else {
+                    ps[start - 1]
+                },
+                ps[pos - 1],
+                ps[end - 1],
+            )
+        } else {
+            let Ok(bin) = bin_edges.binary_search(&pos) else {
+                return;
+            };
+            let bs = &statistics.binned_prefix_sums[col];
+            (
+                if start == 0 {
+                    PrefixStats::ZERO
+                } else {
+                    binned_prefix_stats_at(bs, bin_edges, start - 1)
+                },
+                bs[bin],
+                binned_prefix_stats_at(bs, bin_edges, end - 1),
+            )
+        };
+        let (left, right, gains) = SplitEvaluator::new(self, state.is_stage1_positive_only())
+            .evaluate(solver_stats(left, base), solver_stats(total, base));
+        let statistics = &mut state.precomputed_statistics;
+        statistics.update_pairs_split_left[col][pos] = left;
+        statistics.update_pairs_split_right[col][pos] = right;
+        statistics.error_reductions_split_pairs[col][pos] = gains;
+        statistics.error_reductions_split[col][pos] = gains.0 + gains.1;
     }
 
     fn update_error_reductions_resplit_for_col_range(
@@ -1224,10 +1386,7 @@ impl RefinementStrategy {
         error_reductions[start] = f64::NAN;
         error_reductions_pairs[start] = (f64::NAN, f64::NAN);
 
-        let alpha = self.alpha();
-        let (v_min, v_max) = self.multiplier_bounds();
-        let tau = self.tilt_tau();
-        let rho = self.tilt_rho();
+        let evaluator = SplitEvaluator::new(self, is_stage1);
 
         // Evaluate a single candidate position given left-side sufficient stats.
         // Closed over the output slices + total stats. Shared between the
@@ -1254,45 +1413,26 @@ impl RefinementStrategy {
                 return;
             }
 
-            if is_stage1 {
-                let h_l = s11_l;
-                let g_l = t1_l;
-                let h_r = total_s11 - h_l;
-                let g_r = total_t1 - g_l;
-
-                let (u_l, _denom_l, _num_l) = l2_update_unanchored(alpha, g_l, h_l);
-                let v_b_l = (1.0 + u_l).clamp(v_min, v_max);
-                let u_l_clamped = v_b_l - 1.0;
-                let gain_l = backbone_regularized_gain(u_l_clamped, g_l, h_l, alpha);
-
-                let (u_r, _denom_r, _num_r) = l2_update_unanchored(alpha, g_r, h_r);
-                let v_b_r = (1.0 + u_r).clamp(v_min, v_max);
-                let u_r_clamped = v_b_r - 1.0;
-                let gain_r = backbone_regularized_gain(u_r_clamped, g_r, h_r, alpha);
-
-                update_left[pos] = (u_l_clamped, 0.0);
-                update_right[pos] = (u_r_clamped, 0.0);
-                error_reductions[pos] = gain_l + gain_r;
-                error_reductions_pairs[pos] = (gain_l, gain_r);
-            } else {
-                let s11_r = total_s11 - s11_l;
-                let s22_r = total_s22 - s22_l;
-                let s12_r = total_s12 - s12_l;
-                let t1_r = total_t1 - t1_l;
-                let t2_r = total_t2 - t2_l;
-
-                let (u_plus_l, u_minus_l, gain_l) = solve_two_tensor(
-                    s11_l, s22_l, s12_l, t1_l, t2_l, alpha, tau, rho, v_min, v_max,
-                );
-                let (u_plus_r, u_minus_r, gain_r) = solve_two_tensor(
-                    s11_r, s22_r, s12_r, t1_r, t2_r, alpha, tau, rho, v_min, v_max,
-                );
-
-                update_left[pos] = (u_plus_l, u_minus_l);
-                update_right[pos] = (u_plus_r, u_minus_r);
-                error_reductions[pos] = gain_l + gain_r;
-                error_reductions_pairs[pos] = (gain_l, gain_r);
-            }
+            let (left, right, gains) = evaluator.evaluate(
+                PrefixStats {
+                    s11: s11_l,
+                    s22: s22_l,
+                    s12: s12_l,
+                    t1: t1_l,
+                    t2: t2_l,
+                },
+                PrefixStats {
+                    s11: total_s11,
+                    s22: total_s22,
+                    s12: total_s12,
+                    t1: total_t1,
+                    t2: total_t2,
+                },
+            );
+            update_left[pos] = left;
+            update_right[pos] = right;
+            error_reductions[pos] = gains.0 + gains.1;
+            error_reductions_pairs[pos] = gains;
         };
 
         if bin_edges.is_empty() {
