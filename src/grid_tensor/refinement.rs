@@ -943,6 +943,60 @@ impl RefinementStrategy {
         self.refresh_error_reduction_caches_for_affected(state, &ranges)
     }
 
+    /// Populate linear terms from contiguous full-row references with retained L2 curvature.
+    fn refresh_full_row_linear_slices(state: &mut FittingState<'_>) -> bool {
+        let Some(reference) = state.branch_consensus.as_ref() else {
+            return false;
+        };
+        let n = state.n;
+        if reference.anchors.is_some() || state.residuals.len() < n {
+            return false;
+        }
+        let (Some(plus), Some(minus), Some(residual), Some(target_plus), Some(target_minus)) = (
+            state.f_plus.as_slice(),
+            state.f_minus.as_slice(),
+            state.r_tilde.as_slice(),
+            reference.plus.as_slice(),
+            reference.minus.as_slice(),
+        ) else {
+            return false;
+        };
+        let statistics = &mut state.precomputed_statistics;
+        if [
+            plus.len(),
+            minus.len(),
+            residual.len(),
+            target_plus.len(),
+            target_minus.len(),
+            statistics.c_t1.len(),
+            statistics.c_t2.len(),
+        ]
+        .into_iter()
+        .any(|len| len < n)
+        {
+            return false;
+        }
+        let (plus, minus, residual, target_plus, target_minus) = (
+            &plus[..n],
+            &minus[..n],
+            &residual[..n],
+            &target_plus[..n],
+            &target_minus[..n],
+        );
+        let (c_t1, c_t2) = (&mut statistics.c_t1[..n], &mut statistics.c_t2[..n]);
+        let rho = reference.weight;
+        for row in 0..n {
+            let (fp, fm, rt) = (plus[row], minus[row], residual[row]);
+            let mut t1 = 1.0 * rt * fp;
+            let mut t2 = 1.0 * rt * fm;
+            t1 += rho * (target_plus[row] - fp) * fp;
+            t2 += rho * (fm - target_minus[row]) * fm;
+            c_t1[row] = t1;
+            c_t2[row] = t2;
+        }
+        true
+    }
+
     /// Rebuild every statistic that depends on the residuals or the branch consensus.
     ///
     /// The partition and factors are kept; per-point sufficient statistics, prefix sums,
@@ -963,10 +1017,12 @@ impl RefinementStrategy {
                 &consensus_anchors,
             );
         if weights_fixed {
-            for i in 0..n {
-                let point = state.point_statistics(i, self.weight(state.residuals[i]));
-                state.precomputed_statistics.c_t1[i] = point.t1;
-                state.precomputed_statistics.c_t2[i] = point.t2;
+            if !Self::refresh_full_row_linear_slices(&mut state) {
+                for i in 0..n {
+                    let point = state.point_statistics(i, self.weight(state.residuals[i]));
+                    state.precomputed_statistics.c_t1[i] = point.t1;
+                    state.precomputed_statistics.c_t2[i] = point.t2;
+                }
             }
         } else {
             for i in 0..n {
@@ -2016,3 +2072,6 @@ mod cycle4_review_tests;
 
 #[cfg(test)]
 mod cycle5_refresh_tests;
+
+#[cfg(test)]
+mod cycle7_refresh_tests;

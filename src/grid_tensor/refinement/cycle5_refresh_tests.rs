@@ -11,7 +11,7 @@ use crate::grid_tensor::{
 };
 
 // The two-pass oracle separates row evaluation from writes to the statistic caches.
-fn two_pass_refresh<'a>(
+pub(super) fn two_pass_refresh<'a>(
     strategy: &RefinementStrategy,
     mut state: FittingState<'a>,
 ) -> FittingState<'a> {
@@ -168,7 +168,7 @@ fn slice_bits(actual: &[f64], expected: &[f64]) {
     }
 }
 
-fn assert_statistics_bits(actual: &FittingState, expected: &FittingState) {
+pub(super) fn assert_statistics_bits(actual: &FittingState, expected: &FittingState) {
     let (a, e) = (
         &actual.precomputed_statistics,
         &expected.precomputed_statistics,
