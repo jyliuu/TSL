@@ -382,7 +382,7 @@ pub fn create_raw_component_event(
         return RawLoggingEvent::Component(snapshot);
     }
 
-    // Compute intervals from state (same logic as in convert_state_to_result)
+    // Compute intervals from state (same logic as in convert_state_to_grid)
     let mut intervals = Vec::with_capacity(intervals_count);
     let mut prev = 0usize;
     for &b in &state.boundaries[col] {

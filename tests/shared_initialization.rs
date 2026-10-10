@@ -26,8 +26,8 @@ fn ordered_grid_bag_matches_ensemble_grids_and_training_predictions() {
     let _guard = TEST_LOCK.lock().unwrap();
     let (x, y) = data(127, 4, false);
     for bins in [None, Some(16)] {
-        for huber in [false, true] {
-            let parameters = params(false, huber, bins, 7);
+        for (huber, consensus) in [(false, 0.0), (true, 0.0), (false, 0.3), (true, 0.3)] {
+            let parameters = params_with_consensus(false, huber, bins, 7, consensus);
             let mut bag_rng = StdRng::seed_from_u64(312);
             let mut ensemble_rng = bag_rng.clone();
             let bag = fit_grid_bag(x.view(), y.view(), &parameters, &mut bag_rng);
@@ -63,6 +63,16 @@ fn data(n: usize, p: usize, positive: bool) -> (Array2<f64>, Array1<f64>) {
 }
 
 fn params(best: bool, huber: bool, bins: Option<u16>, trees: usize) -> StagePredictorParams {
+    params_with_consensus(best, huber, bins, trees, 0.0)
+}
+
+fn params_with_consensus(
+    best: bool,
+    huber: bool,
+    bins: Option<u16>,
+    trees: usize,
+    consensus: f64,
+) -> StagePredictorParams {
     let split = SplitStrategyParamsBuilder::new()
         .split_try(9)
         .colsample_bytree(0.8)
@@ -86,6 +96,7 @@ fn params(best: bool, huber: bool, bins: Option<u16>, trees: usize) -> StagePred
         .n_trees(trees)
         .n_iter(12)
         .similarity_threshold(0.5)
+        .consensus(consensus)
         .split_strategy(split.build())
         .refinement_strategy(refinement.build())
         .max_bins(bins)
@@ -192,6 +203,45 @@ fn shared_initialization_accepts_strided_data_and_single_grid() {
         let expected = independent_ensemble(x, y, &params, &mut StdRng::seed_from_u64(99));
         let actual = fit_ensemble(x, y, &params, &mut StdRng::seed_from_u64(99));
         assert_fit_parity(&actual, &expected);
+    }
+}
+
+#[cfg(feature = "evo-logging")]
+#[test]
+fn logged_consensus_ensemble_reports_every_member() {
+    let _guard = TEST_LOCK.lock().unwrap();
+    struct SenderGuard;
+    impl Drop for SenderGuard {
+        fn drop(&mut self) {
+            logging::clear_event_sender();
+        }
+    }
+    let (x, y) = data(80, 4, false);
+    let params = params_with_consensus(false, true, Some(16), 3, 0.3);
+    let (tx, rx) = std::sync::mpsc::channel();
+    logging::set_event_sender(tx);
+    let guard = SenderGuard;
+    let (_, ensemble) = logging::with_epoch(7, || {
+        let mut rng = StdRng::seed_from_u64(71);
+        fit_ensemble(x.view(), y.view(), &params, &mut rng)
+    });
+    drop(guard);
+    let events: Vec<_> = rx.into_iter().collect();
+    for expected_tree in 0..params.n_trees {
+        assert!(events.iter().any(|event| matches!(event,
+            logging::LoggingMessage::GridErrFitted { epoch: 7, tree_id, variant: logging::GridErrorVariant::Train, .. }
+                if *tree_id == expected_tree)));
+        assert!(events.iter().any(|event| matches!(event,
+            logging::LoggingMessage::Component { epoch: 7, tree_id, .. }
+                if *tree_id == expected_tree)));
+    }
+    let mut unlogged_rng = StdRng::seed_from_u64(71);
+    let (_, unlogged) = fit_ensemble(x.view(), y.view(), &params, &mut unlogged_rng);
+    for (grid, expected) in ensemble.grid_tensors.iter().zip(&unlogged.grid_tensors) {
+        assert_eq!(
+            bincode::serialize(grid).unwrap(),
+            bincode::serialize(expected).unwrap()
+        );
     }
 }
 

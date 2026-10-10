@@ -836,4 +836,6 @@ pub(crate) fn compute_partial_products_for_axis(
 }
 
 #[cfg(test)]
+mod interval_index_tests;
+#[cfg(test)]
 mod prediction_cache_tests;

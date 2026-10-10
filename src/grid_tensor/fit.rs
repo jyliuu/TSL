@@ -195,7 +195,6 @@ pub(crate) fn fit_step_with_candidate_refresh<'a, R: Rng + ?Sized>(
     (state, true)
 }
 
-/// Identify the fitted factors and convert the state into the output types.
 /// Identify the fitted grid and log its final component states.
 pub(crate) fn finish_grid(mut state: FittingState<'_>) -> GridTensor {
     log::debug!(
