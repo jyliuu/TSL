@@ -156,10 +156,8 @@ fn assert_states_identical(actual: &FittingState, expected: &FittingState) {
         &actual.precomputed_statistics,
         &expected.precomputed_statistics,
     );
+    crate::grid_tensor::state::assert_curvature_bits(&a.curvature, &e.curvature);
     for (a, e) in [
-        (&a.c_s11, &e.c_s11),
-        (&a.c_s22, &e.c_s22),
-        (&a.c_s12, &e.c_s12),
         (&a.c_t1, &e.c_t1),
         (&a.c_t2, &e.c_t2),
     ] {

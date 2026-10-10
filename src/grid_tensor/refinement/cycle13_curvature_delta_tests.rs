@@ -20,14 +20,14 @@ fn accepted11_deltas(
     for &row in updated_points {
         let point = state.point_curvature_statistics(row, refinement.weight(state.residuals[row]));
         deltas.push([
-            point.s11 - state.precomputed_statistics.c_s11[row],
-            point.s22 - state.precomputed_statistics.c_s22[row],
-            point.s12 - state.precomputed_statistics.c_s12[row],
+            point.s11 - state.precomputed_statistics.curvature[row].s11,
+            point.s22 - state.precomputed_statistics.curvature[row].s22,
+            point.s12 - state.precomputed_statistics.curvature[row].s12,
         ]);
         // Row statistics depend on predictions and the reference, not another row's cache.
-        state.precomputed_statistics.c_s11[row] = point.s11;
-        state.precomputed_statistics.c_s22[row] = point.s22;
-        state.precomputed_statistics.c_s12[row] = point.s12;
+        state.precomputed_statistics.curvature[row].s11 = point.s11;
+        state.precomputed_statistics.curvature[row].s22 = point.s22;
+        state.precomputed_statistics.curvature[row].s12 = point.s12;
     }
     deltas
 }
@@ -144,17 +144,17 @@ fn cycle13_curvature_deltas_preserve_arithmetic_and_row_order() {
                     1 => {
                         state.f_plus[row] = if row % 2 == 0 { -0.0 } else { 0.0 };
                         state.f_minus[row] = if row % 3 == 0 { -0.0 } else { 0.0 };
-                        state.precomputed_statistics.c_s11[row] = -0.0;
-                        state.precomputed_statistics.c_s22[row] = 0.0;
-                        state.precomputed_statistics.c_s12[row] = -0.0;
+                        state.precomputed_statistics.curvature[row].s11 = -0.0;
+                        state.precomputed_statistics.curvature[row].s22 = 0.0;
+                        state.precomputed_statistics.curvature[row].s12 = -0.0;
                     }
                     2 => {
                         let value = [f64::from_bits(1), 1e-140, 1e140, 1e-70, 1e70][row % 5];
                         state.f_plus[row] = value;
                         state.f_minus[row] = value * 0.5;
-                        state.precomputed_statistics.c_s11[row] = -1e280;
-                        state.precomputed_statistics.c_s22[row] = 1e280;
-                        state.precomputed_statistics.c_s12[row] = -1e280;
+                        state.precomputed_statistics.curvature[row].s11 = -1e280;
+                        state.precomputed_statistics.curvature[row].s22 = 1e280;
+                        state.precomputed_statistics.curvature[row].s12 = -1e280;
                     }
                     _ => state.f_minus[row] = 0.0,
                 }
@@ -231,22 +231,21 @@ fn cycle13_curvature_deltas_preserve_each_shape_and_stride_fallback() {
             compare(state, &refinement, 0, n, variant == 0);
         }
     }
-    for index in 0..3 {
-        for shorter in [false, true] {
-            let mut state = initial.clone();
-            let n = state.n;
-            let cache = match index {
-                0 => &mut state.precomputed_statistics.c_s11,
-                1 => &mut state.precomputed_statistics.c_s22,
-                _ => &mut state.precomputed_statistics.c_s12,
-            };
-            if shorter {
-                cache.truncate(n - 1);
-            } else {
-                cache.push(-0.0);
-            }
-            compare(state, &refinement, 0, n, shorter);
+    // One vector holds all three curvature statistics; one shape sweep covers it.
+    for shorter in [false, true] {
+        let mut state = initial.clone();
+        let n = state.n;
+        let cache = &mut state.precomputed_statistics.curvature;
+        if shorter {
+            cache.truncate(n - 1);
+        } else {
+            cache.push(crate::grid_tensor::state::CurvatureCache {
+                s11: -0.0,
+                s22: -0.0,
+                s12: -0.0,
+            });
         }
+        compare(state, &refinement, 0, n, shorter);
     }
 }
 
@@ -261,7 +260,7 @@ fn cycle13_curvature_deltas_preserve_empty_and_invalid_row_failures() {
             0 => {
                 state.f_plus = Array1::zeros(0);
                 state.residuals = Array1::zeros(0);
-                state.precomputed_statistics.c_s11.clear();
+                state.precomputed_statistics.curvature.clear();
                 state.precomputed_statistics.sorted_indices[0] = vec![usize::MAX];
                 let expected = state.clone();
                 let actual = refinement.update_binned_curvature_statistics(state.clone(), 0, 0, 0);
@@ -290,7 +289,7 @@ fn cycle13_curvature_deltas_preserve_empty_and_invalid_row_failures() {
             _ => {
                 let reference = state.branch_consensus.as_mut().unwrap();
                 reference.plus = Array1::from_iter(reference.plus.iter().take(n - 1).copied());
-                state.precomputed_statistics.c_s11.truncate(n - 2);
+                state.precomputed_statistics.curvature.truncate(n - 2);
                 state.precomputed_statistics.sorted_indices[0] = vec![0, n - 1, 3];
                 3
             }

@@ -88,13 +88,7 @@ fn statistics_bits(actual: &FittingState, expected: &FittingState, linear: bool)
         &actual.precomputed_statistics,
         &expected.precomputed_statistics,
     );
-    for (a, e) in [
-        (&a.c_s11, &e.c_s11),
-        (&a.c_s22, &e.c_s22),
-        (&a.c_s12, &e.c_s12),
-    ] {
-        slice_bits(a, e);
-    }
+    crate::grid_tensor::state::assert_curvature_bits(&a.curvature, &e.curvature);
     if linear {
         slice_bits(&a.c_t1, &e.c_t1);
         slice_bits(&a.c_t2, &e.c_t2);
@@ -209,9 +203,14 @@ fn cycle4_review_zero_deltas_keep_touched_range_and_signed_zero() {
     for row in 0..state.n {
         update_prediction(&mut state, row, -0.0, 0.0);
     }
-    state.precomputed_statistics.c_s11.fill(0.0);
-    state.precomputed_statistics.c_s22.fill(0.0);
-    state.precomputed_statistics.c_s12.fill(-0.0);
+    state
+        .precomputed_statistics
+        .curvature
+        .fill(crate::grid_tensor::state::CurvatureCache {
+            s11: 0.0,
+            s22: 0.0,
+            s12: -0.0,
+        });
     for column in &mut state.precomputed_statistics.binned_prefix_sums {
         for value in column {
             *value = PrefixStats {

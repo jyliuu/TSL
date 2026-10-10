@@ -139,9 +139,9 @@ fn assert_direct_statistics(state: &FittingState, strategy: &RefinementStrategy)
     for row in 0..state.n {
         point_close(
             PrefixStats {
-                s11: statistics.c_s11[row],
-                s22: statistics.c_s22[row],
-                s12: statistics.c_s12[row],
+                s11: statistics.curvature[row].s11,
+                s22: statistics.curvature[row].s22,
+                s12: statistics.curvature[row].s12,
                 t1: statistics.c_t1[row],
                 t2: statistics.c_t2[row],
             },
@@ -228,9 +228,7 @@ fn dense_reference_refresh<'a>(
         &state.precomputed_statistics,
         &mut expected.precomputed_statistics,
     );
-    after.c_s11.clone_from(&before.c_s11);
-    after.c_s22.clone_from(&before.c_s22);
-    after.c_s12.clone_from(&before.c_s12);
+    after.curvature.clone_from(&before.curvature);
     for (source, target) in before.prefix_sums.iter().zip(&mut after.prefix_sums).chain(
         before
             .binned_prefix_sums
@@ -375,12 +373,8 @@ fn anchor_review_reference_deltas_track_actions_and_full_rebuilds() {
             assert_eq!(state.f_minus, previous.f_minus);
             assert_eq!(state.residuals, previous.residuals);
             assert_eq!(
-                state.precomputed_statistics.c_s11,
-                previous.precomputed_statistics.c_s11
-            );
-            assert_eq!(
-                state.precomputed_statistics.c_s22,
-                previous.precomputed_statistics.c_s22
+                state.precomputed_statistics.curvature,
+                previous.precomputed_statistics.curvature
             );
             assert_direct_statistics(&state, &strategy);
             assert_scores_match(&state, &expected);

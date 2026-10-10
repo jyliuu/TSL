@@ -138,8 +138,8 @@ fn cycle11_linear_bin_slices_preserve_numeric_and_storage_order() {
                 reference.plus[row] = plus;
                 reference.minus[row] = minus;
             }
-            state.precomputed_statistics.c_s11[0] = -0.0;
-            state.precomputed_statistics.c_s12[0] = -0.0;
+            state.precomputed_statistics.curvature[0].s11 = -0.0;
+            state.precomputed_statistics.curvature[0].s12 = -0.0;
             state.precomputed_statistics.c_t1.fill(f64::NAN);
             state.precomputed_statistics.c_t2.fill(f64::NAN);
             state.linear_statistics_stale = true;

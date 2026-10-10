@@ -6,7 +6,9 @@
 
 use std::iter::once;
 
-use crate::grid_tensor::state::{AffectedRange, FittingState, PrecomputedStatistics, PrefixStats};
+use crate::grid_tensor::state::{
+    AffectedRange, CurvatureCache, FittingState, PrecomputedStatistics, PrefixStats,
+};
 use crate::grid_tensor::two_tensor_solver::{
     data_loss_gain, log_coordinate_penalty, solve_two_tensor, DEFAULT_V_MAX, DEFAULT_V_MIN,
 };
@@ -379,9 +381,9 @@ impl RefinementStrategy {
 
             // Compute per-point two-tensor statistics and build prefix sums
             // For two-tensor, we need 5 sufficient statistics:
-            //   c_s11[i] = w_i * f_plus[i]²
-            //   c_s22[i] = w_i * f_minus[i]²
-            //   c_s12[i] = w_i * f_plus[i] * f_minus[i]
+            //   curvature[i].s11 = w_i * f_plus[i]²
+            //   curvature[i].s22 = w_i * f_minus[i]²
+            //   curvature[i].s12 = w_i * f_plus[i] * f_minus[i]
             //   c_t1[i] = w_i * r_tilde[i] * f_plus[i]
             //   c_t2[i] = w_i * r_tilde[i] * f_minus[i]
             // We only need to populate per-point contributions once (col == 0), since they're point-specific
@@ -394,7 +396,7 @@ impl RefinementStrategy {
                 let rt = state.r_tilde[i];
                 let w = self.weight(state.residuals[i]);
 
-                // In Stage 1 mode: c_s22 = 0, c_s12 = 0, c_t2 = 0
+                // In Stage 1 mode: s22 = 0, s12 = 0, c_t2 = 0
                 // Reuse existing caches but set unused ones to zero
                 let c_s11_val = w * fp * fp;
                 let c_s22_val = if is_stage1 { 0.0 } else { w * fm * fm };
@@ -404,9 +406,11 @@ impl RefinementStrategy {
 
                 // Store per-point values (only on first column to avoid redundant writes)
                 if col == 0 {
-                    state.precomputed_statistics.c_s11[i] = c_s11_val;
-                    state.precomputed_statistics.c_s22[i] = c_s22_val;
-                    state.precomputed_statistics.c_s12[i] = c_s12_val;
+                    state.precomputed_statistics.curvature[i] = CurvatureCache {
+                        s11: c_s11_val,
+                        s22: c_s22_val,
+                        s12: c_s12_val,
+                    };
                     state.precomputed_statistics.c_t1[i] = c_t1_val;
                     state.precomputed_statistics.c_t2[i] = c_t2_val;
                 }
@@ -429,7 +433,7 @@ impl RefinementStrategy {
                 vec![crate::grid_tensor::state::IntervalStats {
                     sum_s11: acc.s11,
                     sum_s22: acc.s22,
-                    sum_s12: acc.s12, // Will be negated when used: S12 = -sum(c_s12)
+                    sum_s12: acc.s12, // Will be negated when used: S12 = -sum(curvature[i].s12)
                     sum_t1: acc.t1,
                     sum_t2: acc.t2, // Will be negated when used: t2 = -sum(c_t2)
                     n: state.n,
@@ -739,17 +743,13 @@ impl RefinementStrategy {
                         residuals.len(),
                         target_plus.len(),
                         target_minus.len(),
-                        state.precomputed_statistics.c_s11.len(),
-                        state.precomputed_statistics.c_s22.len(),
-                        state.precomputed_statistics.c_s12.len(),
+                        state.precomputed_statistics.curvature.len(),
                     ]
                     .into_iter()
                     .all(|length| length == n)
                 {
                     let rho = reference.weight;
-                    let c_s11 = &mut state.precomputed_statistics.c_s11[..n];
-                    let c_s22 = &mut state.precomputed_statistics.c_s22[..n];
-                    let c_s12 = &mut state.precomputed_statistics.c_s12[..n];
+                    let curvature = &mut state.precomputed_statistics.curvature[..n];
                     for &row in updated_points {
                         if row >= n {
                             // The first failing row uses the residual array's indexing behavior.
@@ -763,10 +763,9 @@ impl RefinementStrategy {
                         let s12 = 1.0 * fp * fm;
                         s11 += rho * fp * fp;
                         s22 += rho * fm * fm;
-                        deltas.push([s11 - c_s11[row], s22 - c_s22[row], s12 - c_s12[row]]);
-                        c_s11[row] = s11;
-                        c_s22[row] = s22;
-                        c_s12[row] = s12;
+                        let cache = &mut curvature[row];
+                        deltas.push([s11 - cache.s11, s22 - cache.s22, s12 - cache.s12]);
+                        *cache = CurvatureCache { s11, s22, s12 };
                     }
                     return deltas;
                 }
@@ -775,14 +774,14 @@ impl RefinementStrategy {
         for &row in updated_points {
             let point = state.point_curvature_statistics(row, self.weight(state.residuals[row]));
             deltas.push([
-                point.s11 - state.precomputed_statistics.c_s11[row],
-                point.s22 - state.precomputed_statistics.c_s22[row],
-                point.s12 - state.precomputed_statistics.c_s12[row],
+                point.s11 - state.precomputed_statistics.curvature[row].s11,
+                point.s22 - state.precomputed_statistics.curvature[row].s22,
+                point.s12 - state.precomputed_statistics.curvature[row].s12,
             ]);
             // Row statistics depend on predictions and the reference, not another row's cache.
-            state.precomputed_statistics.c_s11[row] = point.s11;
-            state.precomputed_statistics.c_s22[row] = point.s22;
-            state.precomputed_statistics.c_s12[row] = point.s12;
+            state.precomputed_statistics.curvature[row].s11 = point.s11;
+            state.precomputed_statistics.curvature[row].s22 = point.s22;
+            state.precomputed_statistics.curvature[row].s12 = point.s12;
         }
         deltas
     }
@@ -806,9 +805,7 @@ impl RefinementStrategy {
         let residuals = &state.residuals;
 
         let (c_s11_new, c_s22_new, c_s12_new, c_t1_new, c_t2_new, d_s11, d_s22, d_s12, d_t1, d_t2) = {
-            let old_s11 = &state.precomputed_statistics.c_s11;
-            let old_s22 = &state.precomputed_statistics.c_s22;
-            let old_s12 = &state.precomputed_statistics.c_s12;
+            let old = &state.precomputed_statistics.curvature;
             let old_t1 = &state.precomputed_statistics.c_t1;
             let old_t2 = &state.precomputed_statistics.c_t2;
 
@@ -844,9 +841,9 @@ impl RefinementStrategy {
                     c_t2_new.push(new_t2);
                 }
 
-                d_s11.push(new_s11 - old_s11[pt]);
-                d_s22.push(new_s22 - old_s22[pt]);
-                d_s12.push(new_s12 - old_s12[pt]);
+                d_s11.push(new_s11 - old[pt].s11);
+                d_s22.push(new_s22 - old[pt].s22);
+                d_s12.push(new_s12 - old[pt].s12);
                 if LINEAR {
                     d_t1.push(new_t1 - old_t1[pt]);
                     d_t2.push(new_t2 - old_t2[pt]);
@@ -1058,17 +1055,15 @@ impl RefinementStrategy {
             }
         }
 
-        // 4) Update stored per-point c_* values
+        // 4) Store the per-point curvature and linear caches
         {
-            let c_s11 = &mut state.precomputed_statistics.c_s11;
-            let c_s22 = &mut state.precomputed_statistics.c_s22;
-            let c_s12 = &mut state.precomputed_statistics.c_s12;
+            let curvature = &mut state.precomputed_statistics.curvature;
             let c_t1 = &mut state.precomputed_statistics.c_t1;
             let c_t2 = &mut state.precomputed_statistics.c_t2;
             for (j, &pt) in updated_points.iter().enumerate() {
-                c_s11[pt] = c_s11_new[j];
-                c_s22[pt] = c_s22_new[j];
-                c_s12[pt] = c_s12_new[j];
+                curvature[pt].s11 = c_s11_new[j];
+                curvature[pt].s22 = c_s22_new[j];
+                curvature[pt].s12 = c_s12_new[j];
                 if LINEAR {
                     c_t1[pt] = c_t1_new[j];
                     c_t2[pt] = c_t2_new[j];
@@ -1352,9 +1347,9 @@ impl RefinementStrategy {
             for i in 0..n {
                 let point = state.point_statistics(i, self.weight(state.residuals[i]));
                 let statistics = &mut state.precomputed_statistics;
-                statistics.c_s11[i] = point.s11;
-                statistics.c_s22[i] = point.s22;
-                statistics.c_s12[i] = point.s12;
+                statistics.curvature[i].s11 = point.s11;
+                statistics.curvature[i].s22 = point.s22;
+                statistics.curvature[i].s12 = point.s12;
                 statistics.c_t1[i] = point.t1;
                 statistics.c_t2[i] = point.t2;
             }
@@ -1382,9 +1377,9 @@ impl RefinementStrategy {
                 let mut acc = PrefixStats::ZERO;
                 for (slot, &i) in prefix.iter_mut().zip(&statistics.sorted_indices[col]) {
                     if !weights_fixed {
-                        acc.s11 += statistics.c_s11[i];
-                        acc.s22 += statistics.c_s22[i];
-                        acc.s12 += statistics.c_s12[i];
+                        acc.s11 += statistics.curvature[i].s11;
+                        acc.s22 += statistics.curvature[i].s22;
+                        acc.s12 += statistics.curvature[i].s12;
                         slot.s11 = acc.s11;
                         slot.s22 = acc.s22;
                         slot.s12 = acc.s12;
@@ -1432,9 +1427,9 @@ impl RefinementStrategy {
                 binned.fill(PrefixStats::ZERO);
                 for (i, &bin) in statistics.bin_indices[col].iter().enumerate() {
                     binned[bin as usize] += PrefixStats {
-                        s11: statistics.c_s11[i],
-                        s22: statistics.c_s22[i],
-                        s12: statistics.c_s12[i],
+                        s11: statistics.curvature[i].s11,
+                        s22: statistics.curvature[i].s22,
+                        s12: statistics.curvature[i].s12,
                         t1: statistics.c_t1[i],
                         t2: statistics.c_t2[i],
                     };

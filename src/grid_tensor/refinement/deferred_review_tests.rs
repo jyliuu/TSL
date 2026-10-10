@@ -107,13 +107,7 @@ fn statistics_bits(actual: &FittingState, expected: &FittingState, linear: bool)
         &actual.precomputed_statistics,
         &expected.precomputed_statistics,
     );
-    for (a, e) in [
-        (&a.c_s11, &e.c_s11),
-        (&a.c_s22, &e.c_s22),
-        (&a.c_s12, &e.c_s12),
-    ] {
-        slice_bits(a, e);
-    }
+    crate::grid_tensor::state::assert_curvature_bits(&a.curvature, &e.curvature);
     if linear {
         slice_bits(&a.c_t1, &e.c_t1);
         slice_bits(&a.c_t2, &e.c_t2);

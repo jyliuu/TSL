@@ -623,21 +623,35 @@ impl std::ops::AddAssign for PrefixStats {
 /// Entry budget for the rank-ordered bin streams (32 MiB of `u16`).
 pub const MAX_RANK_STREAM_ENTRIES: usize = 1 << 24;
 
+/// One row's curvature contributions, `s11 = wᵢ f₊²`, `s22 = wᵢ f₋²` and `s12 = wᵢ f₊ f₋`,
+/// with the consensus weight folded into `s11` and `s22`; stored together so a row's
+/// cache is one cache line.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct CurvatureCache {
+    pub s11: f64,
+    pub s22: f64,
+    pub s12: f64,
+}
+
+#[cfg(test)]
+pub(crate) fn assert_curvature_bits(actual: &[CurvatureCache], expected: &[CurvatureCache]) {
+    assert_eq!(actual.len(), expected.len());
+    for (a, e) in actual.iter().zip(expected) {
+        assert_eq!(a.s11.to_bits(), e.s11.to_bits());
+        assert_eq!(a.s22.to_bits(), e.s22.to_bits());
+        assert_eq!(a.s12.to_bits(), e.s12.to_bits());
+    }
+}
+
 /// Working buffers containing pre-computed performance caches
 #[derive(Debug, Clone)]
 pub struct PrecomputedStatistics {
     /// Prefix sums of (s11, s22, s12, t1, t2) by sorted position [col][pos].
     /// Empty for binned columns (`binned_prefix_sums[col]` used instead).
     pub prefix_sums: Vec<Vec<PrefixStats>>,
-    /// Per-point S11 contributions: c_s11[i] = w_i * f_plus[i]²
-    /// Stored once (not per-column) since these are point-specific
-    pub c_s11: Vec<f64>,
-    /// Per-point S22 contributions: c_s22[i] = w_i * f_minus[i]²
-    /// Stored once (not per-column) since these are point-specific
-    pub c_s22: Vec<f64>,
-    /// Per-point S12 contributions: c_s12[i] = w_i * f_plus[i] * f_minus[i]
-    /// Stored once (not per-column) since these are point-specific
-    pub c_s12: Vec<f64>,
+    /// Per-point curvature contributions, stored once since they are point-specific.
+    pub curvature: Vec<CurvatureCache>,
     /// Per-point t1 contributions: c_t1[i] = w_i * r_tilde[i] * f_plus[i]
     /// Stored once (not per-column) since these are point-specific
     pub c_t1: Vec<f64>,
@@ -704,9 +718,7 @@ impl PrecomputedStatistics {
     pub fn new(n: usize, p: usize) -> Self {
         Self {
             prefix_sums: vec![vec![]; p],
-            c_s11: vec![0.0; n],
-            c_s22: vec![0.0; n],
-            c_s12: vec![0.0; n],
+            curvature: vec![CurvatureCache::default(); n],
             c_t1: vec![0.0; n],
             c_t2: vec![0.0; n],
             // Each column starts with one interval covering all points

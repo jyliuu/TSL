@@ -37,9 +37,9 @@ pub(super) fn two_pass_refresh<'a>(
     statistics.consensus_anchors = consensus_anchors;
     for (i, point) in points.iter().enumerate() {
         if !weights_fixed {
-            statistics.c_s11[i] = point.s11;
-            statistics.c_s22[i] = point.s22;
-            statistics.c_s12[i] = point.s12;
+            statistics.curvature[i].s11 = point.s11;
+            statistics.curvature[i].s22 = point.s22;
+            statistics.curvature[i].s12 = point.s12;
         }
         statistics.c_t1[i] = point.t1;
         statistics.c_t2[i] = point.t2;
@@ -52,9 +52,9 @@ pub(super) fn two_pass_refresh<'a>(
             let mut acc = PrefixStats::ZERO;
             for (slot, &i) in prefix.iter_mut().zip(&statistics.sorted_indices[col]) {
                 if !weights_fixed {
-                    acc.s11 += statistics.c_s11[i];
-                    acc.s22 += statistics.c_s22[i];
-                    acc.s12 += statistics.c_s12[i];
+                    acc.s11 += statistics.curvature[i].s11;
+                    acc.s22 += statistics.curvature[i].s22;
+                    acc.s12 += statistics.curvature[i].s12;
                     slot.s11 = acc.s11;
                     slot.s22 = acc.s22;
                     slot.s12 = acc.s12;
@@ -86,9 +86,9 @@ pub(super) fn two_pass_refresh<'a>(
             binned.fill(PrefixStats::ZERO);
             for (i, &bin) in statistics.bin_indices[col].iter().enumerate() {
                 binned[bin as usize] += PrefixStats {
-                    s11: statistics.c_s11[i],
-                    s22: statistics.c_s22[i],
-                    s12: statistics.c_s12[i],
+                    s11: statistics.curvature[i].s11,
+                    s22: statistics.curvature[i].s22,
+                    s12: statistics.curvature[i].s12,
                     t1: statistics.c_t1[i],
                     t2: statistics.c_t2[i],
                 };
@@ -173,10 +173,8 @@ pub(super) fn assert_statistics_bits(actual: &FittingState, expected: &FittingSt
         &actual.precomputed_statistics,
         &expected.precomputed_statistics,
     );
+    crate::grid_tensor::state::assert_curvature_bits(&a.curvature, &e.curvature);
     for (a, e) in [
-        (&a.c_s11, &e.c_s11),
-        (&a.c_s22, &e.c_s22),
-        (&a.c_s12, &e.c_s12),
         (&a.c_t1, &e.c_t1),
         (&a.c_t2, &e.c_t2),
     ] {
@@ -376,24 +374,16 @@ fn cycle5_refresh_preserves_curvature_and_signed_zero_bits() {
                     row as f64 - 64.0
                 };
                 state.residuals[row] = state.r_tilde[row];
-                state.precomputed_statistics.c_s11[row] = -0.0;
-                state.precomputed_statistics.c_s22[row] = 0.0;
-                state.precomputed_statistics.c_s12[row] = -0.0;
+                state.precomputed_statistics.curvature[row].s11 = -0.0;
+                state.precomputed_statistics.curvature[row].s22 = 0.0;
+                state.precomputed_statistics.curvature[row].s12 = -0.0;
             }
             let expected = two_pass_refresh(&strategy, state.clone());
             let actual = strategy.refresh_statistics(state.clone());
             assert_statistics_bits(&actual, &expected);
-            slice_bits(
-                &actual.precomputed_statistics.c_s11,
-                &state.precomputed_statistics.c_s11,
-            );
-            slice_bits(
-                &actual.precomputed_statistics.c_s22,
-                &state.precomputed_statistics.c_s22,
-            );
-            slice_bits(
-                &actual.precomputed_statistics.c_s12,
-                &state.precomputed_statistics.c_s12,
+            crate::grid_tensor::state::assert_curvature_bits(
+                &actual.precomputed_statistics.curvature,
+                &state.precomputed_statistics.curvature,
             );
             assert!(!actual.linear_statistics_stale);
         }

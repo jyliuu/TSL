@@ -140,8 +140,8 @@ fn cycle7_refresh_eligible_rows_match_oracle_with_stale_and_signed_inputs() {
                         // L2 linear terms use r_tilde even when the outer residual cache differs.
                         state.residuals[row] = state.r_tilde[row] + 17.0;
                     }
-                    state.precomputed_statistics.c_s11[0] = -0.0;
-                    state.precomputed_statistics.c_s12[0] = -0.0;
+                    state.precomputed_statistics.curvature[0].s11 = -0.0;
+                    state.precomputed_statistics.curvature[0].s12 = -0.0;
                     state.precomputed_statistics.c_t1.fill(f64::NAN);
                     state.precomputed_statistics.c_t2.fill(f64::NAN);
                     state.linear_statistics_stale = true;
@@ -161,17 +161,9 @@ fn cycle7_refresh_eligible_rows_match_oracle_with_stale_and_signed_inputs() {
                         &direct.precomputed_statistics.c_t2,
                         &expected.precomputed_statistics.c_t2,
                     );
-                    assert_slice_bits(
-                        &direct.precomputed_statistics.c_s11,
-                        &state.precomputed_statistics.c_s11,
-                    );
-                    assert_slice_bits(
-                        &direct.precomputed_statistics.c_s22,
-                        &state.precomputed_statistics.c_s22,
-                    );
-                    assert_slice_bits(
-                        &direct.precomputed_statistics.c_s12,
-                        &state.precomputed_statistics.c_s12,
+                    crate::grid_tensor::state::assert_curvature_bits(
+                        &direct.precomputed_statistics.curvature,
+                        &state.precomputed_statistics.curvature,
                     );
                     assert_refresh(state, &strategy);
                 }

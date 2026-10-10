@@ -40,14 +40,14 @@ fn one_feature_update<'a>(
     for &row in updated_points {
         let point = state.point_curvature_statistics(row, refinement.weight(state.residuals[row]));
         deltas.push([
-            point.s11 - state.precomputed_statistics.c_s11[row],
-            point.s22 - state.precomputed_statistics.c_s22[row],
-            point.s12 - state.precomputed_statistics.c_s12[row],
+            point.s11 - state.precomputed_statistics.curvature[row].s11,
+            point.s22 - state.precomputed_statistics.curvature[row].s22,
+            point.s12 - state.precomputed_statistics.curvature[row].s12,
         ]);
         // Row statistics depend on predictions and the reference, not another row's cache.
-        state.precomputed_statistics.c_s11[row] = point.s11;
-        state.precomputed_statistics.c_s22[row] = point.s22;
-        state.precomputed_statistics.c_s12[row] = point.s12;
+        state.precomputed_statistics.curvature[row].s11 = point.s11;
+        state.precomputed_statistics.curvature[row].s22 = point.s22;
+        state.precomputed_statistics.curvature[row].s12 = point.s12;
     }
 
     let mut buckets = Vec::new();
@@ -182,9 +182,9 @@ fn change_rows(
             ),
             2 => {
                 let delta = [1e16, 1.0, -1e16, -1.0][offset % 4];
-                state.precomputed_statistics.c_s11[row] = -delta;
-                state.precomputed_statistics.c_s22[row] = delta * 0.5;
-                state.precomputed_statistics.c_s12[row] = -delta * 0.25;
+                state.precomputed_statistics.curvature[row].s11 = -delta;
+                state.precomputed_statistics.curvature[row].s22 = delta * 0.5;
+                state.precomputed_statistics.curvature[row].s12 = -delta * 0.25;
                 (0.0, 0.0)
             }
             _ => {
@@ -244,9 +244,14 @@ fn cycle8_scatter_zero_deltas_preserve_touched_ranges_and_signed_bits() {
         let (mut state, refinement) = initial(&x, &y, rho);
         state.f_plus.fill(-0.0);
         state.f_minus.fill(0.0);
-        state.precomputed_statistics.c_s11.fill(0.0);
-        state.precomputed_statistics.c_s22.fill(0.0);
-        state.precomputed_statistics.c_s12.fill(-0.0);
+        state
+            .precomputed_statistics
+            .curvature
+            .fill(crate::grid_tensor::state::CurvatureCache {
+                s11: 0.0,
+                s22: 0.0,
+                s12: -0.0,
+            });
         for column in &mut state.precomputed_statistics.binned_prefix_sums {
             for slot in column {
                 slot.s11 = -0.0;
