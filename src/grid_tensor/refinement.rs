@@ -6,7 +6,7 @@
 
 use std::iter::once;
 
-use crate::grid_tensor::state::{AffectedRange, FittingState, PrefixStats};
+use crate::grid_tensor::state::{AffectedRange, FittingState, PrecomputedStatistics, PrefixStats};
 use crate::grid_tensor::two_tensor_solver::{
     data_loss_gain, log_coordinate_penalty, solve_two_tensor, DEFAULT_V_MAX, DEFAULT_V_MIN,
 };
@@ -294,6 +294,9 @@ fn canonical_merge_factors(a_plus: f64, a_minus: f64, is_stage1: bool) -> (f64, 
     let backbone = log_backbone.exp();
     (backbone * tilt.exp(), backbone * (-tilt).exp())
 }
+
+/// Binned columns scattered per row pass of the linear rebin.
+const LINEAR_TILE_COLUMNS: usize = 4;
 
 impl RefinementStrategy {
     pub fn initialize<'a>(&self, state: FittingState<'a>) -> FittingState<'a> {
@@ -1207,6 +1210,117 @@ impl RefinementStrategy {
         true
     }
 
+    /// Scatter the linear row terms of a tile of binned columns in one row pass.
+    ///
+    /// Every bucket receives its rows in ascending row order from `+0.0`, as the
+    /// per-column loop does; columns are independent accumulators.
+    fn scatter_linear_tile(
+        maps: &[&[u16]],
+        t1: &[f64],
+        t2: &[f64],
+        scratch: &mut [[f64; 2]],
+        widths: &[usize],
+    ) {
+        match (maps, widths) {
+            ([m0, m1, m2, m3], &[w0, w1, w2, _]) => {
+                let (b0, rest) = scratch.split_at_mut(w0);
+                let (b1, rest) = rest.split_at_mut(w1);
+                let (b2, b3) = rest.split_at_mut(w2);
+                for (((((&x0, &x1), &x2), &x3), &v1), &v2) in
+                    m0.iter().zip(*m1).zip(*m2).zip(*m3).zip(t1).zip(t2)
+                {
+                    let s0 = &mut b0[x0 as usize];
+                    s0[0] += v1;
+                    s0[1] += v2;
+                    let s1 = &mut b1[x1 as usize];
+                    s1[0] += v1;
+                    s1[1] += v2;
+                    let s2 = &mut b2[x2 as usize];
+                    s2[0] += v1;
+                    s2[1] += v2;
+                    let s3 = &mut b3[x3 as usize];
+                    s3[0] += v1;
+                    s3[1] += v2;
+                }
+            }
+            ([m0, m1, m2], &[w0, w1, _]) => {
+                let (b0, rest) = scratch.split_at_mut(w0);
+                let (b1, b2) = rest.split_at_mut(w1);
+                for ((((&x0, &x1), &x2), &v1), &v2) in m0.iter().zip(*m1).zip(*m2).zip(t1).zip(t2) {
+                    let s0 = &mut b0[x0 as usize];
+                    s0[0] += v1;
+                    s0[1] += v2;
+                    let s1 = &mut b1[x1 as usize];
+                    s1[0] += v1;
+                    s1[1] += v2;
+                    let s2 = &mut b2[x2 as usize];
+                    s2[0] += v1;
+                    s2[1] += v2;
+                }
+            }
+            ([m0, m1], &[w0, _]) => {
+                let (b0, b1) = scratch.split_at_mut(w0);
+                for (((&x0, &x1), &v1), &v2) in m0.iter().zip(*m1).zip(t1).zip(t2) {
+                    let s0 = &mut b0[x0 as usize];
+                    s0[0] += v1;
+                    s0[1] += v2;
+                    let s1 = &mut b1[x1 as usize];
+                    s1[0] += v1;
+                    s1[1] += v2;
+                }
+            }
+            ([m0], &[_]) => {
+                let b0 = scratch;
+                for ((&x0, &v1), &v2) in m0.iter().zip(t1).zip(t2) {
+                    let s0 = &mut b0[x0 as usize];
+                    s0[0] += v1;
+                    s0[1] += v2;
+                }
+            }
+            _ => unreachable!("tiles hold one to four columns"),
+        }
+    }
+
+    /// Rebuild the binned linear prefix sums of every binned column, `LINEAR_TILE_COLUMNS`
+    /// columns per row pass over the first `n` rows of the linear caches.
+    fn rebin_linear_tiles(statistics: &mut PrecomputedStatistics, n: usize) {
+        let PrecomputedStatistics {
+            c_t1,
+            c_t2,
+            bin_indices,
+            bin_edges,
+            binned_prefix_sums,
+            ..
+        } = statistics;
+        let (t1, t2) = (&c_t1[..n], &c_t2[..n]);
+        let binned: Vec<usize> = (0..bin_edges.len())
+            .filter(|&col| !bin_edges[col].is_empty())
+            .collect();
+        let mut scratch: Vec<[f64; 2]> = Vec::new();
+        for tile in binned.chunks(LINEAR_TILE_COLUMNS) {
+            let widths: Vec<usize> = tile
+                .iter()
+                .map(|&col| binned_prefix_sums[col].len())
+                .collect();
+            scratch.clear();
+            scratch.resize(widths.iter().sum(), [0.0; 2]);
+            let maps: Vec<&[u16]> = tile.iter().map(|&col| &bin_indices[col][..n]).collect();
+            Self::scatter_linear_tile(&maps, t1, t2, &mut scratch, &widths);
+            let mut offset = 0;
+            for (&col, &width) in tile.iter().zip(&widths) {
+                let bucket = &scratch[offset..offset + width];
+                offset += width;
+                let (mut t1, mut t2) = (0.0, 0.0);
+                for (slot, b) in binned_prefix_sums[col].iter_mut().zip(bucket) {
+                    t1 += b[0];
+                    t2 += b[1];
+                    slot.t1 = t1;
+                    slot.t2 = t2;
+                }
+            }
+        }
+    }
+
     /// Rebuild every statistic that depends on the residuals or the branch consensus.
     ///
     /// The partition and factors are kept; per-point sufficient statistics, prefix sums,
@@ -1248,6 +1362,18 @@ impl RefinementStrategy {
         let statistics = &mut state.precomputed_statistics;
         statistics.consensus_weight = consensus_weight;
         statistics.consensus_anchors = consensus_anchors;
+        let tiled = weights_fixed
+            && statistics.c_t1.len() >= n
+            && statistics.c_t2.len() >= n
+            && (0..state.p).all(|col| {
+                statistics.bin_edges[col].is_empty()
+                    || (statistics.bin_indices[col].len() == n
+                        && statistics.binned_prefix_sums[col].len()
+                            == statistics.bin_edges[col].len() + 1)
+            });
+        if tiled {
+            Self::rebin_linear_tiles(statistics, n);
+        }
         let mut bins_t1 = Vec::new();
         let mut bins_t2 = Vec::new();
         for col in 0..state.p {
@@ -1268,6 +1394,8 @@ impl RefinementStrategy {
                     slot.t1 = acc.t1;
                     slot.t2 = acc.t2;
                 }
+            } else if tiled {
+                // Rebuilt by the tiled pass.
             } else if weights_fixed {
                 let binned = &mut statistics.binned_prefix_sums[col];
                 bins_t1.clear();
@@ -2308,5 +2436,7 @@ mod cycle11_linear_bin_slice_tests;
 
 #[cfg(test)]
 mod cycle13_curvature_delta_tests;
+#[cfg(test)]
+mod linear_tile_tests;
 #[cfg(test)]
 mod rank_stream_scatter_tests;
