@@ -116,7 +116,6 @@ fn prefix_bits(actual: &[Vec<PrefixStats>], expected: &[Vec<PrefixStats>]) {
 
 fn assert_states_identical(actual: &FittingState, expected: &FittingState) {
     assert_eq!(actual.boundaries, expected.boundaries);
-    assert_eq!(actual.interval_id, expected.interval_id);
     matrix_bits(&actual.backbone_values, &expected.backbone_values);
     matrix_bits(&actual.tilt_values, &expected.tilt_values);
     bits(actual.lambda_plus, expected.lambda_plus);

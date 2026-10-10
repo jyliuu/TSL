@@ -80,7 +80,6 @@ fn assert_cache_bits(actual: &FittingState<'_>, expected: &FittingState<'_>) {
         actual.current_error.to_bits(),
         expected.current_error.to_bits()
     );
-    assert_eq!(actual.interval_id, expected.interval_id);
     assert_eq!(actual.boundaries, expected.boundaries);
 }
 

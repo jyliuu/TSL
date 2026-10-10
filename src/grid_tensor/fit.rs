@@ -1176,8 +1176,14 @@ mod tests {
         }
     }
 
+    fn interval_indices(state: &FittingState) -> Vec<usize> {
+        (0..state.n)
+            .map(|row| state.interval_index(0, row))
+            .collect()
+    }
+
     #[test]
-    fn interval_ids_follow_inserted_and_removed_boundaries() {
+    fn interval_indices_follow_inserted_and_removed_boundaries() {
         let x = Array2::from_shape_vec((6, 1), vec![5.0, 0.0, 3.0, 1.0, 4.0, 2.0]).unwrap();
         let y = Array1::from_vec(vec![6.0, 1.0, 4.0, 2.0, 5.0, 3.0]);
         let refinement_strategy = RefinementStrategy::L2Refinement {
@@ -1218,7 +1224,7 @@ mod tests {
             );
         }
         assert_eq!(state.boundaries[0], vec![2, 4]);
-        assert_eq!(state.interval_id[0], vec![2, 0, 1, 0, 2, 1]);
+        assert_eq!(interval_indices(&state), vec![2, 0, 1, 0, 2, 1]);
 
         let merge_first = MergeCandidate {
             col: 0,
@@ -1233,7 +1239,7 @@ mod tests {
             &split_strategy,
         );
         assert_eq!(state.boundaries[0], vec![4]);
-        assert_eq!(state.interval_id[0], vec![1, 0, 0, 0, 1, 0]);
+        assert_eq!(interval_indices(&state), vec![1, 0, 0, 0, 1, 0]);
 
         let merge_last = MergeCandidate {
             col: 0,
@@ -1248,7 +1254,7 @@ mod tests {
             &split_strategy,
         );
         assert!(state.boundaries[0].is_empty());
-        assert_eq!(state.interval_id[0], vec![0; 6]);
+        assert_eq!(interval_indices(&state), vec![0; 6]);
     }
 
     #[test]

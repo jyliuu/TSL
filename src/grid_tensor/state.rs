@@ -22,9 +22,6 @@ pub struct FittingState<'a> {
     pub f: Array1<f64>,       // f(x_i) = f_plus[i] - f_minus[i]
     pub r_tilde: Array1<f64>, // within-stage residual: R_i - f(x_i)
 
-    // Interval tracking
-    pub interval_id: Vec<Vec<usize>>, // interval_id[j][i] = k_j(i), current interval index per axis per point
-
     // Predictions and residuals (outer residuals for forest-level)
     pub y_hat: Array1<f64>,
     pub residuals: Array1<f64>,
@@ -81,7 +78,6 @@ impl<'a> Clone for FittingState<'a> {
             f_minus: self.f_minus.clone(),
             f: self.f.clone(),
             r_tilde: self.r_tilde.clone(),
-            interval_id: self.interval_id.clone(),
             y_hat: self.y_hat.clone(),
             residuals: self.residuals.clone(),
             current_error: self.current_error,
@@ -124,9 +120,6 @@ impl<'a> FittingState<'a> {
         // Initialize two-tensor grid: backbone = 1, tilt = 0 for all intervals
         let backbone_values = vec![vec![1.0]; p];
         let tilt_values = vec![vec![0.0]; p];
-
-        // All points start in interval 0 on every axis.
-        let interval_id = vec![vec![0; n]; p];
 
         // Initialize lambdas from residuals (will be properly initialized in refinement::initialize)
         // For now, set to small positive values
@@ -176,7 +169,6 @@ impl<'a> FittingState<'a> {
             f_minus,
             f,
             r_tilde,
-            interval_id,
             y_hat,
             residuals,
             current_error,
@@ -254,6 +246,13 @@ impl<'a> FittingState<'a> {
         self.tilt_values
             .iter()
             .all(|d_vec| d_vec.iter().all(|&d| d.abs() < EPS))
+    }
+
+    /// Index of the interval on `col` that holds `row`: the number of boundaries at or
+    /// below the row's rank, since an interval begins at its boundary rank.
+    pub fn interval_index(&self, col: usize, row: usize) -> usize {
+        let rank = self.precomputed_statistics.sort_order[col][row];
+        self.boundaries[col].partition_point(|&b| b <= rank)
     }
 
     pub fn interval_range(&self, col: usize, interval_idx: usize) -> (usize, usize) {

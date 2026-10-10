@@ -118,7 +118,6 @@ fn statistics_bits(actual: &FittingState, expected: &FittingState, linear: bool)
 
 fn prediction_bits(actual: &FittingState, expected: &FittingState) {
     assert_eq!(actual.boundaries, expected.boundaries);
-    assert_eq!(actual.interval_id, expected.interval_id);
     for (actual, expected) in [
         (&actual.backbone_values, &expected.backbone_values),
         (&actual.tilt_values, &expected.tilt_values),

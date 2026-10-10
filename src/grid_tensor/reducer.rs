@@ -365,9 +365,6 @@ fn reduce_grid_split_two_tensor(
 
     // Insert new boundary at the correct position
     state.boundaries[col].insert(insert_at, index);
-    for &row in &state.precomputed_statistics.sorted_indices[col][index..] {
-        state.interval_id[col][row] += 1;
-    }
 
     // Parent parameters
     let b_p = state.backbone_values[col][insert_at];
@@ -579,12 +576,6 @@ fn reduce_grid_merge_optimal<'a>(
     b_merged_optimal: f64,
     d_merged_optimal: f64,
 ) -> FittingState<'a> {
-    let index = state.boundaries[col][interval_idx];
-    for &row in &state.precomputed_statistics.sorted_indices[col][index..] {
-        debug_assert!(state.interval_id[col][row] > 0);
-        state.interval_id[col][row] -= 1;
-    }
-
     // Remove the boundary inserted by the split
     state.boundaries[col].remove(interval_idx);
 
@@ -806,7 +797,8 @@ fn reduce_apply_scaling(mut state: FittingState<'_>, factor: f64) -> FittingStat
 /// Compute partial products g_{\pm}^{(-j)} for all points by dividing out axis j factor.
 ///
 /// Uses the efficient approach: g_{+,i}^{(-j)} = f_{+,i} / a_{+,j}^{k_j(i)}
-/// where a_{+,j}^{k_j(i)} = b_{j,i} * exp(d_{j,i})
+/// where a_{+,j}^{k_j(i)} = b_{j,i} * exp(d_{j,i}) and k_j(i) is the number of boundaries
+/// at or below the row's rank on axis j.
 ///
 /// # Arguments
 /// * `col` - The axis index j
@@ -823,9 +815,11 @@ pub(crate) fn compute_partial_products_for_axis(
     let n = state.n;
     let mut g_plus = Vec::with_capacity(n);
     let mut g_minus = Vec::with_capacity(n);
+    let boundaries = &state.boundaries[col];
+    let ranks = &state.precomputed_statistics.sort_order[col];
 
     for i in 0..n {
-        let interval_idx = state.interval_id[col][i];
+        let interval_idx = boundaries.partition_point(|&b| b <= ranks[i]);
 
         let b_j = state.backbone_values[col][interval_idx];
         let d_j = state.tilt_values[col][interval_idx];
