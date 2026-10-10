@@ -196,7 +196,8 @@ pub(crate) fn fit_step_with_candidate_refresh<'a, R: Rng + ?Sized>(
 }
 
 /// Identify the fitted factors and convert the state into the output types.
-pub(crate) fn finish_fit(mut state: FittingState<'_>) -> (FitResult, GridTensor) {
+/// Identify the fitted grid and log its final component states.
+pub(crate) fn finish_grid(mut state: FittingState<'_>) -> GridTensor {
     log::debug!(
         "Split/Resplit/Merge counts: {}/{}/{}",
         state.loop_state.split_count,
@@ -210,8 +211,7 @@ pub(crate) fn finish_fit(mut state: FittingState<'_>) -> (FitResult, GridTensor)
     #[cfg(feature = "evo-logging")]
     let final_iteration = state.iteration;
 
-    // Convert FittingState to output types
-    let (fit_result, grid_tensor) = convert_state_to_result(state);
+    let grid_tensor = convert_state_to_grid(state);
 
     // Add component state logging for final state AFTER identification has been applied
     // This ensures we save the identified components (including λ_±), not pre-identification ones.
@@ -222,7 +222,26 @@ pub(crate) fn finish_fit(mut state: FittingState<'_>) -> (FitResult, GridTensor)
         use crate::grid_tensor::logging_helpers::log_final_component_states;
         log_final_component_states(logging_state, &grid_tensor, final_iteration);
     }
-    (fit_result, grid_tensor)
+    grid_tensor
+}
+
+/// Identify the fitted grid and evaluate it on the training rows.
+pub(crate) fn finish_fit(state: FittingState<'_>) -> (FitResult, GridTensor) {
+    let (x, labels) = (state.x, state.labels);
+    let grid_tensor = finish_grid(state);
+    // `FitResult` is consistent with the returned `GridTensor`: after identification the
+    // returned y_hat/residuals/err equal `grid_tensor.predict(x)` and its residuals.
+    let y_hat = grid_tensor.predict(x.view());
+    let residuals = (labels.to_owned() - y_hat.view()).to_owned();
+    let err = residuals.pow2().mean().unwrap();
+    (
+        FitResult {
+            err,
+            residuals,
+            y_hat,
+        },
+        grid_tensor,
+    )
 }
 
 /// Compute real intervals from state boundaries and sorted indices
@@ -305,9 +324,8 @@ fn compute_observation_counts(
 }
 
 /// Convert FittingState into the final output types
-fn convert_state_to_result(state: FittingState) -> (FitResult, GridTensor) {
+fn convert_state_to_grid(state: FittingState) -> GridTensor {
     let x = state.x;
-    let labels = state.labels;
     let boundaries = state.boundaries;
     let precomputed_statistics = state.precomputed_statistics;
 
@@ -334,7 +352,7 @@ fn convert_state_to_result(state: FittingState) -> (FitResult, GridTensor) {
         &mut lambda_minus,
     );
 
-    let grid_tensor = GridTensor::new_two_tensor(
+    GridTensor::new_two_tensor(
         splits,
         observation_counts,
         real_intervals,
@@ -342,22 +360,7 @@ fn convert_state_to_result(state: FittingState) -> (FitResult, GridTensor) {
         tilt_values,
         lambda_plus,
         lambda_minus,
-    );
-
-    // Ensure `FitResult` is consistent with the returned `GridTensor`.
-    // In particular: after any end-of-stage transformations (identification / normalization),
-    // the returned y_hat/residuals/err must match `grid_tensor.predict(x)`.
-    let y_hat = grid_tensor.predict(x.view());
-    let residuals = (labels.to_owned() - y_hat.view()).to_owned();
-    let err = residuals.pow2().mean().unwrap();
-
-    let fit_res = FitResult {
-        err,
-        residuals,
-        y_hat,
-    };
-
-    (fit_res, grid_tensor)
+    )
 }
 
 #[cfg(test)]

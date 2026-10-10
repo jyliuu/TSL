@@ -17,7 +17,7 @@ use rayon::prelude::*;
 use crate::{
     grid_tensor::{
         fit::{
-            finish_fit, fit_step_with_candidate_refresh, initialize_state_with_input,
+            finish_fit, finish_grid, fit_step_with_candidate_refresh, initialize_state_with_input,
             max_iterations,
         },
         prepared_input::PreparedInput,
@@ -47,11 +47,15 @@ pub(super) fn fit_consensus_bag<'a>(
     initial_state: Option<&FittingState<'a>>,
     prepared: Option<&PreparedInput<'_>>,
     epoch: Option<usize>,
-) -> Vec<(FitResult, GridTensor)> {
+    fit_results: bool,
+) -> Vec<(Option<FitResult>, GridTensor)> {
     assert!(
         consensus.is_finite() && consensus >= 0.0,
         "consensus must be finite and nonnegative"
     );
+    // Each member's training evaluation is kept when a caller asks for it or when logging
+    // reports it; otherwise the member only yields its identified grid.
+    let fit_results = fit_results || logging::is_logging_enabled();
     // Member setup and teardown have no observable order while logging is disabled, so
     // a shared initial state is cloned and the fitted grids are converted on the pool.
     let shared_setup = initial_state.filter(|_| !logging::is_logging_enabled());
@@ -117,9 +121,12 @@ pub(super) fn fit_consensus_bag<'a>(
         let mut state = member.state.expect("member state");
         state.branch_consensus = None;
         in_context(member.tree_id, epoch, || {
+            if !fit_results {
+                return (None, finish_grid(state));
+            }
             let (fit_res, grid) = finish_fit(state);
             logging::log_grid_error_fitted(fit_res.err, logging::GridErrorVariant::Train);
-            (fit_res, grid)
+            (Some(fit_res), grid)
         })
     };
     #[cfg(feature = "use-rayon")]
@@ -846,6 +853,40 @@ mod tests {
     }
 
     #[test]
+    fn grid_only_members_match_evaluated_members_and_carry_no_results() {
+        let (x, y) = data();
+        let params = parity_params(false, Some(16), 0.0);
+        let initial = initialize_state_with_input(x.view(), y.view(), &params, None);
+        let fit = |fit_results| {
+            fit_consensus_bag(
+                x.view(),
+                y.view(),
+                &params,
+                0.3,
+                1,
+                None,
+                &[21, 22, 23, 24, 25],
+                Some(&initial),
+                None,
+                None,
+                fit_results,
+            )
+        };
+        let evaluated = fit(true);
+        let grids_only = fit(false);
+        assert_eq!(evaluated.len(), grids_only.len());
+        for ((a_fit, a_grid), (b_fit, b_grid)) in evaluated.iter().zip(&grids_only) {
+            assert_eq!(
+                bincode::serialize(a_grid).unwrap(),
+                bincode::serialize(b_grid).unwrap()
+            );
+            let a_fit = a_fit.as_ref().expect("evaluated member keeps its result");
+            assert_eq!(a_fit.y_hat, a_grid.predict(x.view()));
+            assert!(b_fit.is_none());
+        }
+    }
+
+    #[test]
     fn all_training_anchors_match_the_full_row_model_exactly() {
         let (x, y) = data();
         for interval in [1, 4] {
@@ -864,6 +905,7 @@ mod tests {
                         Some(&initial),
                         None,
                         None,
+                        true,
                     )
                 };
                 let baseline = fit(None);
@@ -875,6 +917,7 @@ mod tests {
                             bincode::serialize(a_grid).unwrap(),
                             bincode::serialize(b_grid).unwrap()
                         );
+                        let (a_fit, b_fit) = (a_fit.as_ref().unwrap(), b_fit.as_ref().unwrap());
                         assert_eq!(a_fit.y_hat, b_fit.y_hat);
                         assert_eq!(a_fit.residuals, b_fit.residuals);
                         assert_eq!(a_fit.err.to_bits(), b_fit.err.to_bits());

@@ -62,7 +62,7 @@ pub(crate) fn fit_ensemble_with_input<R: Rng + ?Sized>(
     rng: &mut R,
     prepared: Option<&grid_tensor::prepared_input::PreparedInput<'_>>,
 ) -> (FitResult, StagePredictor) {
-    let grid_tensors = fit_grid_bag_with_input(x, y, hyperparameters, rng, prepared)
+    let grid_tensors = fit_grid_bag_with_input(x, y, hyperparameters, rng, prepared, false)
         .into_iter()
         .map(|(_, grid)| grid)
         .collect();
@@ -76,16 +76,22 @@ pub fn fit_grid_bag<R: Rng + ?Sized>(
     hyperparameters: &StagePredictorParams,
     rng: &mut R,
 ) -> Vec<(FitResult, GridTensor)> {
-    fit_grid_bag_with_input(x, y, hyperparameters, rng, None)
+    fit_grid_bag_with_input(x, y, hyperparameters, rng, None, true)
+        .into_iter()
+        .map(|(fit, grid)| (fit.expect("bag members keep their fit results"), grid))
+        .collect()
 }
 
+/// Fit the bag; `fit_results` keeps each member's training evaluation, which the
+/// ensemble path does not consume.
 fn fit_grid_bag_with_input<R: Rng + ?Sized>(
     x: ArrayView2<f64>,
     y: ArrayView1<f64>,
     hyperparameters: &StagePredictorParams,
     rng: &mut R,
     prepared: Option<&grid_tensor::prepared_input::PreparedInput<'_>>,
-) -> Vec<(FitResult, GridTensor)> {
+    fit_results: bool,
+) -> Vec<(Option<FitResult>, GridTensor)> {
     let StagePredictorParams {
         n_trees,
         tg_params,
@@ -120,10 +126,11 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
             initial_state.as_ref(),
             prepared,
             epoch_opt,
+            fit_results,
         );
     }
 
-    let fitted_grids: Vec<(FitResult, GridTensor)>;
+    let fitted_grids: Vec<(Option<FitResult>, GridTensor)>;
 
     #[cfg(not(feature = "use-rayon"))]
     {
@@ -131,7 +138,15 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
             .iter()
             .enumerate()
             .map(|(tree_id, &seed)| {
-                fit_grid_tensor_with_context(tree_id, seed, x, y, tg_params, initial_state.as_ref())
+                let (fit_res, grid) = fit_grid_tensor_with_context(
+                    tree_id,
+                    seed,
+                    x,
+                    y,
+                    tg_params,
+                    initial_state.as_ref(),
+                );
+                (Some(fit_res), grid)
             })
             .collect();
     }
@@ -170,7 +185,7 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
         results.sort_by_key(|(tree_id, _, _)| *tree_id);
         fitted_grids = results
             .into_iter()
-            .map(|(_, fit, grid)| (fit, grid))
+            .map(|(_, fit, grid)| (Some(fit), grid))
             .collect();
     }
 
