@@ -2,7 +2,17 @@
 
 use super::prefix::{add_statistics, sub_stats};
 use super::RefinementStrategy;
-use crate::grid_tensor::state::{FittingState, PrefixStats};
+use crate::grid_tensor::state::{CurvatureCache, FittingState, PrecomputedStatistics, PrefixStats};
+
+/// The rows an action rescaled, sorted positions `start..end` of column `col`, with each
+/// row's change in retained statistics in the same order.
+struct AffectedRows<'d> {
+    col: usize,
+    start: usize,
+    end: usize,
+    n: usize,
+    deltas: &'d [PrefixStats],
+}
 
 impl RefinementStrategy {
     pub fn update_statistics<'a>(
@@ -33,6 +43,8 @@ impl RefinementStrategy {
         self.update_statistics_impl::<false>(state, col, start, end, affected_points_range)
     }
 
+    /// Without `LINEAR`, only the curvature statistics are retained; the `t1`/`t2` terms of
+    /// rows and prefix sums are left as they are.
     fn update_statistics_impl<'a, const LINEAR: bool>(
         &self,
         mut state: FittingState<'a>,
@@ -47,278 +59,199 @@ impl RefinementStrategy {
             return state;
         }
 
-        // 1) Compute the retained per-point statistics and their deltas vs stored c_*.
-        // Precomputing deltas avoids re-loading old c_* values for every affected column.
-        let residuals = &state.residuals;
-
-        let (c_s11_new, c_s22_new, c_s12_new, c_t1_new, c_t2_new, d_s11, d_s22, d_s12, d_t1, d_t2) = {
-            let old = &state.precomputed_statistics.curvature;
-            let old_t1 = &state.precomputed_statistics.c_t1;
-            let old_t2 = &state.precomputed_statistics.c_t2;
-
-            let mut c_s11_new = Vec::with_capacity(updated_points.len());
-            let mut c_s22_new = Vec::with_capacity(updated_points.len());
-            let mut c_s12_new = Vec::with_capacity(updated_points.len());
-            let mut c_t1_new = Vec::with_capacity(if LINEAR { updated_points.len() } else { 0 });
-            let mut c_t2_new = Vec::with_capacity(if LINEAR { updated_points.len() } else { 0 });
-            let mut d_s11 = Vec::with_capacity(updated_points.len());
-            let mut d_s22 = Vec::with_capacity(updated_points.len());
-            let mut d_s12 = Vec::with_capacity(updated_points.len());
-            let mut d_t1 = Vec::with_capacity(if LINEAR { updated_points.len() } else { 0 });
-            let mut d_t2 = Vec::with_capacity(if LINEAR { updated_points.len() } else { 0 });
-
-            for &pt in updated_points.iter() {
-                let PrefixStats {
-                    s11: new_s11,
-                    s22: new_s22,
-                    s12: new_s12,
-                    t1: new_t1,
-                    t2: new_t2,
-                } = if LINEAR {
-                    state.point_statistics(pt, self.weight(residuals[pt]))
+        // 1) Each affected row's retained statistics and their change from the stored
+        //    caches, so every column applies the same deltas.
+        let (new_values, deltas): (Vec<PrefixStats>, Vec<PrefixStats>) = updated_points
+            .iter()
+            .map(|&pt| {
+                let new = if LINEAR {
+                    state.point_statistics(pt, self.weight(state.residuals[pt]))
                 } else {
-                    state.point_curvature_statistics(pt, self.weight(residuals[pt]))
+                    state.point_curvature_statistics(pt, self.weight(state.residuals[pt]))
                 };
+                let statistics = &state.precomputed_statistics;
+                let old = statistics.curvature[pt];
+                let delta = PrefixStats {
+                    s11: new.s11 - old.s11,
+                    s22: new.s22 - old.s22,
+                    s12: new.s12 - old.s12,
+                    t1: if LINEAR {
+                        new.t1 - statistics.c_t1[pt]
+                    } else {
+                        0.0
+                    },
+                    t2: if LINEAR {
+                        new.t2 - statistics.c_t2[pt]
+                    } else {
+                        0.0
+                    },
+                };
+                (new, delta)
+            })
+            .unzip();
 
-                c_s11_new.push(new_s11);
-                c_s22_new.push(new_s22);
-                c_s12_new.push(new_s12);
-                if LINEAR {
-                    c_t1_new.push(new_t1);
-                    c_t2_new.push(new_t2);
-                }
-
-                d_s11.push(new_s11 - old[pt].s11);
-                d_s22.push(new_s22 - old[pt].s22);
-                d_s12.push(new_s12 - old[pt].s12);
-                if LINEAR {
-                    d_t1.push(new_t1 - old_t1[pt]);
-                    d_t2.push(new_t2 - old_t2[pt]);
-                }
-            }
-
-            (
-                c_s11_new, c_s22_new, c_s12_new, c_t1_new, c_t2_new, d_s11, d_s22, d_s12, d_t1,
-                d_t2,
-            )
+        let affected = AffectedRows {
+            col,
+            start,
+            end,
+            n: state.n,
+            deltas: &deltas,
         };
+        let statistics = &mut state.precomputed_statistics;
 
-        // 2) For other (non-split) columns, apply delta updates.
-        //    Binned columns: scatter deltas into B-length bin buckets and
-        //    sweep cumulants over the affected bin range (~B work instead of
-        //    ~n work — the main optimization).
-        //    Exact columns: original O(span) scatter + sweep over length-n
-        //    prefix sums (parity path).
-        //
-        //    The bucket scatter groups the retained deltas at offset `off`
-        //    into one `PrefixStats` per bucket slot so the prefix-sum
-        //    sweep touches a single 40-byte struct per index instead of
-        //    five independent `Vec<f64>`. Order of additions is unchanged.
-        let mut bucket_d: Vec<PrefixStats> = Vec::new();
-        for (c, &(min_pos, max_pos)) in affected_points_range
+        // 2) Every other column scatters the deltas over the sorted positions its affected
+        //    rows span: into length-B bin buckets for binned columns (O(B) work), into the
+        //    length-n prefix sums for exact columns.
+        let mut buckets = Vec::new();
+        for (c, &positions) in affected_points_range
             .iter()
             .enumerate()
             .filter(|&(c, _)| c != col)
         {
-            if min_pos > max_pos {
+            if positions.0 > positions.1 {
                 continue;
             }
-            let is_binned = !state.precomputed_statistics.bin_edges[c].is_empty();
-
-            if is_binned {
-                // ---- Binned path ----
-                let bin_edges = &state.precomputed_statistics.bin_edges[c];
-                let min_bin = bin_edges.partition_point(|&e| e <= min_pos);
-                let max_bin = bin_edges.partition_point(|&e| e <= max_pos);
-                let bin_span = max_bin - min_bin + 1;
-
-                bucket_d.clear();
-                bucket_d.resize(bin_span, PrefixStats::ZERO);
-
-                let bin_indices = &state.precomputed_statistics.bin_indices[c];
-                for (j, &pt) in updated_points.iter().enumerate() {
-                    let bin = bin_indices[pt] as usize;
-                    let off = bin - min_bin;
-                    let slot = &mut bucket_d[off];
-                    slot.s11 += d_s11[j];
-                    slot.s22 += d_s22[j];
-                    slot.s12 += d_s12[j];
-                    if LINEAR {
-                        slot.t1 += d_t1[j];
-                        slot.t2 += d_t2[j];
-                    }
-                }
-
-                let b = &mut state.precomputed_statistics.binned_prefix_sums[c];
-                let mut acc_d = PrefixStats::ZERO;
-                for off in 0..bin_span {
-                    add_statistics::<LINEAR>(&mut acc_d, bucket_d[off]);
-                    add_statistics::<LINEAR>(&mut b[min_bin + off], acc_d);
-                }
-                if let Some(tail) = b.get_mut((max_bin + 1)..) {
-                    for v in tail {
-                        add_statistics::<LINEAR>(v, acc_d);
-                    }
-                }
-            } else {
-                // ---- Exact path (length-n prefix sums) ----
-                let span = max_pos - min_pos + 1;
-                bucket_d.clear();
-                bucket_d.resize(span, PrefixStats::ZERO);
-
-                let sort_order = &state.precomputed_statistics.sort_order[c];
-                let prefix_sums = &mut state.precomputed_statistics.prefix_sums[c];
-
-                for (j, &pt) in updated_points.iter().enumerate() {
-                    let pos_full = sort_order[pt];
-                    let off = pos_full - min_pos;
-                    let slot = &mut bucket_d[off];
-                    slot.s11 += d_s11[j];
-                    slot.s22 += d_s22[j];
-                    slot.s12 += d_s12[j];
-                    if LINEAR {
-                        slot.t1 += d_t1[j];
-                        slot.t2 += d_t2[j];
-                    }
-                }
-
-                let mut acc_d = PrefixStats::ZERO;
-                let range = &mut prefix_sums[min_pos..=max_pos];
-                for off in 0..span {
-                    add_statistics::<LINEAR>(&mut acc_d, bucket_d[off]);
-                    add_statistics::<LINEAR>(&mut range[off], acc_d);
-                }
-
-                if let Some(tail) = prefix_sums.get_mut((max_pos + 1)..) {
-                    for v in tail {
-                        add_statistics::<LINEAR>(v, acc_d);
-                    }
-                }
-            }
+            scatter_column::<LINEAR>(statistics, &affected, c, positions, &mut buckets);
         }
 
-        // 3) Split column: same path-split as non-split columns, but the
-        //    affected range is the full interval [start..end).
-        //    Binned path uses the same bin-indexed delta scatter as above.
-        //    Exact path keeps the original rebuild-from-new-values logic for
-        //    parity with the prior implementation.
-        let split_is_binned = !state.precomputed_statistics.bin_edges[col].is_empty();
-
-        if split_is_binned {
-            // Binned split column: bin-indexed delta scatter, identical to
-            // the non-split binned loop above but using (start, end-1).
-            let min_pos = start;
-            let max_pos = end - 1;
-
-            let bin_edges = &state.precomputed_statistics.bin_edges[col];
-            let min_bin = bin_edges.partition_point(|&e| e <= min_pos);
-            let max_bin = bin_edges.partition_point(|&e| e <= max_pos);
-            let bin_span = max_bin - min_bin + 1;
-
-            bucket_d.clear();
-            bucket_d.resize(bin_span, PrefixStats::ZERO);
-
-            let bin_indices = &state.precomputed_statistics.bin_indices[col];
-            for (j, &pt) in updated_points.iter().enumerate() {
-                let bin = bin_indices[pt] as usize;
-                let off = bin - min_bin;
-                let slot = &mut bucket_d[off];
-                slot.s11 += d_s11[j];
-                slot.s22 += d_s22[j];
-                slot.s12 += d_s12[j];
-                if LINEAR {
-                    slot.t1 += d_t1[j];
-                    slot.t2 += d_t2[j];
-                }
-            }
-
-            let b = &mut state.precomputed_statistics.binned_prefix_sums[col];
-            let mut acc_d = PrefixStats::ZERO;
-            for off in 0..bin_span {
-                add_statistics::<LINEAR>(&mut acc_d, bucket_d[off]);
-                add_statistics::<LINEAR>(&mut b[min_bin + off], acc_d);
-            }
-            if let Some(tail) = b.get_mut((max_bin + 1)..) {
-                for v in tail {
-                    add_statistics::<LINEAR>(v, acc_d);
-                }
-            }
+        // 3) The split column spans the full interval [start, end). A binned split column
+        //    scatters the deltas; an exact one rebuilds the interval's prefix sums from the
+        //    new row values and shifts the tail.
+        if !statistics.bin_edges[col].is_empty() {
+            scatter_column::<LINEAR>(statistics, &affected, col, (start, end - 1), &mut buckets);
         } else {
-            let prefix_sums = &mut state.precomputed_statistics.prefix_sums[col];
-
-            // Exact split column: rebuild the interval [start..end) and shift the tail.
-            // Each per-stat prefix is rebuilt by accumulating the matching
-            // c_*_new vector — same order of additions as before.
-            let min_pos = start;
-            let max_pos = end - 1;
-            let prev = if min_pos > 0 {
+            let prefix_sums = &mut statistics.prefix_sums[col];
+            let (min_pos, max_pos) = (start, end - 1);
+            let mut acc = if min_pos > 0 {
                 prefix_sums[min_pos - 1]
             } else {
                 PrefixStats::ZERO
             };
             let old_last = prefix_sums[max_pos];
-
-            let mut acc = prev;
-            for (k, v) in c_s11_new.iter().enumerate() {
-                acc.s11 += *v;
-                prefix_sums[min_pos + k].s11 = acc.s11;
-            }
-            acc.s22 = prev.s22;
-            for (k, v) in c_s22_new.iter().enumerate() {
-                acc.s22 += *v;
-                prefix_sums[min_pos + k].s22 = acc.s22;
-            }
-            acc.s12 = prev.s12;
-            for (k, v) in c_s12_new.iter().enumerate() {
-                acc.s12 += *v;
-                prefix_sums[min_pos + k].s12 = acc.s12;
-            }
-            acc.t1 = prev.t1;
-            for (k, v) in c_t1_new.iter().enumerate() {
-                acc.t1 += *v;
-                prefix_sums[min_pos + k].t1 = acc.t1;
-            }
-            acc.t2 = prev.t2;
-            for (k, v) in c_t2_new.iter().enumerate() {
-                acc.t2 += *v;
-                prefix_sums[min_pos + k].t2 = acc.t2;
-            }
-
-            let diff = if LINEAR {
-                sub_stats(prefix_sums[max_pos], old_last)
-            } else {
-                PrefixStats {
-                    s11: prefix_sums[max_pos].s11 - old_last.s11,
-                    s22: prefix_sums[max_pos].s22 - old_last.s22,
-                    s12: prefix_sums[max_pos].s12 - old_last.s12,
-                    t1: 0.0,
-                    t2: 0.0,
+            for (value, new) in prefix_sums[min_pos..=max_pos].iter_mut().zip(&new_values) {
+                add_statistics::<LINEAR>(&mut acc, *new);
+                value.s11 = acc.s11;
+                value.s22 = acc.s22;
+                value.s12 = acc.s12;
+                if LINEAR {
+                    value.t1 = acc.t1;
+                    value.t2 = acc.t2;
                 }
-            };
+            }
+            let diff = sub_stats(prefix_sums[max_pos], old_last);
             if let Some(tail) = prefix_sums.get_mut((max_pos + 1)..) {
-                for v in tail {
-                    add_statistics::<LINEAR>(v, diff);
+                for value in tail {
+                    add_statistics::<LINEAR>(value, diff);
                 }
             }
         }
 
-        // 4) Store the per-point curvature and linear caches
-        {
-            let curvature = &mut state.precomputed_statistics.curvature;
-            let c_t1 = &mut state.precomputed_statistics.c_t1;
-            let c_t2 = &mut state.precomputed_statistics.c_t2;
-            for (j, &pt) in updated_points.iter().enumerate() {
-                curvature[pt].s11 = c_s11_new[j];
-                curvature[pt].s22 = c_s22_new[j];
-                curvature[pt].s12 = c_s12_new[j];
-                if LINEAR {
-                    c_t1[pt] = c_t1_new[j];
-                    c_t2[pt] = c_t2_new[j];
-                }
+        // 4) Store the per-point curvature and linear caches.
+        let updated_points = &statistics.sorted_indices[col][start..end];
+        for (&pt, new) in updated_points.iter().zip(&new_values) {
+            statistics.curvature[pt] = CurvatureCache {
+                s11: new.s11,
+                s22: new.s22,
+                s12: new.s12,
+            };
+            if LINEAR {
+                statistics.c_t1[pt] = new.t1;
+                statistics.c_t2[pt] = new.t2;
             }
         }
 
         state.linear_statistics_stale = !LINEAR;
         state
+    }
+}
+
+/// Add the affected rows' deltas to column `c`, whose affected rows span sorted positions
+/// `positions.0..=positions.1`.
+fn scatter_column<const LINEAR: bool>(
+    statistics: &mut PrecomputedStatistics,
+    affected: &AffectedRows,
+    c: usize,
+    (min_pos, max_pos): (usize, usize),
+    buckets: &mut Vec<PrefixStats>,
+) {
+    let PrecomputedStatistics {
+        sorted_indices,
+        sort_order,
+        bin_edges,
+        bin_indices,
+        bin_ranks,
+        prefix_sums,
+        binned_prefix_sums,
+        ..
+    } = statistics;
+    let rows = &sorted_indices[affected.col][affected.start..affected.end];
+    let edges = &bin_edges[c];
+    if edges.is_empty() {
+        let ranks = &sort_order[c];
+        scatter_and_sweep::<LINEAR>(
+            &mut prefix_sums[c],
+            (min_pos, max_pos),
+            rows.iter().map(|&row| ranks[row]),
+            affected.deltas,
+            buckets,
+        );
+        return;
+    }
+    let bin_span = (
+        edges.partition_point(|&e| e <= min_pos),
+        edges.partition_point(|&e| e <= max_pos),
+    );
+    let prefix = &mut binned_prefix_sums[c];
+    match bin_ranks.get(affected.col) {
+        // Column `c`'s bins of the affected rows, contiguous in the action column's rank order.
+        Some(streams) => {
+            let offset = c * affected.n;
+            scatter_and_sweep::<LINEAR>(
+                prefix,
+                bin_span,
+                streams[offset + affected.start..offset + affected.end]
+                    .iter()
+                    .map(|&bin| bin as usize),
+                affected.deltas,
+                buckets,
+            );
+        }
+        None => {
+            let row_bins = &bin_indices[c];
+            scatter_and_sweep::<LINEAR>(
+                prefix,
+                bin_span,
+                rows.iter().map(|&row| row_bins[row] as usize),
+                affected.deltas,
+                buckets,
+            );
+        }
+    }
+}
+
+/// Add each delta to its slot of `prefix`, where every slot lies in `lo..=hi`, keeping
+/// `prefix` a running sum: the slot totals accumulate over `lo..=hi`, and the tail past `hi`
+/// receives the full total. `slots` yields one slot per delta, in delta order.
+fn scatter_and_sweep<const LINEAR: bool>(
+    prefix: &mut [PrefixStats],
+    (lo, hi): (usize, usize),
+    slots: impl Iterator<Item = usize>,
+    deltas: &[PrefixStats],
+    buckets: &mut Vec<PrefixStats>,
+) {
+    buckets.clear();
+    buckets.resize(hi - lo + 1, PrefixStats::ZERO);
+    for (slot, &delta) in slots.zip(deltas) {
+        add_statistics::<LINEAR>(&mut buckets[slot - lo], delta);
+    }
+    let mut accumulated = PrefixStats::ZERO;
+    for (value, &bucket) in prefix[lo..=hi].iter_mut().zip(buckets.iter()) {
+        add_statistics::<LINEAR>(&mut accumulated, bucket);
+        add_statistics::<LINEAR>(value, accumulated);
+    }
+    if let Some(tail) = prefix.get_mut((hi + 1)..) {
+        for value in tail {
+            add_statistics::<LINEAR>(value, accumulated);
+        }
     }
 }
