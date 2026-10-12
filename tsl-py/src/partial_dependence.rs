@@ -7,10 +7,11 @@ use numpy::{
     ToPyArray,
 };
 use pyo3::{
+    exceptions::PyValueError,
     prelude::*,
     types::{PyList, PyTuple},
 };
-use tsl::forest::TSL;
+use tsl::{forest::TSL, grid_tensor::GridTensor};
 
 /// Per-epoch `(C_plus, C_minus)` constants and the `(n_observations, 2 * n_epochs)` values
 /// with columns `[f+_epoch0, f-_epoch0, f+_epoch1, f-_epoch1, ...]`.
@@ -32,6 +33,31 @@ pub fn to_py_tuple<'py>(
     PyTuple::new(py, [constants_list.as_any(), pd_py.as_any()])
 }
 
+/// A grid's branch factors `(b·e^{d}, b·e^{−d})`, tabulated per axis and interval.
+struct FactorTable<'a> {
+    grid: &'a GridTensor,
+    factors: Vec<Vec<(f64, f64)>>,
+}
+
+impl<'a> FactorTable<'a> {
+    fn new(grid: &'a GridTensor) -> Self {
+        Self {
+            grid,
+            factors: grid.two_tensor_factors(),
+        }
+    }
+
+    /// Factors of the interval of `axis` that holds `value`, clamped to the last interval.
+    fn at(&self, axis: usize, value: f64) -> (f64, f64) {
+        let axis_factors = &self.factors[axis];
+        let bin = self
+            .grid
+            .bin_index(axis, value)
+            .min(axis_factors.len().saturating_sub(1));
+        axis_factors[bin]
+    }
+}
+
 /// Partial dependence on the features `fixed_indices`, evaluated at the rows of `fixed_values`
 /// and averaged over the rows of `data_x` for the remaining features.
 pub fn partial_dependence(
@@ -49,7 +75,7 @@ pub fn partial_dependence(
 
     // Validate dimensions
     if fixed_values_contiguous.ncols() != n_fixed {
-        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+        return Err(PyValueError::new_err(format!(
             "fixed_values must have {} columns (one per fixed_indices), got {}",
             n_fixed,
             fixed_values_contiguous.ncols()
@@ -61,7 +87,7 @@ pub fn partial_dependence(
 
     // Validate all indices are unique
     if fixed_set.len() != n_fixed {
-        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+        return Err(PyValueError::new_err(
             "fixed_indices must contain unique values",
         ));
     }
@@ -78,7 +104,7 @@ pub fn partial_dependence(
         // Validate fixed indices are in bounds
         for &idx in fixed_indices {
             if idx >= n_features {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                return Err(PyValueError::new_err(format!(
                     "Feature index {} out of bounds (n_features={})",
                     idx, n_features
                 )));
@@ -91,10 +117,11 @@ pub fn partial_dependence(
         // Prediction formula: scaling_plus * f_plus + scaling_minus * (-f_minus)
         // So we use: effective_lambda_plus = scaling_plus * lambda_plus
         //            effective_lambda_minus = -scaling_minus * lambda_minus
-        let scaling_plus = tgf.scaling_plus.unwrap_or(1.0);
-        let scaling_minus = tgf.scaling_minus.unwrap_or(0.0);
+        let (scaling_plus, scaling_minus) = tgf.scalings();
         let effective_lambda_plus = scaling_plus * grid.lambda_plus;
         let effective_lambda_minus = -scaling_minus * grid.lambda_minus;
+        let table = FactorTable::new(grid);
+        let marginalized: Vec<usize> = (0..n_features).filter(|j| !fixed_set.contains(j)).collect();
 
         // Step 1: Compute E[∏_{j ∉ S} f_j(X_j)] once per epoch
         // Since f = λ_± * ∏_j a_±,j, we compute the expectation of the product over non-fixed features
@@ -106,21 +133,10 @@ pub fn partial_dependence(
             let mut prod_plus = effective_lambda_plus;
             let mut prod_minus = effective_lambda_minus;
 
-            // Only iterate over non-fixed features
-            for j in 0..n_features {
-                if fixed_set.contains(&j) {
-                    continue; // Skip fixed features
-                }
-
-                let x_j = data_x_contiguous[[train_idx, j]];
-                let col_idx = grid.splits[j].partition_point(|&split| split <= x_j);
-                let col_idx = col_idx.min(grid.backbone_values[j].len() - 1);
-
-                let b = grid.backbone_values[j][col_idx];
-                let d = grid.tilt_values[j][col_idx];
-
-                prod_plus *= b * d.exp();
-                prod_minus *= b * (-d).exp();
+            for &j in &marginalized {
+                let (a_plus, a_minus) = table.at(j, data_x_contiguous[[train_idx, j]]);
+                prod_plus *= a_plus;
+                prod_minus *= a_minus;
             }
 
             expected_marginalized_plus += prod_plus;
@@ -138,18 +154,11 @@ pub fn partial_dependence(
             let mut prod_fixed_plus = 1.0;
             let mut prod_fixed_minus = 1.0;
 
-            // Only iterate over fixed features
             for (col_idx, &feature_idx) in fixed_indices.iter().enumerate() {
-                let x_j = fixed_values_contiguous[[obs_idx, col_idx]];
-
-                let interval_idx = grid.splits[feature_idx].partition_point(|&split| split <= x_j);
-                let interval_idx = interval_idx.min(grid.backbone_values[feature_idx].len() - 1);
-
-                let b = grid.backbone_values[feature_idx][interval_idx];
-                let d = grid.tilt_values[feature_idx][interval_idx];
-
-                prod_fixed_plus *= b * d.exp();
-                prod_fixed_minus *= b * (-d).exp();
+                let (a_plus, a_minus) =
+                    table.at(feature_idx, fixed_values_contiguous[[obs_idx, col_idx]]);
+                prod_fixed_plus *= a_plus;
+                prod_fixed_minus *= a_minus;
             }
 
             // Combine: ∏_{j ∈ S} f_j(x_j) · E[∏_{j ∉ S} f_j(X_j)]
@@ -184,12 +193,12 @@ pub fn first_order_partial_dependence(
     let n_epochs = tsl.get_stage_predictors().len();
 
     if n_samples == 0 {
-        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+        return Err(PyValueError::new_err(
             "data_x must contain at least one sample",
         ));
     }
     if data_x_contiguous.ncols() != n_features {
-        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+        return Err(PyValueError::new_err(format!(
             "values_x and data_x must have the same number of columns, got {} and {}",
             n_features,
             data_x_contiguous.ncols()
@@ -207,7 +216,7 @@ pub fn first_order_partial_dependence(
         let grid_features = grid.splits.len();
 
         if grid_features != n_features {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            return Err(PyValueError::new_err(format!(
                 "Feature count mismatch: values_x has {} columns but grid has {}",
                 n_features, grid_features
             )));
@@ -217,10 +226,10 @@ pub fn first_order_partial_dependence(
         // Prediction formula: scaling_plus * f_plus + scaling_minus * (-f_minus)
         // So we use: effective_lambda_plus = scaling_plus * lambda_plus
         //            effective_lambda_minus = -scaling_minus * lambda_minus
-        let scaling_plus = tgf.scaling_plus.unwrap_or(1.0);
-        let scaling_minus = tgf.scaling_minus.unwrap_or(0.0);
+        let (scaling_plus, scaling_minus) = tgf.scalings();
         let effective_lambda_plus = scaling_plus * grid.lambda_plus;
         let effective_lambda_minus = -scaling_minus * grid.lambda_minus;
+        let table = FactorTable::new(grid);
 
         let mut sum_plus = vec![0.0; n_features];
         let mut sum_minus = vec![0.0; n_features];
@@ -234,16 +243,8 @@ pub fn first_order_partial_dependence(
 
         for sample_idx in 0..n_samples {
             for j in 0..n_features {
-                let x_j = data_x_contiguous[[sample_idx, j]];
-                let interval_idx = grid.splits[j].partition_point(|&split| split <= x_j);
-                let interval_idx =
-                    interval_idx.min(grid.backbone_values[j].len().saturating_sub(1));
-
-                let b = grid.backbone_values[j][interval_idx];
-                let d = grid.tilt_values[j][interval_idx];
-
-                factors_plus[j] = b * d.exp();
-                factors_minus[j] = b * (-d).exp();
+                (factors_plus[j], factors_minus[j]) =
+                    table.at(j, data_x_contiguous[[sample_idx, j]]);
             }
 
             prefix_plus[0] = 1.0;
@@ -280,16 +281,7 @@ pub fn first_order_partial_dependence(
 
         for obs_idx in 0..n_observations {
             for j in 0..n_features {
-                let x_j = values_x_contiguous[[obs_idx, j]];
-                let interval_idx = grid.splits[j].partition_point(|&split| split <= x_j);
-                let interval_idx =
-                    interval_idx.min(grid.backbone_values[j].len().saturating_sub(1));
-
-                let b = grid.backbone_values[j][interval_idx];
-                let d = grid.tilt_values[j][interval_idx];
-
-                let m_plus = b * d.exp();
-                let m_minus = b * (-d).exp();
+                let (m_plus, m_minus) = table.at(j, values_x_contiguous[[obs_idx, j]]);
 
                 // Compute PD values (scaling already absorbed into constants via effective_lambda)
                 let col_plus = 2 * epoch_idx;
@@ -326,14 +318,14 @@ pub fn ice_curves(
 
     // Validate dimensions
     if feature_index >= n_features {
-        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+        return Err(PyValueError::new_err(format!(
             "feature_index {} out of bounds (n_features={})",
             feature_index, n_features
         )));
     }
 
     if data_x_contiguous.ncols() != n_features {
-        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+        return Err(PyValueError::new_err(format!(
             "observations and data_x must have the same number of columns, got {} and {}",
             n_features,
             data_x_contiguous.ncols()
@@ -341,7 +333,7 @@ pub fn ice_curves(
     }
 
     if n_range_values == 0 {
-        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+        return Err(PyValueError::new_err(
             "x_range must contain at least one value",
         ));
     }
@@ -354,54 +346,33 @@ pub fn ice_curves(
         let grid_features = grid.splits.len();
 
         if grid_features != n_features {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            return Err(PyValueError::new_err(format!(
                 "Feature count mismatch: observations has {} columns but grid has {}",
                 n_features, grid_features
             )));
         }
 
-        // Get OLS scaling coefficients
-        let scaling_plus = tgf.scaling_plus.unwrap_or(1.0);
-        let scaling_minus = tgf.scaling_minus.unwrap_or(0.0);
+        let (scaling_plus, scaling_minus) = tgf.scalings();
+        let table = FactorTable::new(grid);
+        let varying_factors: Vec<(f64, f64)> = x_range_contiguous
+            .iter()
+            .map(|&v| table.at(feature_index, v))
+            .collect();
 
-        // For each observation
         for obs_idx in 0..n_obs {
-            // Pre-compute constant factors for all features except the varying one
+            // Product over every feature except the varying one
             let mut const_plus = grid.lambda_plus;
             let mut const_minus = grid.lambda_minus;
 
-            for j in 0..n_features {
-                if j == feature_index {
-                    continue; // Skip the varying feature
-                }
-
-                let x_j = observations_contiguous[[obs_idx, j]];
-                let interval_idx = grid.splits[j].partition_point(|&split| split <= x_j);
-                let interval_idx =
-                    interval_idx.min(grid.backbone_values[j].len().saturating_sub(1));
-
-                let b = grid.backbone_values[j][interval_idx];
-                let d = grid.tilt_values[j][interval_idx];
-
-                const_plus *= b * d.exp();
-                const_minus *= b * (-d).exp();
+            for j in (0..n_features).filter(|&j| j != feature_index) {
+                let (a_plus, a_minus) = table.at(j, observations_contiguous[[obs_idx, j]]);
+                const_plus *= a_plus;
+                const_minus *= a_minus;
             }
 
-            // For each value in x_range
-            for range_idx in 0..n_range_values {
-                let v = x_range_contiguous[range_idx];
-
-                // Find interval for the varying feature at value v
-                let interval_idx = grid.splits[feature_index].partition_point(|&split| split <= v);
-                let interval_idx =
-                    interval_idx.min(grid.backbone_values[feature_index].len().saturating_sub(1));
-
-                let b = grid.backbone_values[feature_index][interval_idx];
-                let d = grid.tilt_values[feature_index][interval_idx];
-
-                // Compute f+ and f- with the varying feature
-                let f_plus_unscaled = const_plus * (b * d.exp());
-                let f_minus_unscaled = const_minus * (b * (-d).exp());
+            for (range_idx, &(a_plus, a_minus)) in varying_factors.iter().enumerate() {
+                let f_plus_unscaled = const_plus * a_plus;
+                let f_minus_unscaled = const_minus * a_minus;
 
                 // Apply scaling (matching prediction formula: scaling_plus * f_+ + scaling_minus * (-f_-))
                 // For ICE curves, return scaled f+ and scaled (-f-) separately
