@@ -35,7 +35,7 @@ The aggregation mode (`Mean` / `GeometricMean` / `Combined`) is set internally; 
 | `n_iter` | `10` | split budget per grid ($T$); larger captures more structure |
 | `split_strategy` | `"random"` | `"random"`, `"best_split"`, or `"top_k"` |
 | `split_try` | `10` | candidate split positions sampled per (feature, interval) |
-| `colsample_bytree` | `0.8` | fraction of features sampled per split proposal |
+| `colsample_bytree` | `1.0` | fraction of features proposed per split, from those that still have split positions |
 | `min_interval_samples` | `1` | minimum observations on each side of a split |
 | `min_split_loss` | `0.0` | minimum objective reduction to accept any structural action |
 | `complexity_penalty` | `0.0` | fixed-scale boundary cost used by split, resplit, and merge (`0.0` disables merge candidates) |
@@ -119,7 +119,6 @@ TSLRegressor(
     n_trees=16,          # moderate bagging
     n_iter=30,           # enough splits to capture structure
     split_try=16,
-    colsample_bytree=0.8,
     alpha=0.01,          # light log-backbone shrinkage
     seed=0,
 )

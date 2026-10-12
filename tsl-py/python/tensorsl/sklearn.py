@@ -55,8 +55,9 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         The decay rate for the number of splits in each epoch.
     split_try : int, default=10
         Number of split points to try for each feature.
-    colsample_bytree : float, default=0.8
-        Subsample ratio of columns when constructing each tree.
+    colsample_bytree : float, default=1.0
+        Fraction of the features each split proposal draws from, among those that still
+        have split positions (at least one).
     alpha: float, default=0.0
         L2 penalty on the multiplicative log-backbone update.
     complexity_penalty : float, default=0.0
@@ -122,7 +123,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         n_iter: int = 10,
         decay: float = 1.0,
         split_try: int = 10,
-        colsample_bytree: float = 0.8,
+        colsample_bytree: float = 1.0,
         alpha: float = 0.0,
         complexity_penalty: float = 0.0,
         min_split_loss: float = 0.0,

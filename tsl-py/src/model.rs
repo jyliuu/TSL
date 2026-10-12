@@ -290,7 +290,7 @@ impl TSLPy {
         n_trees=10,
         n_iter=10,
         split_try=10,
-        colsample_bytree=0.8,
+        colsample_bytree=1.0,
         alpha=0.0,
         complexity_penalty=0.0,
         min_split_loss=0.0,
