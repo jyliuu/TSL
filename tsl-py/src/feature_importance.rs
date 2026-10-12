@@ -1,7 +1,7 @@
 //! Backbone and tilt feature importance of a fitted `TSL`, per stage and energy-weighted.
 
 use numpy::ndarray::{Array1, Array2, ArrayView2};
-use pyo3::prelude::*;
+use pyo3::{exceptions::PyValueError, prelude::*};
 use tsl::forest::TSL;
 
 /// Per-stage importance `(backbone, tilt)`, each of shape `(n_stages, n_features)`.
@@ -59,7 +59,7 @@ fn per_stage_variances(
     for tgf in stage_predictors.iter() {
         let grid = tgf.get_primary_grid_tensor();
         if grid.splits.len() != n_features {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            return Err(PyValueError::new_err(format!(
                 "Feature dimension mismatch: data has {} features, but model has {}",
                 n_features,
                 grid.splits.len()
@@ -81,15 +81,11 @@ fn per_stage_variances(
             let mut d_values = Vec::with_capacity(n_samples);
 
             for i in 0..n_samples {
-                let x_j = data_x[[i, j]];
-                let col_idx = grid.splits[j].partition_point(|&split| split <= x_j);
-                let col_idx = col_idx.min(grid.backbone_values[j].len() - 1);
-
-                let b = grid.backbone_values[j][col_idx];
-                let d = grid.tilt_values[j][col_idx];
-
-                log_b_values.push(b.ln());
-                d_values.push(d);
+                let bin = grid
+                    .bin_index(j, data_x[[i, j]])
+                    .min(grid.backbone_values[j].len() - 1);
+                log_b_values.push(grid.backbone_values[j][bin].ln());
+                d_values.push(grid.tilt_values[j][bin]);
             }
 
             // Compute mean
@@ -119,41 +115,22 @@ fn per_stage_variances(
 /// Computes stage weights based on energy: each stage's share of the total
 /// `||scaling_+ * f_+ - scaling_- * f_-||_n^2` over all stages.
 fn stage_weights(tsl: &TSL, data_x: ArrayView2<f64>) -> Result<Vec<f64>, PyErr> {
-    use tsl::stage_predictor::extract_two_tensor_predictions_unscaled;
-
     let stage_predictors = tsl.get_stage_predictors();
     let n_stages = stage_predictors.len();
     let n_samples = data_x.nrows();
 
     if n_stages == 0 {
-        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-            "Model has no stages",
-        ));
+        return Err(PyValueError::new_err("Model has no stages"));
     }
 
-    // Compute stage weights based on energy
-    // Energy = ||scaling_+ * f_+ - scaling_- * f_-||_n^2
-    // where f_+ and f_- already include lambda, so we multiply by scaling
-    let mut stage_energies = Vec::with_capacity(n_stages);
-
-    for tgf in stage_predictors.iter() {
-        let grid = tgf.get_primary_grid_tensor();
-        let (f_plus, f_minus) = extract_two_tensor_predictions_unscaled(grid, data_x);
-
-        // Get OLS scaling coefficients (default to 1.0 for scaling_plus, 0.0 for scaling_minus)
-        let scaling_plus = tgf.scaling_plus.unwrap_or(1.0);
-        let scaling_minus = tgf.scaling_minus.unwrap_or(0.0);
-
-        // Compute ||scaling_+ * f_+ - scaling_- * f_-||_n^2
-        // This matches the actual prediction formula: scaling_plus * f_+ + scaling_minus * (-f_-)
-        let mut energy = 0.0;
-        for i in 0..n_samples {
-            let diff = scaling_plus * f_plus[i] - scaling_minus * f_minus[i];
-            energy += diff * diff;
-        }
-        energy /= n_samples as f64;
-        stage_energies.push(energy);
-    }
+    // Energy of a stage: the mean square of its prediction scaling_+ * f_+ + scaling_- * (-f_-)
+    let stage_energies: Vec<f64> = stage_predictors
+        .iter()
+        .map(|tgf| {
+            let prediction = tgf.predict(data_x);
+            prediction.iter().fold(0.0, |energy, p| energy + p * p) / n_samples as f64
+        })
+        .collect();
 
     // Normalize stage weights
     let total_energy: f64 = stage_energies.iter().sum();
