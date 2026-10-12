@@ -43,12 +43,12 @@ The package has three layers:
 ```r
 tsl(x, y,
     epochs = 10L, n_trees = 10L, n_iter = 10L, decay = 1.0,
-    split_try = 10L, colsample_bytree = 0.8, alpha = 0.0,
+    split_try = 10L, colsample_bysplit = 1.0, alpha = 0.0,
     complexity_penalty = 0.0, min_split_loss = 0.0, min_interval_samples = 1L,
-    refinement_strategy = "l2", prior_sample_size = 0.0, update_clamp = Inf,
+    refinement_strategy = "l2", update_clamp = Inf,
     tilt_tau = 0.01, tilt_rho = 0.0, split_strategy = "random",
     top_k = 10L, must_fill_all_k = TRUE, similarity_threshold = 0.0,
-    bagged = FALSE, seed = 42L, verbosity = 1L)
+    seed = 42L, verbosity = 1L)
 ```
 
 Fit a boosted TSL model. The flat hyperparameters map onto the same Rust builders as the
@@ -66,13 +66,12 @@ guidance.
 | `n_iter` | `integer` | `10` | split budget per grid |
 | `decay` | `numeric` | `1.0` | multiply `n_iter` by this after epoch 1 |
 | `split_try` | `integer` | `10` | candidate split positions per feature (`"random"` strategy) |
-| `colsample_bytree` | `numeric` | `0.8` | fraction of features sampled per tree |
+| `colsample_bysplit` | `numeric` | `1.0` | fraction of features proposed per split, from those that still have split positions |
 | `alpha` | `numeric` | `0.0` | $\ell_2$ penalty on the log-backbone update $\beta=\log v_b$ |
 | `complexity_penalty` | `numeric` | `0.0` | fixed-scale boundary cost for unified structural selection (`0.0` disables merges) |
 | `min_split_loss` | `numeric` | `0.0` | minimum objective reduction to accept a structural action |
 | `min_interval_samples` | `integer` | `1` | minimum observations per interval |
 | `refinement_strategy` | `character` | `"l2"` | `"l2"` or `"huber"` |
-| `prior_sample_size` | `numeric` | `0.0` | parent-anchoring strength (advanced; `0.0` = off) |
 | `update_clamp` | `numeric` | `Inf` | nonnegative log-step cap; `Inf` retains numerical multiplier bounds $[0.05,20]$ |
 | `tilt_tau` | `numeric` | `0.01` | $\ell_2$ penalty on the tilt update $\delta=\frac12\log(v_+/v_-)$ |
 | `tilt_rho` | `numeric` | `0.0` | $\ell_1$ penalty on $\delta$; can produce zero tilt updates |
@@ -80,7 +79,6 @@ guidance.
 | `top_k` | `integer` | `10` | (for `"top_k"`) candidate pool size |
 | `must_fill_all_k` | `logical` | `TRUE` | (for `"top_k"`) require all $k$ slots |
 | `similarity_threshold` | `numeric` | `0.0` | bag trim $\xi$ (`0` keeps all) |
-| `bagged` | `logical` | `FALSE` | accepted for parity with the Python API; has no effect |
 | `seed` | `integer` | `42` | RNG seed (fits are deterministic) |
 | `verbosity` | `integer` | `1` | log level: `0` off, `1` info, `2` debug, `3` trace |
 

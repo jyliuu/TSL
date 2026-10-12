@@ -16,14 +16,14 @@
 #' @param decay Learning-rate decay applied after the first epoch.
 #' @param split_try Number of random split candidates (used by the
 #'   `"random"` split strategy).
-#' @param colsample_bytree Fraction of features sampled per tree.
+#' @param colsample_bysplit Fraction of features proposed per split, from those
+#'   that still have split positions (at least one).
 #' @param alpha L2 penalty on the multiplicative log-backbone update.
 #' @param complexity_penalty Cost-complexity strength for unified split, resplit,
 #'   and merge selection; `0.0` preserves split/resplit-only fitting.
 #' @param min_split_loss Minimum loss reduction required to make a split.
 #' @param min_interval_samples Minimum number of samples per interval.
 #' @param refinement_strategy Refinement loss, one of `"l2"` or `"huber"`.
-#' @param prior_sample_size Prior pseudo-count for refinement shrinkage.
 #' @param update_clamp Maximum magnitude of a refinement update.
 #' @param tilt_tau L2 penalty on the multiplicative tilt update.
 #' @param tilt_rho L1 penalty on the multiplicative tilt update; positive values
@@ -35,7 +35,6 @@
 #'   candidates.
 #' @param similarity_threshold Threshold controlling bagged aggregation of
 #'   trees within a stage.
-#' @param bagged Accepted for parity with the Python API; has no effect.
 #' @param seed Random seed.
 #' @param verbosity Logging verbosity: `0` off, `1` info, `2` debug, `3` trace.
 #'
@@ -63,13 +62,12 @@ tsl <- function(x, y,
                 n_iter = 10L,
                 decay = 1.0,
                 split_try = 10L,
-                colsample_bytree = 0.8,
+                colsample_bysplit = 1.0,
                 alpha = 0.0,
                 complexity_penalty = 0.0,
                 min_split_loss = 0.0,
                 min_interval_samples = 1L,
                 refinement_strategy = c("l2", "huber"),
-                prior_sample_size = 0.0,
                 update_clamp = Inf,
                 tilt_tau = 0.01,
                 tilt_rho = 0.0,
@@ -77,7 +75,6 @@ tsl <- function(x, y,
                 top_k = 10L,
                 must_fill_all_k = TRUE,
                 similarity_threshold = 0.0,
-                bagged = FALSE,
                 seed = 42L,
                 verbosity = 1L) {
   refinement_strategy <- match.arg(refinement_strategy)
@@ -101,14 +98,14 @@ tsl <- function(x, y,
     x, y,
     as.integer(epochs), as.double(decay),
     as.integer(n_trees), as.integer(n_iter),
-    as.integer(split_try), as.double(colsample_bytree),
+    as.integer(split_try), as.double(colsample_bysplit),
     as.double(alpha), as.double(complexity_penalty),
     as.double(min_split_loss), as.integer(min_interval_samples),
-    as.character(refinement_strategy), as.double(prior_sample_size),
+    as.character(refinement_strategy),
     as.double(update_clamp), as.double(tilt_tau), as.double(tilt_rho),
     as.character(split_strategy), as.integer(top_k),
     as.logical(must_fill_all_k), as.double(similarity_threshold),
-    as.logical(bagged), as.double(seed), as.integer(verbosity)
+    as.double(seed), as.integer(verbosity)
   )
 
   structure(
