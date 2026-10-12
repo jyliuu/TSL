@@ -43,7 +43,6 @@ impl RefinementStrategy {
         let (v_min, v_max) = self.multiplier_bounds();
 
         for i in lo_boundary_idx..=hi_boundary_idx {
-            // Use interval stats directly (O(1) lookup instead of prefix_range computation)
             let left_stats = &state.precomputed_statistics.interval_stats[col][i];
             let right_stats = &state.precomputed_statistics.interval_stats[col][i + 1];
 
@@ -52,7 +51,7 @@ impl RefinementStrategy {
                 // H^L = S_{11}^L, g^L = t_1^L
                 let h_l = left_stats.sum_s11;
                 let g_l = left_stats.sum_t1;
-                let (u_l, _denom_l, _num_l) = l2_update_unanchored(alpha, g_l, h_l);
+                let u_l = l2_update_unanchored(alpha, g_l, h_l);
                 let v_b_l = (1.0 + u_l).clamp(v_min, v_max);
                 let u_l_clamped = v_b_l - 1.0;
                 let gain_l = backbone_regularized_gain(u_l_clamped, g_l, h_l, alpha);
@@ -60,7 +59,7 @@ impl RefinementStrategy {
                 // H^R = S_{11}^R, g^R = t_1^R
                 let h_r = right_stats.sum_s11;
                 let g_r = right_stats.sum_t1;
-                let (u_r, _denom_r, _num_r) = l2_update_unanchored(alpha, g_r, h_r);
+                let u_r = l2_update_unanchored(alpha, g_r, h_r);
                 let v_b_r = (1.0 + u_r).clamp(v_min, v_max);
                 let u_r_clamped = v_b_r - 1.0;
                 let gain_r = backbone_regularized_gain(u_r_clamped, g_r, h_r, alpha);
@@ -196,7 +195,7 @@ impl RefinementStrategy {
             }
 
             let merged_factors = if is_stage1 {
-                let (u, _, _) = l2_update_unanchored(self.alpha(), t1, s11);
+                let u = l2_update_unanchored(self.alpha(), t1, s11);
                 let multiplier = (1.0 + u).clamp(v_min, v_max);
                 canonical_merge_factors(reference.0 * multiplier, reference.0 * multiplier, true)
             } else {

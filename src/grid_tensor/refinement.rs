@@ -17,9 +17,7 @@ mod split_scores;
 mod tests;
 
 pub use gain::{huber_weighting, l2_gain_raw, l2_update_unanchored};
-pub use prefix::{
-    binned_prefix_stats_at, binned_prefix_stats_range, prefix_range, prefix_stats_range,
-};
+pub use prefix::{binned_prefix_stats_at, binned_prefix_stats_range, prefix_stats_range};
 
 use crate::grid_tensor::two_tensor_solver::{DEFAULT_V_MAX, DEFAULT_V_MIN};
 

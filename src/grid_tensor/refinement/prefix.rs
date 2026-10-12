@@ -13,15 +13,6 @@ pub(super) fn add_statistics<const LINEAR: bool>(target: &mut PrefixStats, value
     }
 }
 
-#[inline]
-pub fn prefix_range(prefix: &[f64], start: usize, end: usize) -> f64 {
-    if start == 0 {
-        prefix[end - 1]
-    } else {
-        prefix[end - 1] - prefix[start - 1]
-    }
-}
-
 /// Subtract two `PrefixStats` componentwise.
 #[inline]
 pub(super) fn sub_stats(a: PrefixStats, b: PrefixStats) -> PrefixStats {
