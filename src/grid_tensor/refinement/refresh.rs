@@ -69,6 +69,11 @@ impl RefinementStrategy {
                 slot.t2 += t2;
             }
         }
+        self.refresh_all_scores(state)
+    }
+
+    /// Recompute every column's interval statistics and every split, resplit and merge score.
+    fn refresh_all_scores<'a>(&self, mut state: FittingState<'a>) -> FittingState<'a> {
         for col in 0..state.p {
             let last_interval = state.boundaries[col].len();
             Self::update_interval_stats_for_col_range(&mut state, col, 0, last_interval);
@@ -289,20 +294,20 @@ impl RefinementStrategy {
         let statistics = &mut state.precomputed_statistics;
         statistics.consensus_weight = consensus_weight;
         statistics.consensus_anchors = consensus_anchors;
-        let tiled = weights_fixed
-            && statistics.c_t1.len() >= n
-            && statistics.c_t2.len() >= n
-            && (0..state.p).all(|col| {
-                statistics.bin_edges[col].is_empty()
-                    || (statistics.bin_indices[col].len() == n
-                        && statistics.binned_prefix_sums[col].len()
-                            == statistics.bin_edges[col].len() + 1)
-            });
-        if tiled {
+        if weights_fixed {
+            debug_assert!(
+                statistics.c_t1.len() >= n
+                    && statistics.c_t2.len() >= n
+                    && (0..state.p).all(|col| {
+                        statistics.bin_edges[col].is_empty()
+                            || (statistics.bin_indices[col].len() == n
+                                && statistics.binned_prefix_sums[col].len()
+                                    == statistics.bin_edges[col].len() + 1)
+                    }),
+                "binned columns map every row and hold one cumulant per bin"
+            );
             Self::rebin_linear_tiles(statistics, n);
         }
-        let mut bins_t1 = Vec::new();
-        let mut bins_t2 = Vec::new();
         for col in 0..state.p {
             if statistics.bin_edges[col].is_empty() {
                 let prefix = &mut statistics.prefix_sums[col];
@@ -321,40 +326,8 @@ impl RefinementStrategy {
                     slot.t1 = acc.t1;
                     slot.t2 = acc.t2;
                 }
-            } else if tiled {
-                // Rebuilt by the tiled pass.
-            } else if weights_fixed {
-                let binned = &mut statistics.binned_prefix_sums[col];
-                bins_t1.clear();
-                bins_t1.resize(binned.len(), 0.0);
-                bins_t2.clear();
-                bins_t2.resize(binned.len(), 0.0);
-                let row_bins = &statistics.bin_indices[col];
-                match (
-                    statistics.c_t1.get(..row_bins.len()),
-                    statistics.c_t2.get(..row_bins.len()),
-                ) {
-                    (Some(t1), Some(t2)) => {
-                        for ((&bin, &value1), &value2) in row_bins.iter().zip(t1).zip(t2) {
-                            bins_t1[bin as usize] += value1;
-                            bins_t2[bin as usize] += value2;
-                        }
-                    }
-                    _ => {
-                        for (i, &bin) in statistics.bin_indices[col].iter().enumerate() {
-                            bins_t1[bin as usize] += statistics.c_t1[i];
-                            bins_t2[bin as usize] += statistics.c_t2[i];
-                        }
-                    }
-                }
-                let (mut t1, mut t2) = (0.0, 0.0);
-                for (slot, (b1, b2)) in binned.iter_mut().zip(bins_t1.iter().zip(&bins_t2)) {
-                    t1 += b1;
-                    t2 += b2;
-                    slot.t1 = t1;
-                    slot.t2 = t2;
-                }
-            } else {
+            } else if !weights_fixed {
+                // With fixed weights the tiled pass has rebuilt the binned columns.
                 let binned = &mut statistics.binned_prefix_sums[col];
                 binned.fill(PrefixStats::ZERO);
                 for (i, &bin) in statistics.bin_indices[col].iter().enumerate() {
@@ -375,17 +348,6 @@ impl RefinementStrategy {
         }
 
         state.linear_statistics_stale = false;
-        for col in 0..state.p {
-            let last_interval = state.boundaries[col].len();
-            Self::update_interval_stats_for_col_range(&mut state, col, 0, last_interval);
-        }
-        let ranges: Vec<AffectedRange> = (0..state.p)
-            .map(|col| AffectedRange {
-                col,
-                point_range: (0, n - 1),
-                interval_range: (0, 0),
-            })
-            .collect();
-        self.refresh_error_reduction_caches_for_affected(state, &ranges)
+        self.refresh_all_scores(state)
     }
 }
