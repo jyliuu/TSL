@@ -1,3 +1,6 @@
+//! The grid-tensor fitting loop: prepare the state, apply proposed structural actions, and
+//! identify the fitted grid.
+
 use ndarray::ArrayView2;
 use rand::Rng;
 
@@ -179,13 +182,11 @@ pub(crate) fn fit_step_with_candidate_refresh<'a, R: Rng + ?Sized>(
         return (state, false);
     }
 
-    // Log component states and f+/f- statistics every iteration
-    // Use reducer pattern - always call it, even if logging_state is None (no-op)
-    // Feature flag is encapsulated inside the reducers
+    // Log the f+/f- statistics and component states after every action; both reducers
+    // pass a `None` logging state through unchanged.
     #[cfg(feature = "evo-logging")]
     use crate::logging::reducer::{log_component_reducer, log_f_component_reducer};
 
-    // Log f+/f- statistics (reducer computes stats internally from state)
     #[cfg(feature = "evo-logging")]
     {
         state.logging_state = log_f_component_reducer(state.logging_state.take(), &state, iter);
@@ -212,10 +213,8 @@ pub(crate) fn finish_grid(mut state: FittingState<'_>) -> GridTensor {
 
     let grid_tensor = convert_state_to_grid(state);
 
-    // Add component state logging for final state AFTER identification has been applied
-    // This ensures we save the identified components (including λ_±), not pre-identification ones.
-    // Feature flag is encapsulated inside the logging helper function
-    // Always call it - it handles None internally
+    // Log the final component states after identification, so they match the returned grid
+    // (including λ_±); a `None` logging state is a no-op.
     #[cfg(feature = "evo-logging")]
     {
         use crate::grid_tensor::logging_helpers::log_final_component_states;
@@ -231,7 +230,7 @@ pub(crate) fn finish_fit(state: FittingState<'_>) -> (FitResult, GridTensor) {
     // `FitResult` is consistent with the returned `GridTensor`: after identification the
     // returned y_hat/residuals/err equal `grid_tensor.predict(x)` and its residuals.
     let y_hat = grid_tensor.predict(x.view());
-    let residuals = (labels.to_owned() - y_hat.view()).to_owned();
+    let residuals = &labels - &y_hat;
     let err = residuals.pow2().mean().unwrap();
     (
         FitResult {
@@ -339,8 +338,6 @@ fn convert_state_to_grid(state: FittingState) -> GridTensor {
     let splits = compute_splits(x, &boundaries, &precomputed_statistics.sorted_indices);
     let observation_counts =
         compute_observation_counts(&boundaries, &precomputed_statistics.sorted_indices);
-
-    // grid_values is no longer stored - computed on-demand via get_mean_factor()
 
     // Apply two-tensor identification/normalization (prediction-preserving).
     l2_identify(
