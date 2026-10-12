@@ -313,7 +313,6 @@ fn fit_members<'a>(
         let advance = |member: &mut Member<'a>| {
             let current = member.state.as_ref().expect("member state");
             if member.next_iteration >= iteration_budget
-                || current.terminated
                 || current.structure_is_final(tg_params.n_iter)
             {
                 return false;
@@ -359,7 +358,7 @@ fn fit_members<'a>(
                 let batch_size = consensus_interval.min(iteration_budget - *next_iteration);
                 let mut advanced = false;
                 for offset in 0..batch_size {
-                    if current.terminated || current.structure_is_final(tg_params.n_iter) {
+                    if current.structure_is_final(tg_params.n_iter) {
                         break;
                     }
                     // Intermediate proposals consume scores for the same frozen reference;

@@ -82,10 +82,10 @@ impl RefinementStrategy {
             .map(|col| AffectedRange {
                 col,
                 point_range: (0, state.n - 1),
-                interval_range: (0, 0),
             })
             .collect();
-        self.refresh_error_reduction_caches_for_affected(state, &ranges)
+        let sampled = state.sampled_split_scoring;
+        self.refresh_error_reduction_caches_for_affected(state, &ranges, sampled)
     }
 
     /// Populate linear terms from contiguous full-row references with retained L2 curvature.

@@ -103,25 +103,29 @@ impl RefinementStrategy {
         mut state: FittingState<'a>,
     ) -> FittingState<'a> {
         let evaluator = SplitEvaluator::new(self, state.is_stage1_positive_only());
-        let n = state.n;
+        let (n, sampled) = (state.n, state.sampled_split_scoring);
         for col in 0..state.p {
-            Self::update_error_reductions_split_for_col_range(&mut state, &evaluator, col, 0, n);
+            Self::update_error_reductions_split_for_col_range(
+                &mut state, &evaluator, col, 0, n, sampled,
+            );
         }
         state
     }
 
-    /// Rescore every interval that intersects sorted positions `lo..=hi` of `col`.
+    /// Rescore every interval that intersects sorted positions `lo..=hi` of `col`; with
+    /// `sampled` scoring, mask the intervals' endpoints for on-demand rescoring instead.
     pub(super) fn update_error_reductions_split_for_col_range(
         state: &mut FittingState,
         evaluator: &SplitEvaluator,
         col: usize,
         lo: usize,
         hi: usize,
+        sampled: bool,
     ) {
         let n = state.n;
         let mut start = 0usize;
         for &end in state.boundaries[col].iter().chain(once(&n)) {
-            if end > lo && state.sampled_split_scoring && !evaluator.is_stage1() {
+            if end > lo && sampled && !evaluator.is_stage1() {
                 // Sampled scoring rescores positions on demand. solve_two_tensor returns
                 // finite gains, so summing the two sides never creates a NaN mask, and every
                 // mask persists, including at endpoints of intervals a merge has joined.
@@ -154,12 +158,11 @@ impl RefinementStrategy {
         state: &mut FittingState,
         evaluator: &SplitEvaluator,
     ) {
-        let sampled = state.sampled_split_scoring;
-        state.sampled_split_scoring = false;
         for col in 0..state.p {
-            Self::update_error_reductions_split_for_col_range(state, evaluator, col, 0, state.n);
+            Self::update_error_reductions_split_for_col_range(
+                state, evaluator, col, 0, state.n, false,
+            );
         }
-        state.sampled_split_scoring = sampled;
         state.split_scores_stale = false;
     }
 

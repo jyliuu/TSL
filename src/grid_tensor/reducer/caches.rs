@@ -105,7 +105,7 @@ pub(super) fn refresh_action_statistics<'a>(
         StatisticsPlan::Eager => {
             let (ranges, points) = affected_ranges(&state, col, (start, end));
             let state = refinement.update_statistics(state, col, start, end, &points);
-            refinement.refresh_error_reduction_caches_for_affected(state, &ranges)
+            refinement.refresh_error_reduction_caches_for_affected(state, &ranges, false)
         }
     }
 }

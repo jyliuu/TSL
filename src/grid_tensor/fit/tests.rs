@@ -700,8 +700,8 @@ fn test_immediate_resplit_has_zero_gain() {
         &[crate::grid_tensor::state::AffectedRange {
             col: 0,
             point_range: (0, n),
-            interval_range: (0, 1),
         }],
+        false,
     );
 
     // Resplitting again should do nothing (idempotence)

@@ -61,8 +61,6 @@ pub struct FittingState<'a> {
     // Fitting metadata
     pub iteration: usize,
 
-    pub terminated: bool,
-
     /// Proximal pull of each branch toward reference branch functions.
     pub branch_consensus: Option<BranchConsensus>,
 
@@ -103,7 +101,6 @@ impl<'a> Clone for FittingState<'a> {
             loop_state: self.loop_state.clone(),
             split_strategy_state: self.split_strategy_state.clone(),
             iteration: self.iteration,
-            terminated: self.terminated,
             branch_consensus: self.branch_consensus.clone(),
             sampled_split_scoring: self.sampled_split_scoring,
             split_scores_stale: self.split_scores_stale,
@@ -190,7 +187,6 @@ impl<'a> FittingState<'a> {
             loop_state,
             split_strategy_state,
             iteration: 0,
-            terminated: false,
             branch_consensus: None,
             sampled_split_scoring: false,
             split_scores_stale: false,

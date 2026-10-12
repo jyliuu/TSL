@@ -81,10 +81,19 @@ pub(crate) fn initialize_state_with_input<'a>(
 
 /// Fit from a state initialized with the same data and hyperparameters.
 pub(crate) fn fit_initialized<R: Rng + ?Sized>(
-    mut state: FittingState<'_>,
+    state: FittingState<'_>,
     hyperparameters: &GridTensorParams,
     rng: &mut R,
 ) -> (FitResult, GridTensor) {
+    finish_fit(fit_structure(state, hyperparameters, rng))
+}
+
+/// Apply structural actions until the grid is finished or its action budget is spent.
+pub(crate) fn fit_structure<'a, R: Rng + ?Sized>(
+    mut state: FittingState<'a>,
+    hyperparameters: &GridTensorParams,
+    rng: &mut R,
+) -> FittingState<'a> {
     let refinement_strategy = hyperparameters
         .refinement_strategy_params
         .get_refinement_strategy();
@@ -104,7 +113,7 @@ pub(crate) fn fit_initialized<R: Rng + ?Sized>(
             break;
         }
     }
-    finish_fit(state)
+    state
 }
 
 /// Upper bound on structural actions for a grid with fineness budget `n_iter`.
@@ -115,7 +124,7 @@ pub(crate) fn max_iterations(n_iter: usize) -> usize {
 /// Propose and apply one structural action.
 ///
 /// Returns `false` once the grid is finished: the split budget is exhausted with merges
-/// disabled, no objective-improving action remains, or the state is marked terminated.
+/// disabled, or no objective-improving action remains.
 pub(crate) fn fit_step<'a, R: Rng + ?Sized>(
     state: FittingState<'a>,
     iter: usize,
@@ -178,9 +187,6 @@ pub(crate) fn fit_step_with_candidate_refresh<'a, R: Rng + ?Sized>(
         split_strategy,
         candidate_refresh,
     );
-    if state.terminated {
-        return (state, false);
-    }
 
     // Log the f+/f- statistics and component states after every action; both reducers
     // pass a `None` logging state through unchanged.

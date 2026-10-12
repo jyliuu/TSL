@@ -97,14 +97,10 @@ pub(crate) fn fitting_reducer_with_candidate_refresh<'a>(
     candidate_refresh: CandidateRefresh,
 ) -> FittingState<'a> {
     state.require_current_statistics();
-    let sampled_split_scoring = state.sampled_split_scoring;
-    if candidate_refresh == CandidateRefresh::Eager {
-        // Untouched intervals retain scores computed before prefix-tail shifts.
-        // Materialize pending scores before an action that permits another local proposal.
-        if state.split_scores_stale {
-            refinement_strategy.refresh_all_split_scores(&mut state);
-        }
-        state.sampled_split_scoring = false;
+    // Untouched intervals retain scores computed before prefix-tail shifts, so an eager
+    // action materializes pending scores before it permits another local proposal.
+    if candidate_refresh == CandidateRefresh::Eager && state.split_scores_stale {
+        refinement_strategy.refresh_all_split_scores(&mut state);
     }
 
     #[cfg(feature = "evo-logging")]
@@ -132,7 +128,6 @@ pub(crate) fn fitting_reducer_with_candidate_refresh<'a>(
         state.logging_state = log_split_reducer(state.logging_state.take(), split_event);
     }
 
-    state.sampled_split_scoring = sampled_split_scoring;
     state
 }
 

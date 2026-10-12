@@ -467,15 +467,15 @@ fn consensus_stops_after_a_whole_round_without_progress() {
 }
 
 #[test]
-fn consensus_keeps_exhausted_and_terminated_members_fixed() {
+fn consensus_keeps_exhausted_members_fixed() {
     let x = Array2::from_shape_fn((16, 1), |(row, _)| row as f64);
     let y = Array1::zeros(x.nrows());
     let params = lifecycle_params(2);
     let mut members = constant_members(x.view(), y.view(), &params, &[(3.0, 2.0), (4.0, 1.0)]);
-    members[0].state.as_mut().unwrap().loop_state.fineness = params.n_iter;
-    members[1].state.as_mut().unwrap().terminated = true;
     for member in &mut members {
-        member.state.as_mut().unwrap().iteration = 7;
+        let state = member.state.as_mut().unwrap();
+        state.loop_state.fineness = params.n_iter;
+        state.iteration = 7;
     }
     fit_members(&mut members, &params, 1.0, 1, None, None);
     for (member, (plus, minus)) in members.into_iter().zip([(3.0, 2.0), (4.0, 1.0)]) {

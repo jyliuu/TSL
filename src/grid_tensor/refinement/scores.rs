@@ -7,22 +7,31 @@ use crate::grid_tensor::state::{AffectedRange, FittingState};
 
 impl RefinementStrategy {
     /// Rescore the split, interval, resplit and merge caches over each affected range.
-    /// Stale split scores are rebuilt first unless sampled scoring defers them.
+    /// With `sampled_split_scoring`, split scores are masked for on-demand rescoring and
+    /// stale ones stay deferred; otherwise stale split scores are rebuilt first.
     pub fn refresh_error_reduction_caches_for_affected<'a>(
         &self,
         mut state: FittingState<'a>,
         affected_ranges: &[AffectedRange],
+        sampled_split_scoring: bool,
     ) -> FittingState<'a> {
         state.require_current_statistics();
         let evaluator = SplitEvaluator::new(self, state.is_stage1_positive_only());
-        if state.split_scores_stale && (!state.sampled_split_scoring || evaluator.is_stage1()) {
+        if state.split_scores_stale && (!sampled_split_scoring || evaluator.is_stage1()) {
             Self::refresh_all_split_scores_with(&mut state, &evaluator);
         }
         for affected_range in affected_ranges {
             let c = affected_range.col;
             let (lo, hi) = affected_range.point_range;
 
-            Self::update_error_reductions_split_for_col_range(&mut state, &evaluator, c, lo, hi);
+            Self::update_error_reductions_split_for_col_range(
+                &mut state,
+                &evaluator,
+                c,
+                lo,
+                hi,
+                sampled_split_scoring,
+            );
 
             // Boundary caches are located from the point range; `interval_range` indexes
             // allowed intervals.

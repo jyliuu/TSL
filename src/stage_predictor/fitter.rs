@@ -14,33 +14,6 @@ use super::StagePredictor;
 #[cfg(feature = "use-rayon")]
 use rayon::prelude::*;
 
-/// Apply structural actions until the grid is finished or its action budget is spent.
-fn fit_structure<'a, R: Rng + ?Sized>(
-    mut state: FittingState<'a>,
-    tg_params: &GridTensorParams,
-    rng: &mut R,
-) -> FittingState<'a> {
-    let refinement_strategy = tg_params
-        .refinement_strategy_params
-        .get_refinement_strategy();
-    let split_strategy = tg_params.split_strategy_params.get_split_strategy();
-    for iter in 0..fit::max_iterations(tg_params.n_iter) {
-        let advanced;
-        (state, advanced) = fit::fit_step(
-            state,
-            iter,
-            tg_params.n_iter,
-            &refinement_strategy,
-            &split_strategy,
-            rng,
-        );
-        if !advanced {
-            break;
-        }
-    }
-    state
-}
-
 /// Fit one bag member; `fit_results` keeps its training evaluation.
 fn fit_grid_tensor_with_context<'a>(
     tree_id: usize,
@@ -57,7 +30,7 @@ fn fit_grid_tensor_with_context<'a>(
             Some(initial_state) => initial_state.clone(),
             None => fit::initialize_state(x, y, tg_params),
         };
-        let state = fit_structure(state, tg_params, &mut thread_rng);
+        let state = fit::fit_structure(state, tg_params, &mut thread_rng);
 
         let (fit_res, tg) = if fit_results {
             let (fit_res, tg) = fit::finish_fit(state);
