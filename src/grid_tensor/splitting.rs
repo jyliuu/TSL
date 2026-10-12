@@ -607,4 +607,31 @@ mod tests {
         state.loop_state.consecutive_resplits = MAX_CONSECUTIVE_RESPLIT;
         assert_eq!(proposed_split(&strategy, &state).error_reduction, 3.0);
     }
+
+    #[test]
+    fn random_proposals_draw_a_colsample_fraction_of_the_columns_with_positions() {
+        use super::sampling::sample_random_split_positions;
+        let proposed_columns = |allowed: &[Vec<Interval>], total: &[usize], rng: &mut StdRng| {
+            sample_random_split_positions(allowed, total, 0.5, 3, rng, 4)
+                .into_iter()
+                .map(|(col, _, _)| col)
+                .collect::<BTreeSet<_>>()
+        };
+        let mut rng = StdRng::seed_from_u64(1);
+        let allowed = vec![vec![Interval::new(0, 10)]; 4];
+        let mut proposed_ever = BTreeSet::new();
+        for _ in 0..50 {
+            let columns = proposed_columns(&allowed, &[10; 4], &mut rng);
+            assert_eq!(columns.len(), 2, "half of four columns per proposal");
+            proposed_ever.extend(columns);
+        }
+        assert_eq!(proposed_ever.len(), 4, "every column is proposed over many draws");
+
+        // Columns without positions are never proposed; fewer remaining columns than the
+        // fraction are all proposed.
+        let mut allowed = vec![Vec::new(); 4];
+        allowed[2] = vec![Interval::new(0, 10)];
+        let columns = proposed_columns(&allowed, &[0, 0, 10, 0], &mut rng);
+        assert_eq!(columns, BTreeSet::from([2]));
+    }
 }
