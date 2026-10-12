@@ -28,8 +28,8 @@ pub struct FittingState<'a> {
     pub scaling: f64,
 
     // Two-tensor stage scalars
-    pub lambda_plus: f64,  // λ_+ > 0
-    pub lambda_minus: f64, // λ_- > 0
+    pub lambda_plus: f64,  // λ_+ ≥ 0
+    pub lambda_minus: f64, // λ_- ≥ 0
 
     // Per-point caches
     pub f_plus: Array1<f64>,  // f_+(x_i) for each point i
@@ -74,12 +74,11 @@ pub struct FittingState<'a> {
     pub(crate) linear_statistics_stale: bool,
 
     // Logging state (optional: only when logging enabled)
-    // Note: LoggingState is not Clone (contains Sender), so FittingState is not Clone
     #[cfg(feature = "evo-logging")]
     pub logging_state: Option<LoggingState>,
 }
 
-// Manual Clone implementation that excludes logging_state (can't clone Sender)
+// LoggingState holds a channel sender, so a clone starts without logging.
 impl<'a> Clone for FittingState<'a> {
     fn clone(&self) -> Self {
         Self {
@@ -110,7 +109,7 @@ impl<'a> Clone for FittingState<'a> {
             split_scores_stale: self.split_scores_stale,
             linear_statistics_stale: self.linear_statistics_stale,
             #[cfg(feature = "evo-logging")]
-            logging_state: None, // Can't clone LoggingState (contains Sender)
+            logging_state: None,
         }
     }
 }
@@ -127,7 +126,7 @@ pub(crate) fn staggered_zeros(n: usize, slot: usize) -> Array1<f64> {
 impl<'a> FittingState<'a> {
     pub fn new(x: ArrayView2<'a, f64>, y: ArrayView1<'a, f64>) -> Self {
         let split_strategy_state = SplitStrategyState::new();
-        let loop_state = LoopState::new();
+        let loop_state = LoopState::default();
         let precomputed_statistics = PrecomputedStatistics::new(x.nrows(), x.ncols());
         let n = x.nrows();
         let p = x.ncols();
@@ -136,8 +135,7 @@ impl<'a> FittingState<'a> {
         let backbone_values = vec![vec![1.0]; p];
         let tilt_values = vec![vec![0.0]; p];
 
-        // Initialize lambdas from residuals (will be properly initialized in refinement::initialize)
-        // For now, set to small positive values
+        // Small positive placeholders until the refinement initializes λ± from the residuals.
         const EPS_LAMBDA: f64 = 1e-10;
         let lambda_plus = EPS_LAMBDA;
         let lambda_minus = EPS_LAMBDA;
@@ -166,8 +164,7 @@ impl<'a> FittingState<'a> {
             .for_each(|residual, &label, &prediction| *residual = label - prediction);
         let current_error = residuals.iter().map(|r| r * r).sum();
 
-        // Initially r_tilde = R (within-stage residual equals outer residual when f=0)
-        // But since we initialized f, we need to compute r_tilde = R - f
+        // r_tilde = labels - f, which equals the residuals since y_hat = f.
         let mut r_tilde = staggered_zeros(n, 6);
         r_tilde.assign(&residuals);
 

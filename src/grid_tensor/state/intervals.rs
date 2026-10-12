@@ -34,32 +34,22 @@ impl<'a> FittingState<'a> {
         let end = self.boundaries[col]
             .get(interval_idx)
             .copied()
-            .unwrap_or(self.x.nrows());
+            .unwrap_or(self.n);
         (start, end)
     }
 
+    /// Start of interval `interval_idx`, its boundary with the next interval, and that
+    /// interval's end.
     pub fn interval_range_left_and_right(
         &self,
         col: usize,
         interval_idx: usize,
     ) -> (usize, usize, usize) {
-        let start = if interval_idx == 0 {
-            0
-        } else {
-            self.boundaries[col][interval_idx - 1]
-        };
-
-        let index = if interval_idx < self.boundaries[col].len() {
-            self.boundaries[col][interval_idx]
-        } else {
-            self.x.nrows()
-        };
-
-        let end = if interval_idx + 1 < self.boundaries[col].len() {
-            self.boundaries[col][interval_idx + 1]
-        } else {
-            self.x.nrows()
-        };
+        let (start, index) = self.interval_range(col, interval_idx);
+        let end = self.boundaries[col]
+            .get(interval_idx + 1)
+            .copied()
+            .unwrap_or(self.n);
         (start, index, end)
     }
 
@@ -73,7 +63,7 @@ impl<'a> FittingState<'a> {
         let (start, end) = interval;
         let updated_points = &self.precomputed_statistics.sorted_indices[col][start..end];
 
-        let mut affected_ranges = Vec::with_capacity(self.x.ncols());
+        let mut affected_ranges = Vec::with_capacity(self.p);
 
         // For the split column, compute which allowed_intervals intersect with the affected interval
         let point_range = (start, end - 1);
@@ -86,7 +76,7 @@ impl<'a> FittingState<'a> {
         });
 
         // For other columns, compute tight point ranges and map to interval ranges
-        for other_col in (0..self.x.ncols()).filter(|&c| c != col) {
+        for other_col in (0..self.p).filter(|&c| c != col) {
             let mut min_pos = usize::MAX;
             let mut max_pos = 0usize;
             for &pt_idx in updated_points.iter() {
@@ -140,17 +130,6 @@ impl<'a> FittingState<'a> {
         hi_pos: usize,
     ) -> (usize, usize) {
         let boundaries = &self.boundaries[col];
-
-        if boundaries.is_empty() {
-            // No boundaries means one interval (index 0) covering all points
-            // If the position range is non-empty, it intersects with interval 0
-            if lo_pos <= hi_pos {
-                return (0, 0);
-            } else {
-                // Empty range - return (1, 0) to indicate no intervals
-                return (1, 0);
-            }
-        }
 
         if lo_pos > hi_pos {
             // Empty range - return (1, 0) to indicate no intervals

@@ -20,39 +20,14 @@ pub struct IntervalStats {
     pub n: usize,
 }
 
-impl IntervalStats {
-    /// Compute union stats by adding two interval stats.
-    ///
-    /// Uses the union additivity property: S^U = S^A + S^B, t^U = t^A + t^B
-    ///
-    /// # Arguments
-    /// * `left` - Stats for left interval A
-    /// * `right` - Stats for right interval B
-    ///
-    /// # Returns
-    /// Union stats U = A ∪ B
-    pub fn union(left: &IntervalStats, right: &IntervalStats) -> IntervalStats {
-        IntervalStats {
-            sum_s11: left.sum_s11 + right.sum_s11,
-            sum_s22: left.sum_s22 + right.sum_s22,
-            sum_s12: left.sum_s12 + right.sum_s12,
-            sum_t1: left.sum_t1 + right.sum_t1,
-            sum_t2: left.sum_t2 + right.sum_t2,
-            n: left.n + right.n,
-        }
-    }
-}
-
 /// Per-feature bin-edge positions for histogram binning. Empty `Vec<usize>`
 /// means "no binning for this feature" (exact path); otherwise contains
 /// sorted bin-boundary positions in sorted-index space.
 pub type BinEdges = Vec<Vec<usize>>;
 
-/// Packed (s11, s22, s12, t1, t2) tuple. Used as the element type of
-/// per-column prefix-sum arrays so that the segment-prefix sweep touches one
-/// 40-byte struct per index (one cache line per two indices) instead of
-/// five independent `Vec<f64>`. Order of summation and arithmetic is
-/// unchanged — bit-for-bit parity with the prior SoA-of-5 layout.
+/// Packed (s11, s22, s12, t1, t2) tuple: the element type of the per-column
+/// prefix-sum arrays, so the segment-prefix sweep reads one 40-byte struct per
+/// index (one cache line per two indices).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Default)]
 pub struct PrefixStats {
@@ -106,11 +81,11 @@ pub struct PrecomputedStatistics {
     pub prefix_sums: Vec<Vec<PrefixStats>>,
     /// Per-point curvature contributions, stored once since they are point-specific.
     pub curvature: Vec<CurvatureCache>,
-    /// Per-point t1 contributions: c_t1[i] = w_i * r_tilde[i] * f_plus[i]
-    /// Stored once (not per-column) since these are point-specific
+    /// Per-point t1 contributions: c_t1[i] = w_i * r_tilde[i] * f_plus[i],
+    /// shared by every column
     pub c_t1: Vec<f64>,
-    /// Per-point t2 contributions: c_t2[i] = w_i * r_tilde[i] * f_minus[i]
-    /// Stored once (not per-column) since these are point-specific
+    /// Per-point t2 contributions: c_t2[i] = w_i * r_tilde[i] * f_minus[i],
+    /// shared by every column
     pub c_t2: Vec<f64>,
     /// Per-interval statistics [col][interval_idx] for O(1) resplit/merge lookups
     /// Each column starts with one interval covering all points

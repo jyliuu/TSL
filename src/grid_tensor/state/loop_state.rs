@@ -4,7 +4,7 @@
 pub const MAX_CONSECUTIVE_RESPLIT: usize = 5;
 
 /// Loop control state for tracking algorithm progress
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LoopState {
     /// Net number of splits performed (splits +1, resplits 0, merges -1)
     pub fineness: usize,
@@ -16,28 +16,9 @@ pub struct LoopState {
     pub merge_count: usize,
     /// Number of consecutive resplits (for loop prevention)
     pub consecutive_resplits: usize,
-    /// Current iteration number
-    pub iteration: usize,
-}
-
-impl Default for LoopState {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl LoopState {
-    pub fn new() -> Self {
-        Self {
-            fineness: 0,
-            split_count: 0,
-            resplit_count: 0,
-            merge_count: 0,
-            consecutive_resplits: 0,
-            iteration: 0,
-        }
-    }
-
     pub fn record_split(&mut self) {
         self.split_count += 1;
         self.fineness += 1;
