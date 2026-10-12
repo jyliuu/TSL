@@ -194,19 +194,18 @@ pub(super) fn select_median_tensor_component_shape(
 }
 
 pub(super) fn trim_outliers(
-    grids: &[GridTensor],
     median_index: usize,
     distance_matrix: &[Vec<f64>],
     trim_percentage: f64,
 ) -> Vec<usize> {
-    if grids.is_empty() {
+    let n = distance_matrix.len();
+    if n == 0 {
         return Vec::new();
     }
-    if grids.len() == 1 {
+    if n == 1 {
         return vec![0];
     }
 
-    let n = grids.len();
     let keep_count = (trim_percentage * n as f64).ceil() as usize;
     let keep_count = keep_count.min(n);
 
@@ -214,11 +213,11 @@ pub(super) fn trim_outliers(
         "Using pre-computed distances to median bag {}",
         median_index
     );
-    let mut distances: Vec<(usize, f64)> = Vec::with_capacity(n);
-    for i in 0..n {
-        let dist = distance_matrix[i][median_index];
-        distances.push((i, dist));
-    }
+    let mut distances: Vec<(usize, f64)> = distance_matrix
+        .iter()
+        .enumerate()
+        .map(|(i, row)| (i, row[median_index]))
+        .collect();
 
     distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 

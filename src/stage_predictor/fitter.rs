@@ -207,8 +207,7 @@ fn combine_fitted_grids(
         trim_percentage
     );
 
-    let primary_grid_tensor =
-        aggregate_bagged_two_tensor(&grid_tensors, x.view(), None, trim_percentage);
+    let primary_grid_tensor = aggregate_bagged_two_tensor(&grid_tensors, x.view(), trim_percentage);
 
     let candidate_indices: Vec<usize> = (0..grid_tensors.len()).collect();
 

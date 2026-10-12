@@ -106,7 +106,7 @@ fn test_trim_outliers() {
         splits,
         intervals,
     );
-    let grids = vec![grid1, grid2, grid3];
+    let grids = [grid1, grid2, grid3];
     let observation_counts = vec![vec![10]];
 
     let bin_weights = precompute_bin_weights(&observation_counts);
@@ -114,19 +114,16 @@ fn test_trim_outliers() {
         grids.iter().map(precompute_log_components).collect();
     let (median_index, distance_matrix) =
         select_median_tensor_component_shape(&precomputed_grids, &bin_weights);
-    let kept = trim_outliers(&grids, median_index, &distance_matrix, 0.9);
+    let kept = trim_outliers(median_index, &distance_matrix, 0.9);
 
     assert!(kept.len() >= 2);
     assert!(kept.contains(&0) || kept.contains(&1));
 }
 
 #[test]
-fn test_combine_lambdas_geometric_mean() {
-    let lambda_plus = vec![1.0, 2.0, 4.0];
-    let lambda_minus = vec![0.5, 1.0, 2.0];
-
-    let (combined_plus, combined_minus) =
-        combine_lambdas_geometric_mean(&lambda_plus, &lambda_minus, None);
+fn test_geometric_mean() {
+    let combined_plus = geometric_mean([1.0, 2.0, 4.0].into_iter());
+    let combined_minus = geometric_mean([0.5, 1.0, 2.0].into_iter());
 
     let product: f64 = 1.0 * 2.0 * 4.0;
     let expected_plus = product.powf(1.0 / 3.0);
@@ -153,7 +150,7 @@ fn test_aggregate_bagged_two_tensor_single_bag() {
     )
     .unwrap();
 
-    let aggregated = aggregate_bagged_two_tensor(&grids, points.view(), None, 0.9);
+    let aggregated = aggregate_bagged_two_tensor(&grids, points.view(), 0.9);
 
     assert_eq!(aggregated.backbone_values.len(), grid.backbone_values.len());
 }

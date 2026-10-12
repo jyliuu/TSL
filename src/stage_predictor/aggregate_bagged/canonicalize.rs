@@ -2,7 +2,7 @@
 
 use crate::grid_tensor::GridTensor;
 
-use super::{EPSILON, LOG_EPSILON, LOG_MAX};
+use super::{clamped_ln, EPSILON};
 
 pub(super) fn compute_a_factors_from_bd(
     backbone: &[Vec<f64>],
@@ -113,17 +113,12 @@ fn canonicalize_backbone_log_space(
         let mean_log_b = b
             .iter()
             .zip(counts.iter())
-            .map(|(&x, &c)| {
-                let log_x = x.max(EPSILON).ln().max(LOG_EPSILON).min(LOG_MAX);
-                log_x * (c as f64)
-            })
+            .map(|(&x, &c)| clamped_ln(x) * (c as f64))
             .sum::<f64>()
             / weights_sum;
 
         for x in b.iter_mut() {
-            let log_x = x.max(EPSILON).ln().max(LOG_EPSILON).min(LOG_MAX);
-            let centered_log_x = log_x - mean_log_b;
-            *x = centered_log_x.exp();
+            *x = (clamped_ln(*x) - mean_log_b).exp();
         }
     }
 }
