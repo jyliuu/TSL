@@ -38,6 +38,7 @@ struct Member<'a> {
     next_iteration: usize,
 }
 
+/// Fit the bag in lockstep; `fit_results` keeps each member's training evaluation.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn fit_consensus_bag<'a>(
     x: ArrayView2<'a, f64>,
@@ -60,9 +61,6 @@ pub(super) fn fit_consensus_bag<'a>(
         consensus.is_finite() && consensus >= 0.0,
         "consensus must be finite and nonnegative"
     );
-    // Each member's training evaluation is kept when a caller asks for it or when logging
-    // reports it; otherwise the member only yields its identified grid.
-    let fit_results = fit_results || logging::is_logging_enabled();
     // Member setup and teardown have no observable order while logging is disabled, so
     // a shared initial state is cloned and the fitted grids are converted on the pool.
     let shared_setup = initial_state.filter(|_| !logging::is_logging_enabled());
