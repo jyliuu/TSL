@@ -19,7 +19,7 @@ This is a Cargo workspace (root crate `tsl_rust` + member `tsl-py`).
 ```sh
 cargo build --release
 cargo test -p tsl_rust --release                       # full core test suite (owns tests/)
-cargo test -p tsl_rust --release test_fit_result_is_correct   # single test by name
+cargo test -p tsl_rust --release fit_result_and_grid_reproduce_the_fitted_predictions   # single test by name
 cargo test --release --test forest                     # one integration-test file (tests/forest.rs)
 ```
 The core is pure Rust — no system libraries are required to build. Default cargo features
