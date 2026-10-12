@@ -1,7 +1,5 @@
 //! The `TSL` Python class: the boosted model's fit, prediction, diagnostics and persistence.
 
-use core::f64;
-
 use numpy::{
     ndarray::Array1, PyArray1, PyArray2, PyArray3, PyReadonlyArray1, PyReadonlyArray2, ToPyArray,
 };

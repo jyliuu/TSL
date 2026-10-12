@@ -1,6 +1,6 @@
 //! Maps the flat Python fit keyword arguments onto the core parameter builders.
 
-use pyo3::prelude::*;
+use pyo3::{exceptions::PyValueError, prelude::*};
 use tsl::{
     forest::params::{TSLBoostedParams, TSLBoostedParamsBuilder},
     grid_tensor::{
@@ -48,24 +48,20 @@ impl BoostedFitOptions<'_> {
     pub fn validate(&self) -> PyResult<()> {
         let consensus = self.consensus;
         if !(consensus.is_finite() && consensus >= 0.0) {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            return Err(PyValueError::new_err(format!(
                 "consensus must be finite and nonnegative, got {consensus}"
             )));
         }
         if self.max_bins.is_some_and(|bins| bins < 2) {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "max_bins must be at least 2",
-            ));
+            return Err(PyValueError::new_err("max_bins must be at least 2"));
         }
         if self.consensus_interval == 0 {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            return Err(PyValueError::new_err(
                 "consensus_interval must be at least 1",
             ));
         }
         if self.consensus_anchors == Some(0) {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "consensus_anchors must be positive",
-            ));
+            return Err(PyValueError::new_err("consensus_anchors must be positive"));
         }
         Ok(())
     }
@@ -125,7 +121,7 @@ impl BoostedFitOptions<'_> {
                 .complexity_penalty(self.complexity_penalty)
                 .build(),
             s => {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                return Err(PyValueError::new_err(format!(
                     "Unknown split_strategy: '{s}'. Valid: 'random', 'best_split', 'top_k'"
                 )))
             }
@@ -133,29 +129,22 @@ impl BoostedFitOptions<'_> {
     }
 
     fn refinement_strategy_params(&self) -> PyResult<RefinementStrategyParams> {
-        Ok(match self.refinement_strategy {
-            "l2" => RefinementStrategyParamsBuilder::new()
-                .l2()
-                .alpha(self.alpha)
-                .prior_sample_size(self.prior_sample_size)
-                .update_clamp(self.update_clamp)
-                .tilt_tau(self.tilt_tau)
-                .tilt_rho(self.tilt_rho)
-                .build(),
-            "huber" => RefinementStrategyParamsBuilder::new()
-                .huber()
-                .alpha(self.alpha)
-                .prior_sample_size(self.prior_sample_size)
-                .update_clamp(self.update_clamp)
-                .tilt_tau(self.tilt_tau)
-                .tilt_rho(self.tilt_rho)
-                .build(),
+        let builder = match self.refinement_strategy {
+            "l2" => RefinementStrategyParamsBuilder::new().l2(),
+            "huber" => RefinementStrategyParamsBuilder::new().huber(),
             s => {
-                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                return Err(PyValueError::new_err(format!(
                     "Unknown refinement_strategy: '{s}'. Valid: 'l2', 'huber'"
                 )))
             }
-        })
+        };
+        Ok(builder
+            .alpha(self.alpha)
+            .prior_sample_size(self.prior_sample_size)
+            .update_clamp(self.update_clamp)
+            .tilt_tau(self.tilt_tau)
+            .tilt_rho(self.tilt_rho)
+            .build())
     }
 }
 

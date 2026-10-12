@@ -17,7 +17,7 @@ pub struct FitResultPy {
 
 impl From<FitResult> for FitResultPy {
     fn from(fit_result: FitResult) -> Self {
-        Python::with_gil(|py| FitResultPy {
+        Python::attach(|py| FitResultPy {
             err: fit_result.err,
             residuals: fit_result.residuals.to_pyarray(py).unbind(),
             y_hat: fit_result.y_hat.to_pyarray(py).unbind(),
