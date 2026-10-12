@@ -3,7 +3,7 @@
 use std::iter::once;
 
 use super::RefinementStrategy;
-use crate::grid_tensor::state::{CurvatureCache, FittingState};
+use crate::grid_tensor::state::{CurvatureCache, FittingState, PrefixStats};
 
 impl RefinementStrategy {
     /// Scatter curvature deltas while locating the touched bins in the same row traversal.
@@ -31,188 +31,71 @@ impl RefinementStrategy {
         }
 
         let mut deltas = self.collect_binned_curvature_deltas(&mut state, col, start, end);
-        let n = state.n;
-        if let Some(streams) = state.precomputed_statistics.bin_ranks.get(col).cloned() {
-            // Each feature's bins over the affected ranks form one contiguous stream. Features
-            // are scattered in pairs, and every histogram receives its additions in
-            // affected-row order.
-            assert_eq!(streams.len(), state.p * n);
-            let prefixes = &mut state.precomputed_statistics.binned_prefix_sums;
-            let mut buckets = Vec::new();
-            let mut feature = 0;
-            while feature < state.p {
-                let paired = feature + 1 < state.p;
-                let first_count = prefixes[feature].len();
-                let second_count = if paired {
-                    prefixes[feature + 1].len()
-                } else {
-                    0
-                };
-                buckets.clear();
-                buckets.resize(first_count + second_count, [0.0; 3]);
-                let (first_buckets, second_buckets) = buckets.split_at_mut(first_count);
-                let first_stream = &streams[feature * n + start..feature * n + end];
-                let (mut first_min, mut first_max) = (usize::MAX, 0);
-                let (mut second_min, mut second_max) = (usize::MAX, 0);
-                if paired {
-                    let second_stream =
-                        &streams[(feature + 1) * n + start..(feature + 1) * n + end];
-                    for ((&first_bin, &second_bin), delta) in
-                        first_stream.iter().zip(second_stream).zip(&deltas)
-                    {
-                        let first_bin = first_bin as usize;
-                        let second_bin = second_bin as usize;
-                        first_min = first_min.min(first_bin);
-                        first_max = first_max.max(first_bin);
-                        second_min = second_min.min(second_bin);
-                        second_max = second_max.max(second_bin);
-                        let first_slot = &mut first_buckets[first_bin];
-                        first_slot[0] += delta[0];
-                        first_slot[1] += delta[1];
-                        first_slot[2] += delta[2];
-                        let second_slot = &mut second_buckets[second_bin];
-                        second_slot[0] += delta[0];
-                        second_slot[1] += delta[1];
-                        second_slot[2] += delta[2];
-                    }
-                } else {
-                    for (&bin, delta) in first_stream.iter().zip(&deltas) {
-                        let bin = bin as usize;
-                        // Every touched row contributes to the range, including zero deltas.
-                        first_min = first_min.min(bin);
-                        first_max = first_max.max(bin);
-                        let slot = &mut first_buckets[bin];
-                        slot[0] += delta[0];
-                        slot[1] += delta[1];
-                        slot[2] += delta[2];
-                    }
-                }
-                // Bin membership is monotone in sorted rank. These bounds equal the bins
-                // of the minimum and maximum affected ranks, without a separate rank scan.
-                let histograms = [
-                    (feature, &*first_buckets, first_min, first_max),
-                    (feature + 1, &*second_buckets, second_min, second_max),
-                ];
-                for &(feature, buckets, first, last) in histograms.iter().take(1 + paired as usize)
-                {
-                    let prefix = &mut prefixes[feature];
-                    let mut accumulated = [0.0; 3];
-                    for bin in first..=last {
-                        accumulated[0] += buckets[bin][0];
-                        accumulated[1] += buckets[bin][1];
-                        accumulated[2] += buckets[bin][2];
-                        prefix[bin].s11 += accumulated[0];
-                        prefix[bin].s22 += accumulated[1];
-                        prefix[bin].s12 += accumulated[2];
-                    }
-                    for slot in &mut prefix[(last + 1)..] {
-                        slot.s11 += accumulated[0];
-                        slot.s22 += accumulated[1];
-                        slot.s12 += accumulated[2];
-                    }
-                }
-                feature += 1 + paired as usize;
-            }
-            deltas.clear();
-            state.precomputed_statistics.curvature_deltas = deltas;
-            state.linear_statistics_stale = true;
-            return state;
-        }
-        let updated_points = &state.precomputed_statistics.sorted_indices[col][start..end];
-
+        let (n, p) = (state.n, state.p);
+        let statistics = &mut state.precomputed_statistics;
         let mut buckets = Vec::new();
-        let mut features = (0..state.p).filter(|&feature| feature != col);
-        let mut unpaired = None;
-        while let Some(first_feature) = features.next() {
-            let Some(second_feature) = features.next() else {
-                unpaired = Some(first_feature);
-                break;
-            };
-            let first_bins = &state.precomputed_statistics.bin_indices[first_feature];
-            let second_bins = &state.precomputed_statistics.bin_indices[second_feature];
-            let first_count = state.precomputed_statistics.binned_prefix_sums[first_feature].len();
-            let second_count =
-                state.precomputed_statistics.binned_prefix_sums[second_feature].len();
-            buckets.clear();
-            buckets.resize(first_count + second_count, [0.0; 3]);
-            let (first_buckets, second_buckets) = buckets.split_at_mut(first_count);
-            let (mut first_min, mut first_max) = (usize::MAX, 0);
-            let (mut second_min, mut second_max) = (usize::MAX, 0);
-            // Each histogram receives additions in affected-row order.
-            for (&row, delta) in updated_points.iter().zip(&deltas) {
-                let first_bin = first_bins[row] as usize;
-                let second_bin = second_bins[row] as usize;
-                first_min = first_min.min(first_bin);
-                first_max = first_max.max(first_bin);
-                second_min = second_min.min(second_bin);
-                second_max = second_max.max(second_bin);
-                let first_slot = &mut first_buckets[first_bin];
-                first_slot[0] += delta[0];
-                first_slot[1] += delta[1];
-                first_slot[2] += delta[2];
-                let second_slot = &mut second_buckets[second_bin];
-                second_slot[0] += delta[0];
-                second_slot[1] += delta[1];
-                second_slot[2] += delta[2];
+        if let Some(streams) = statistics.bin_ranks.get(col) {
+            // Each feature's bins over the affected ranks form one contiguous stream. Features
+            // are scattered in pairs.
+            assert_eq!(streams.len(), p * n);
+            let stream = |feature: usize| &streams[feature * n + start..feature * n + end];
+            let prefixes = &mut statistics.binned_prefix_sums;
+            let mut feature = 0;
+            while feature + 1 < p {
+                let bins = stream(feature)
+                    .iter()
+                    .zip(stream(feature + 1))
+                    .map(|(&first, &second)| (first as usize, second as usize));
+                scatter_pair(
+                    prefixes,
+                    (feature, feature + 1),
+                    bins,
+                    &deltas,
+                    &mut buckets,
+                );
+                feature += 2;
             }
-            for (feature, buckets, first, last) in [
-                (first_feature, &*first_buckets, first_min, first_max),
-                (second_feature, &*second_buckets, second_min, second_max),
-            ] {
-                let prefix = &mut state.precomputed_statistics.binned_prefix_sums[feature];
-                let mut accumulated = [0.0; 3];
-                for bin in first..=last {
-                    accumulated[0] += buckets[bin][0];
-                    accumulated[1] += buckets[bin][1];
-                    accumulated[2] += buckets[bin][2];
-                    prefix[bin].s11 += accumulated[0];
-                    prefix[bin].s22 += accumulated[1];
-                    prefix[bin].s12 += accumulated[2];
-                }
-                for slot in &mut prefix[(last + 1)..] {
-                    slot.s11 += accumulated[0];
-                    slot.s22 += accumulated[1];
-                    slot.s12 += accumulated[2];
-                }
+            if feature < p {
+                let bins = stream(feature).iter().map(|&bin| bin as usize);
+                scatter(&mut prefixes[feature], bins, &deltas, &mut buckets);
             }
-        }
-        for feature in unpaired.into_iter().chain(once(col)) {
-            let bins = &state.precomputed_statistics.bin_indices[feature];
-            let bin_count = state.precomputed_statistics.binned_prefix_sums[feature].len();
-            buckets.clear();
-            buckets.resize(bin_count, [0.0; 3]);
-            let (mut first, mut last) = (usize::MAX, 0);
-            for (&row, delta) in updated_points.iter().zip(&deltas) {
-                let bin = bins[row] as usize;
-                // Every touched row contributes to the range, including zero deltas.
-                first = first.min(bin);
-                last = last.max(bin);
-                let slot = &mut buckets[bin];
-                slot[0] += delta[0];
-                slot[1] += delta[1];
-                slot[2] += delta[2];
+        } else {
+            let updated_points = &statistics.sorted_indices[col][start..end];
+            let mut features = (0..p).filter(|&feature| feature != col);
+            let mut unpaired = None;
+            while let Some(first) = features.next() {
+                let Some(second) = features.next() else {
+                    unpaired = Some(first);
+                    break;
+                };
+                let (first_bins, second_bins) = (
+                    &statistics.bin_indices[first],
+                    &statistics.bin_indices[second],
+                );
+                let bins = updated_points
+                    .iter()
+                    .map(|&row| (first_bins[row] as usize, second_bins[row] as usize));
+                scatter_pair(
+                    &mut statistics.binned_prefix_sums,
+                    (first, second),
+                    bins,
+                    &deltas,
+                    &mut buckets,
+                );
             }
-
-            // Bin membership is monotone in sorted rank. These bounds equal the bins
-            // of the minimum and maximum affected ranks, without a separate rank scan.
-            let prefix = &mut state.precomputed_statistics.binned_prefix_sums[feature];
-            let mut accumulated = [0.0; 3];
-            for bin in first..=last {
-                accumulated[0] += buckets[bin][0];
-                accumulated[1] += buckets[bin][1];
-                accumulated[2] += buckets[bin][2];
-                prefix[bin].s11 += accumulated[0];
-                prefix[bin].s22 += accumulated[1];
-                prefix[bin].s12 += accumulated[2];
-            }
-            for slot in &mut prefix[(last + 1)..] {
-                slot.s11 += accumulated[0];
-                slot.s22 += accumulated[1];
-                slot.s12 += accumulated[2];
+            for feature in unpaired.into_iter().chain(once(col)) {
+                let row_bins = &statistics.bin_indices[feature];
+                let bins = updated_points.iter().map(|&row| row_bins[row] as usize);
+                scatter(
+                    &mut statistics.binned_prefix_sums[feature],
+                    bins,
+                    &deltas,
+                    &mut buckets,
+                );
             }
         }
         deltas.clear();
-        state.precomputed_statistics.curvature_deltas = deltas;
+        statistics.curvature_deltas = deltas;
         state.linear_statistics_stale = true;
         state
     }
@@ -241,28 +124,21 @@ impl RefinementStrategy {
             if let (Some(target_plus), Some(target_minus)) =
                 (reference.plus.as_slice(), reference.minus.as_slice())
             {
-                if matches!(self, Self::L2Refinement { .. })
-                    && reference.anchors.is_none()
-                    && [
-                        f_plus.len(),
-                        f_minus.len(),
-                        r_tilde.len(),
-                        residuals.len(),
-                        target_plus.len(),
-                        target_minus.len(),
-                        state.precomputed_statistics.curvature.len(),
-                    ]
-                    .into_iter()
-                    .all(|length| length == n)
+                if [
+                    f_plus.len(),
+                    f_minus.len(),
+                    r_tilde.len(),
+                    residuals.len(),
+                    target_plus.len(),
+                    target_minus.len(),
+                    state.precomputed_statistics.curvature.len(),
+                ]
+                .into_iter()
+                .all(|length| length == n)
                 {
                     let rho = reference.weight;
                     let curvature = &mut state.precomputed_statistics.curvature[..n];
                     for &row in updated_points {
-                        if row >= n {
-                            // The first failing row uses the residual array's indexing behavior.
-                            let _ = state.residuals[row];
-                            unreachable!();
-                        }
                         let fp = f_plus[row];
                         let fm = f_minus[row];
                         let mut s11 = 1.0 * fp * fp;
@@ -291,5 +167,76 @@ impl RefinementStrategy {
             state.precomputed_statistics.curvature[row].s12 = point.s12;
         }
         deltas
+    }
+}
+
+/// Scatter the deltas of two features in one pass over the affected rows, then sweep each
+/// feature's buckets into its prefix sums. Each histogram receives its additions in
+/// affected-row order.
+fn scatter_pair(
+    prefixes: &mut [Vec<PrefixStats>],
+    (first, second): (usize, usize),
+    bins: impl Iterator<Item = (usize, usize)>,
+    deltas: &[[f64; 3]],
+    buckets: &mut Vec<[f64; 3]>,
+) {
+    let first_count = prefixes[first].len();
+    buckets.clear();
+    buckets.resize(first_count + prefixes[second].len(), [0.0; 3]);
+    let (first_buckets, second_buckets) = buckets.split_at_mut(first_count);
+    let (mut first_range, mut second_range) = ((usize::MAX, 0), (usize::MAX, 0));
+    for ((first_bin, second_bin), delta) in bins.zip(deltas) {
+        first_range = (first_range.0.min(first_bin), first_range.1.max(first_bin));
+        second_range = (
+            second_range.0.min(second_bin),
+            second_range.1.max(second_bin),
+        );
+        add_delta(&mut first_buckets[first_bin], delta);
+        add_delta(&mut second_buckets[second_bin], delta);
+    }
+    sweep(&mut prefixes[first], first_buckets, first_range);
+    sweep(&mut prefixes[second], second_buckets, second_range);
+}
+
+/// Scatter one feature's deltas in affected-row order, then sweep them into `prefix`.
+fn scatter(
+    prefix: &mut [PrefixStats],
+    bins: impl Iterator<Item = usize>,
+    deltas: &[[f64; 3]],
+    buckets: &mut Vec<[f64; 3]>,
+) {
+    buckets.clear();
+    buckets.resize(prefix.len(), [0.0; 3]);
+    let mut range = (usize::MAX, 0);
+    for (bin, delta) in bins.zip(deltas) {
+        // Every touched row contributes to the range, including zero deltas.
+        range = (range.0.min(bin), range.1.max(bin));
+        add_delta(&mut buckets[bin], delta);
+    }
+    sweep(prefix, buckets, range);
+}
+
+#[inline]
+fn add_delta(bucket: &mut [f64; 3], delta: &[f64; 3]) {
+    bucket[0] += delta[0];
+    bucket[1] += delta[1];
+    bucket[2] += delta[2];
+}
+
+/// Carry bucketed curvature deltas into bin-cumulative `prefix`: running totals over the
+/// touched bins `first..=last` and the full total past `last`. Bin membership is monotone
+/// in sorted rank, so the touched bins are those of the minimum and maximum affected ranks.
+fn sweep(prefix: &mut [PrefixStats], buckets: &[[f64; 3]], (first, last): (usize, usize)) {
+    let mut accumulated = [0.0; 3];
+    for bin in first..=last {
+        add_delta(&mut accumulated, &buckets[bin]);
+        prefix[bin].s11 += accumulated[0];
+        prefix[bin].s22 += accumulated[1];
+        prefix[bin].s12 += accumulated[2];
+    }
+    for slot in &mut prefix[(last + 1)..] {
+        slot.s11 += accumulated[0];
+        slot.s22 += accumulated[1];
+        slot.s12 += accumulated[2];
     }
 }
