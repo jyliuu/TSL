@@ -15,6 +15,8 @@ pub struct TSLBoostedParams {
     pub seed: u64,
     pub log_level: String,
     pub visualdb_path: Option<String>,
+    /// Constrain the coefficients of the positive and negative branch columns to be nonnegative.
+    pub nonnegative_scaling: bool,
 }
 
 #[derive(Debug)]
@@ -25,6 +27,7 @@ pub struct TSLBoostedParamsBuilder {
     seed: u64,
     log_level: String,
     visualdb_path: Option<String>,
+    nonnegative_scaling: bool,
 }
 
 impl TSLBoostedParamsBuilder {
@@ -36,6 +39,7 @@ impl TSLBoostedParamsBuilder {
             seed: 42,
             log_level: "info".to_string(),
             visualdb_path: None,
+            nonnegative_scaling: false,
         }
     }
 
@@ -75,12 +79,16 @@ impl TSLBoostedParamsBuilder {
     }
 
     pub fn aggregation_method(mut self, aggregation_method: Aggregation) -> Self {
-        self.sp_params_builder = self.sp_params_builder.aggregation_method(aggregation_method);
+        self.sp_params_builder = self
+            .sp_params_builder
+            .aggregation_method(aggregation_method);
         self
     }
 
     pub fn similarity_threshold(mut self, similarity_threshold: f64) -> Self {
-        self.sp_params_builder = self.sp_params_builder.similarity_threshold(similarity_threshold);
+        self.sp_params_builder = self
+            .sp_params_builder
+            .similarity_threshold(similarity_threshold);
         self
     }
 
@@ -91,6 +99,28 @@ impl TSLBoostedParamsBuilder {
 
     pub fn refinement_strategy(mut self, strategy: RefinementStrategyParams) -> Self {
         self.sp_params_builder = self.sp_params_builder.refinement_strategy(strategy);
+        self
+    }
+
+    pub fn consensus(mut self, consensus: f64) -> Self {
+        self.sp_params_builder = self.sp_params_builder.consensus(consensus);
+        self
+    }
+
+    pub fn consensus_interval(mut self, consensus_interval: usize) -> Self {
+        self.sp_params_builder = self
+            .sp_params_builder
+            .consensus_interval(consensus_interval);
+        self
+    }
+
+    pub fn nonnegative_scaling(mut self, nonnegative_scaling: bool) -> Self {
+        self.nonnegative_scaling = nonnegative_scaling;
+        self
+    }
+
+    pub fn consensus_anchors(mut self, consensus_anchors: Option<usize>) -> Self {
+        self.sp_params_builder = self.sp_params_builder.consensus_anchors(consensus_anchors);
         self
     }
 
@@ -107,6 +137,7 @@ impl TSLBoostedParamsBuilder {
             seed: self.seed,
             log_level: self.log_level,
             visualdb_path: self.visualdb_path,
+            nonnegative_scaling: self.nonnegative_scaling,
         }
     }
 }

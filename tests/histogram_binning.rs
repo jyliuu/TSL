@@ -148,72 +148,51 @@ mod tests {
         );
     }
 
-    /// CROSS-BRANCH PARITY at max_bins=Some(255). Loads a baseline prediction
-    /// vector captured on `feat/binned-prefix-sums` (the parent of this
-    /// perf branch) and asserts bit-for-bit equality. Catches any silent
-    /// drift introduced by the AoS layout or rayon parallelism.
-    ///
-    /// Baseline file: `tests/data/parity_baseline_max_bins_255.bin` —
-    /// little-endian u64 header (n_test), followed by n_test f64 bit
-    /// patterns. Generated once on the parent via
-    ///   `cargo run --release --example capture_parity_baseline`.
+    /// A bin budget covering all distinct values preserves the exact candidate set.
     #[test]
-    fn parity_max_bins_255_matches_parent_branch_baseline() {
-        use std::fs::File;
-        use std::io::Read;
-
-        let mut f = File::open("tests/data/parity_baseline_max_bins_255.bin")
-            .expect("baseline file (run capture_parity_baseline example first)");
-        let mut header = [0u8; 8];
-        f.read_exact(&mut header).expect("read header");
-        let n_test = u64::from_le_bytes(header) as usize;
-        let mut baseline: Vec<f64> = Vec::with_capacity(n_test);
-        for _ in 0..n_test {
-            let mut buf = [0u8; 8];
-            f.read_exact(&mut buf).expect("read pred");
-            baseline.push(f64::from_bits(u64::from_le_bytes(buf)));
-        }
-
-        let (x, y) = setup_data_csv("./data/housing_full.csv");
-        let mut rng = StdRng::seed_from_u64(42);
-        let n = y.len();
-        let mut indices: Vec<usize> = (0..n).collect();
-        use rand::seq::SliceRandom;
-        indices.as_mut_slice().shuffle(&mut rng);
-        let split = (n as f64 * 0.8) as usize;
-        let train_idx = &indices[..split];
-        let test_idx = &indices[split..];
-        let x_train = x.select(ndarray::Axis(0), train_idx);
-        let y_train = y.select(ndarray::Axis(0), train_idx);
-        let x_test = x.select(ndarray::Axis(0), test_idx);
-
-        let params = housing_params(Some(255));
-        let mut fit_rng = StdRng::seed_from_u64(43);
-        let (_fit_result, model) = fit(x_train.view(), y_train.view(), &params, &mut fit_rng);
-        let preds = model.predict(x_test.view());
-
-        assert_eq!(preds.len(), baseline.len(), "n_test mismatch");
-        let mut mismatches = 0usize;
-        let mut first_diff: Option<(usize, f64, f64)> = None;
-        for (i, (&a, &b)) in preds.iter().zip(baseline.iter()).enumerate() {
-            if a.to_bits() != b.to_bits() {
-                if first_diff.is_none() {
-                    first_diff = Some((i, a, b));
+    fn low_cardinality_binned_fit_matches_exact_candidates() {
+        let mut rows = Vec::new();
+        let mut targets = Vec::new();
+        for i in 0..8 {
+            for j in 0..6 {
+                for k in 0..4 {
+                    for _ in 0..(1 + (i + 2 * j + 3 * k) % 5) {
+                        rows.extend([i as f64, j as f64, k as f64]);
+                        targets.push(
+                            2.0 + 0.13 * (i * i) as f64
+                                + 0.37 * j as f64
+                                + 0.19 * (k * k) as f64
+                                + 0.07 * (i * j) as f64,
+                        );
+                    }
                 }
-                mismatches += 1;
             }
         }
-        assert_eq!(
-            mismatches, 0,
-            "{} / {} predictions differ from parent baseline; first diff at idx {:?}",
-            mismatches,
-            preds.len(),
-            first_diff
+        let x = ndarray::Array2::from_shape_vec((targets.len(), 3), rows).unwrap();
+        let y = ndarray::Array1::from_vec(targets);
+        let mut exact_rng = StdRng::seed_from_u64(43);
+        let mut binned_rng = StdRng::seed_from_u64(43);
+        let (exact_fit, exact) = fit(x.view(), y.view(), &housing_params(None), &mut exact_rng);
+        let (binned_fit, binned) = fit(
+            x.view(),
+            y.view(),
+            &housing_params(Some(64)),
+            &mut binned_rng,
         );
-        println!(
-            "CROSS-BRANCH PARITY (max_bins=255) OK | {} preds match bit-for-bit",
-            preds.len()
+        assert!(exact.splits.iter().map(Vec::len).sum::<usize>() > 0);
+        assert_eq!(exact.splits, binned.splits);
+        let exact_predictions = exact.predict(x.view());
+        let binned_predictions = binned.predict(x.view());
+        let max_difference = exact_predictions
+            .iter()
+            .zip(binned_predictions.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            max_difference < 1e-9,
+            "prediction difference {max_difference}"
         );
+        assert!((exact_fit.err - binned_fit.err).abs() < 1e-10);
     }
 
     /// SAME-SEED DETERMINISM at max_bins=Some(255): also confirm the binned
@@ -237,5 +216,4 @@ mod tests {
             fit_a.err
         );
     }
-
 }

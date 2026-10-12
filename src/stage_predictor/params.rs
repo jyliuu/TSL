@@ -12,6 +12,13 @@ pub struct StagePredictorParams {
     pub tg_params: GridTensorParams,
     pub similarity_threshold: f64,
     pub aggregation_method: Aggregation,
+    /// Strength ρ of the pull of each grid's branches toward the mean branches of the
+    /// other grids; 0 fits the grids independently.
+    pub consensus: f64,
+    /// Maximum local action attempts between peer-reference updates.
+    pub consensus_interval: usize,
+    /// Optional uniform training-row sample for the branch-consensus penalty.
+    pub consensus_anchors: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -20,6 +27,9 @@ pub struct StagePredictorParamsBuilder {
     tg_params_builder: GridTensorParamsBuilder,
     similarity_threshold: f64,
     aggregation_method: Aggregation,
+    consensus: f64,
+    consensus_interval: usize,
+    consensus_anchors: Option<usize>,
 }
 
 impl StagePredictorParamsBuilder {
@@ -29,6 +39,9 @@ impl StagePredictorParamsBuilder {
             tg_params_builder: GridTensorParamsBuilder::new(),
             similarity_threshold: 0.0,
             aggregation_method: Aggregation::Combined,
+            consensus: 0.0,
+            consensus_interval: 1,
+            consensus_anchors: None,
         }
     }
 
@@ -44,6 +57,31 @@ impl StagePredictorParamsBuilder {
 
     pub fn similarity_threshold(mut self, similarity_threshold: f64) -> Self {
         self.similarity_threshold = similarity_threshold;
+        self
+    }
+
+    /// Fit the bag in lockstep, adding `ρ (‖f₊ − c₊‖² + ‖f₋ − c₋‖²)` to each grid's
+    /// objective, where `c±` are the mean branches of the other grids and `ρ = consensus`.
+    pub fn consensus(mut self, consensus: f64) -> Self {
+        self.consensus = consensus;
+        self
+    }
+
+    pub fn consensus_interval(mut self, consensus_interval: usize) -> Self {
+        assert!(
+            consensus_interval >= 1,
+            "consensus_interval must be at least 1"
+        );
+        self.consensus_interval = consensus_interval;
+        self
+    }
+
+    pub fn consensus_anchors(mut self, consensus_anchors: Option<usize>) -> Self {
+        assert!(
+            consensus_anchors != Some(0),
+            "consensus_anchors must be positive"
+        );
+        self.consensus_anchors = consensus_anchors;
         self
     }
 
@@ -73,6 +111,9 @@ impl StagePredictorParamsBuilder {
             tg_params: self.tg_params_builder.build(),
             similarity_threshold: self.similarity_threshold,
             aggregation_method: self.aggregation_method,
+            consensus: self.consensus,
+            consensus_interval: self.consensus_interval,
+            consensus_anchors: self.consensus_anchors,
         }
     }
 }

@@ -78,8 +78,11 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         heavily shrunk toward the parent, while a child with 100 samples will mostly trust its own data.
         Default: 0.0 (no anchoring). Typical values: 10-50.
     update_clamp : float, default=float('inf')
-        Clamping parameter for refinement updates. Limits magnitude of update multipliers to the range
-        [exp(-update_clamp), exp(update_clamp)]. Use float('inf') for no clamping.
+        Nonnegative log-step cap for refinement updates. Branch multipliers lie in
+        [max(0.05, exp(-update_clamp)), min(20, exp(update_clamp))]. Positive infinity
+        retains the numerical bounds [0.05, 20]. Split and boundary-refit updates
+        are relative to current factors; merge updates are relative to the
+        count-weighted geometric reference of neighboring factors.
     tilt_tau : float, default=0.01
         L2 penalty on the multiplicative tilt update
         ``0.5 * log(v_plus / v_minus)``.
@@ -92,6 +95,13 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         When `split_strategy == "top_k"`, require all K splits to be filled.
     similarity_threshold : float, default=0.0
         Threshold for merging similar components.
+    consensus : float, default=0.0
+        Strength ``rho >= 0`` of the pull toward the bag consensus. With ``rho > 0``
+        the grids of a stage are fitted in lockstep, one structural action per round,
+        and each grid's objective adds ``rho * (|f_plus - c_plus|^2 + |f_minus - c_minus|^2)``,
+        where ``c_plus`` and ``c_minus`` are the mean branches of the other grids. The
+        grids converge to one latent representation; the term also damps updates.
+        ``0.0`` fits the grids independently.
     bagged : bool, default=False
         Whether to use bagging.
     seed : int, default=42
@@ -133,6 +143,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         top_k: int = 10,
         must_fill_all_k: bool = True,
         similarity_threshold: float = 0.0,
+        consensus: float = 0.0,
         bagged: bool = False,
         seed: int = 42,
         verbosity: int = 1,
@@ -163,6 +174,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         self.top_k = top_k
         self.must_fill_all_k = must_fill_all_k
         self.similarity_threshold = similarity_threshold
+        self.consensus = consensus
         self.bagged = bagged
         self.seed = seed
         self.verbosity = verbosity
@@ -210,6 +222,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
             top_k=self.top_k,
             must_fill_all_k=self.must_fill_all_k,
             similarity_threshold=self.similarity_threshold,
+            consensus=self.consensus,
             bagged=self.bagged,
             seed=self.seed,
             verbosity=self.verbosity,

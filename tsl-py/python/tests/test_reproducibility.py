@@ -54,3 +54,26 @@ def test_different_seeds_produce_different_results():
     # Check predictions are different
     with pytest.raises(AssertionError):
         np.testing.assert_array_almost_equal(pred1, pred2, decimal=10)
+
+
+def test_consensus_fit_is_reproducible_and_validated():
+    X, y = generate_test_data(n_samples=300)
+    kwargs = dict(epochs=2, n_trees=6, n_iter=10, split_try=5, colsample_bytree=1.0, seed=7)
+
+    model1, _ = TSL.fit(X, y, consensus=1.0, **kwargs)
+    model2, _ = TSL.fit(X, y, consensus=1.0, **kwargs)
+    np.testing.assert_array_equal(model1.predict(X), model2.predict(X))
+
+    for bad in (-0.5, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="consensus"):
+            TSL.fit(X, y, consensus=bad, **kwargs)
+
+
+def test_sklearn_regressor_forwards_consensus():
+    from tensorsl.sklearn import TSLRegressor
+
+    X, y = generate_test_data(n_samples=300)
+    reg = TSLRegressor(epochs=2, n_trees=6, n_iter=10, consensus=1.0, verbosity=0)
+    assert reg.get_params()["consensus"] == 1.0
+    pred = reg.fit(X, y).predict(X)
+    assert np.isfinite(pred).all()

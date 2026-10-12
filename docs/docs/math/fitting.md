@@ -559,11 +559,17 @@ $$
 When $\rho>0$, the solver checks positive, negative, and exactly zero tilt updates and
 keeps the best valid proposal.
 
-The proposed multipliers are limited to
+For `update_clamp` $c\geq0$, the proposed multipliers are limited to
 
 $$
-v_+,v_-\in[0.05,20].
+v_+,v_-\in[\max(0.05,e^{-c}),\min(20,e^c)].
 $$
+
+The default $c=\infty$ retains the numerical interval $[0.05,20]$. The same
+limits apply to L2 and Huber proposals. For a merge, the multipliers are measured
+from the count-weighted geometric reference of the two neighboring factors.
+Consequently, $c=0$ freezes split and boundary-refit updates, while a merge can
+still replace unequal factors with their common reference.
 
 The action score uses the exact log-coordinate update penalty at this limited proposal.
 When the selected action is applied, the code also enforces
@@ -623,6 +629,15 @@ Setting `max_bins` restricts candidates to quantile-bin edges. Prefix sums let t
 score each threshold in constant time, regardless of the number of rows in the interval.
 See [GridTensor: histogram binning](../code/grid-tensor.md#histogram-binning).
 
+For two-branch `Random` consensus fitting, a proposal immediately following a global
+reference refresh can evaluate just its sampled split positions. Initial scoring and
+positive-only fitting are eager. Pending scores are materialized before local batch
+updates; unused solves are avoided when the post-reference action ends its batch with
+deferred cache refresh. Resplit and merge comparisons use current scores. This affects when the shared numeric
+evaluator runs and introduces no fitting parameter. The implementation's parity tests
+compare actions, random-number state, and serialized models against eager scoring;
+see [the reducer's cache policy](../code/grid-tensor.md#the-reducer-reducerrs).
+
 ## Combining the randomized grids
 
 Once every grid stops, fitting moves from grid level to stage level. Each grid fit
@@ -651,7 +666,7 @@ $$
 $$
 
 These columns include the internal scales $\lambda_{\ell,+}$ and $\lambda_{\ell,-}$ but
-exclude the outer OLS branch coefficients. Collect all branch columns through stage
+exclude the outer branch coefficients. Collect all branch columns through stage
 $\ell$:
 
 $$
@@ -663,7 +678,7 @@ $$
 \in\mathbb R^{n\times2\ell}.
 $$
 
-The full model solves
+By default, the full model solves
 
 $$
 \hat\gamma_\ell
@@ -678,11 +693,25 @@ minimum-norm solution when branch columns are linearly dependent. This joint
 least-squares refit updates every completed branch coefficient before the next stage
 residual is formed.
 
+With `nonnegative_scaling=true`, the joint problem constrains
+$\gamma\in[0,\infty)^{2\ell}$. The bounded active-set solver normalizes the design
+columns and target, then uses SVD on each passive-column design. It evaluates feasible
+incumbents in the original coordinates and retains the one with the lowest training
+loss. The preceding model, extended with two zero coefficients for the new stage,
+is a feasible incumbent. Reaching the iteration budget returns that best incumbent
+without a global-optimality certificate.
+
+Nonnegative outer coefficients preserve the ordered signs of the two scaled branches.
+A zero coefficient makes its branch inactive. Finite stage-level backbone–sinh
+coordinates require both effective branch scales to be positive; zero is a boundary
+case of the two-branch representation. These coefficient constraints do not identify
+unique factors or bound cancellation shared by the positive and negative branches.
+
 !!! note "Where the two scales live"
     `GridTensor.lambda_plus` and `GridTensor.lambda_minus` are positive internal grid
-    scales included in $f_{\ell,+}$ and $f_{\ell,-}$. The unconstrained OLS coefficients
-    are stored separately as `StagePredictor.scaling_plus` and
-    `StagePredictor.scaling_minus`. Prediction applies these outer scalings exactly once;
+    scales included in $f_{\ell,+}$ and $f_{\ell,-}$. The outer coefficients,
+    optionally constrained to be nonnegative, are stored separately as
+    `StagePredictor.scaling_plus` and `StagePredictor.scaling_minus`. Prediction applies these outer scalings exactly once;
     the legacy `GridTensor.scaling` field is ignored in two-tensor mode. See the
     [architecture invariants](../code/architecture.md#two-critical-invariants).
 

@@ -7,8 +7,10 @@ use ndarray::prelude::*;
 use rand::{rngs::StdRng, SeedableRng};
 
 use super::{params::TSLBoostedParams, TSL};
-use crate::stage_predictor::fit_ensemble;
+use crate::stage_predictor::fit_ensemble_with_input;
 use nalgebra::{DMatrix, DVector};
+
+mod nonnegative;
 
 type Logger = Option<std::rc::Rc<std::cell::RefCell<Box<dyn crate::logging::EvoLogger>>>>;
 
@@ -137,10 +139,33 @@ fn train_boosted_model<F>(
     x: ArrayView2<f64>,
     y: ArrayView1<f64>,
     hyperparameters: &TSLBoostedParams,
+    on_epoch_end: F,
+) -> (FitResult, TSL)
+where
+    F: FnMut(
+        usize,
+        &crate::stage_predictor::StagePredictor,
+        &[crate::stage_predictor::StagePredictor],
+        &Logger,
+    ),
+{
+    train_boosted_model_with_preparation(x, y, hyperparameters, true, on_epoch_end)
+}
+
+fn train_boosted_model_with_preparation<F>(
+    x: ArrayView2<f64>,
+    y: ArrayView1<f64>,
+    hyperparameters: &TSLBoostedParams,
+    reuse_input: bool,
     mut on_epoch_end: F,
 ) -> (FitResult, TSL)
 where
-    F: FnMut(usize, &crate::stage_predictor::StagePredictor, &[crate::stage_predictor::StagePredictor], &Logger),
+    F: FnMut(
+        usize,
+        &crate::stage_predictor::StagePredictor,
+        &[crate::stage_predictor::StagePredictor],
+        &Logger,
+    ),
 {
     init_logging(&hyperparameters.log_level);
     log::info!(
@@ -157,6 +182,13 @@ where
     );
 
     let mut sp_params = hyperparameters.sp_params.clone();
+    let prepared_input = (reuse_input
+        && hyperparameters.epochs > 1
+        && sp_params.n_trees > 1
+        && !logging::is_logging_enabled())
+    .then(|| {
+        crate::grid_tensor::prepared_input::PreparedInput::new(x, sp_params.tg_params.max_bins)
+    });
 
     let mut rng = StdRng::seed_from_u64(hyperparameters.seed);
     let mut y_new = y.to_owned();
@@ -180,8 +212,13 @@ where
             // Single-family fitting (split_residuals removed - replaced by two-tensor f+ and -f- columns)
             {
                 // Original single-family fitting logic
-                let (_fit_result, mut stage_predictor) =
-                    fit_ensemble(x.view(), y_new.view(), &sp_params, &mut rng);
+                let (_fit_result, mut stage_predictor) = fit_ensemble_with_input(
+                    x.view(),
+                    y_new.view(),
+                    &sp_params,
+                    &mut rng,
+                    prepared_input.as_ref(),
+                );
 
                 // Always use OrthogonalGreedy scaling strategy
                 // Store f+ and f- for logging
@@ -190,8 +227,10 @@ where
                 // Extract UNSCALED f+ and f- predictions from combined grid
                 // CRITICAL: Extract directly from two-tensor fields, do NOT apply any scaling
                 // The grid's scaling field is ignored - we only use scaling_plus/scaling_minus from OLS
-                let (f_plus, f_minus) =
-                    extract_two_tensor_predictions_unscaled(&stage_predictor.primary_grid_tensor, x);
+                let (f_plus, f_minus) = extract_two_tensor_predictions_unscaled(
+                    &stage_predictor.primary_grid_tensor,
+                    x,
+                );
 
                 // Store for logging
                 let f_plus_opt: Option<ndarray::Array1<f64>> = Some(f_plus.clone());
@@ -223,11 +262,18 @@ where
                 let k = 2 * (i + 1);
                 let x_mat = predictions_matrix.slice(s![.., 0..k]);
 
-                // Solve weighted OLS on ALL columns up to current epoch: X w ≈ y
-                // This is incremental OLS: at each epoch, we add 2 new columns and refit on all columns
-                // This is the "Orthogonal Greedy" approach - greedy in the sense that we add columns
-                // incrementally (one stage at a time), and orthogonal in that we refit OLS on all columns
-                let (err, residuals) = if let Some(w) = solve_least_squares(x_mat, y) {
+                // Refit every branch coefficient against the original target.
+                let weights = if hyperparameters.nonnegative_scaling {
+                    let mut prior = Array1::zeros(k);
+                    for (j, stage) in stage_predictors.iter().enumerate() {
+                        prior[2 * j] = stage.scaling_plus.unwrap_or(0.0);
+                        prior[2 * j + 1] = stage.scaling_minus.unwrap_or(0.0);
+                    }
+                    nonnegative::solve(x_mat, y, prior.view())
+                } else {
+                    solve_least_squares(x_mat, y)
+                };
+                let (err, residuals) = if let Some(w) = weights {
                     log::info!("New projected weights (two-tensor mode): {:?}", w);
 
                     // Update scalings for all families based on OLS solution
@@ -311,12 +357,7 @@ where
                     .map(|(_, logger_rc)| logger_rc.clone());
                 #[cfg(not(feature = "evo-logging"))]
                 let logger_for_callback = None;
-                on_epoch_end(
-                    i,
-                    &stage_predictor,
-                    &stage_predictors,
-                    &logger_for_callback,
-                );
+                on_epoch_end(i, &stage_predictor, &stage_predictors, &logger_for_callback);
 
                 log::info!("Epoch {}, error: {:?}", i, err);
                 stage_predictors.push(stage_predictor);
@@ -453,4 +494,123 @@ pub fn fit_boosted_with_test_error(
     );
 
     (fit_res, tsl, Array1::from(test_errors))
+}
+
+#[cfg(test)]
+mod prepared_input_tests {
+    use super::*;
+    use crate::{
+        forest::params::TSLBoostedParamsBuilder,
+        grid_tensor::params::RefinementStrategyParamsBuilder,
+    };
+
+    fn assert_parity(x: ArrayView2<f64>, y: ArrayView1<f64>, params: &TSLBoostedParams) {
+        let reference = train_boosted_model_with_preparation(x, y, params, false, |_, _, _, _| {});
+        let actual = train_boosted_model_with_preparation(x, y, params, true, |_, _, _, _| {});
+        assert_eq!(
+            bincode::serialize(&actual.1).unwrap(),
+            bincode::serialize(&reference.1).unwrap()
+        );
+        assert_eq!(actual.0.y_hat, reference.0.y_hat);
+        assert_eq!(actual.0.residuals, reference.0.residuals);
+        assert_eq!(actual.0.err.to_bits(), reference.0.err.to_bits());
+    }
+
+    #[test]
+    fn repeated_stage_input_preparation_preserves_complete_forests() {
+        let storage = Array2::from_shape_fn((166, 10), |(i, j)| {
+            if j == 8 {
+                1.
+            } else {
+                ((i * (j + 5)) % 47) as f64 / 13.
+            }
+        });
+        let x = storage.slice(s![..;2,..;2]);
+        let y = Array1::from_shape_fn(x.nrows(), |i| x[[i, 0]].sin() + x[[i, 1]] * x[[i, 2]] - 2.);
+        for bins in [None, Some(1), Some(16), Some(256)] {
+            for huber in [false, true] {
+                let refinement = RefinementStrategyParamsBuilder::new()
+                    .alpha(0.01)
+                    .tilt_tau(0.01);
+                let refinement = if huber {
+                    refinement.huber()
+                } else {
+                    refinement.l2()
+                }
+                .build();
+                let params = TSLBoostedParamsBuilder::new()
+                    .epochs(13)
+                    .n_trees(3)
+                    .n_iter(8)
+                    .decay(0.95)
+                    .seed(79)
+                    .max_bins(bins)
+                    .log_level("off")
+                    .refinement_strategy(refinement)
+                    .build();
+                assert_parity(x, y.view(), &params);
+            }
+        }
+        let params = TSLBoostedParamsBuilder::new()
+            .epochs(100)
+            .n_trees(3)
+            .n_iter(3)
+            .decay(0.8)
+            .seed(79)
+            .max_bins(Some(16))
+            .log_level("off")
+            .build();
+        assert_parity(x, y.view(), &params);
+    }
+}
+
+#[cfg(test)]
+mod nonnegative_scaling_tests {
+    use super::*;
+    use crate::forest::params::TSLBoostedParamsBuilder;
+    use crate::stage_predictor::extract_two_tensor_predictions_unscaled;
+
+    #[test]
+    fn nonnegative_scaling_preserves_branch_signs_and_training_progress() {
+        let x = Array2::from_shape_fn((96, 3), |(i, j)| ((i * (j + 3)) % 41) as f64 / 13.0);
+        let y = Array1::from_shape_fn(x.nrows(), |i| x[(i, 0)].sin() + x[(i, 1)] * x[(i, 2)] - 2.0);
+        let params = TSLBoostedParamsBuilder::new()
+            .epochs(4)
+            .n_trees(3)
+            .n_iter(8)
+            .max_bins(Some(16))
+            .consensus(0.3)
+            .nonnegative_scaling(true)
+            .log_level("off")
+            .build();
+        let mut previous_loss = y.mapv(|v| v * v).sum();
+        let (fit, model) =
+            train_boosted_model(x.view(), y.view(), &params, |_, stage, earlier, _| {
+                let mut prediction = Array1::<f64>::zeros(y.len());
+                for component in earlier.iter().chain(std::iter::once(stage)) {
+                    let plus = component.scaling_plus.unwrap();
+                    let minus = component.scaling_minus.unwrap();
+                    assert!(plus.is_finite() && plus >= 0.0);
+                    assert!(minus.is_finite() && minus >= 0.0);
+                    let (fp, fm) = extract_two_tensor_predictions_unscaled(
+                        &component.primary_grid_tensor,
+                        x.view(),
+                    );
+                    assert!(fp
+                        .iter()
+                        .chain(fm.iter())
+                        .all(|v| v.is_finite() && *v >= 0.0));
+                    let reconstructed = &fp * plus - &fm * minus;
+                    assert_eq!(component.predict(x.view()), reconstructed);
+                    prediction += &reconstructed;
+                }
+                assert!(prediction.iter().all(|v| v.is_finite()));
+                let loss = (&prediction - &y).mapv(|v| v * v).sum();
+                assert!(loss <= previous_loss + 1e-10 * previous_loss.max(1.0));
+                previous_loss = loss;
+            });
+        let predicted = model.predict(x.view());
+        assert!((&predicted - &fit.y_hat).iter().all(|v| v.abs() < 1e-11));
+        assert!((fit.err * y.len() as f64 - previous_loss).abs() < 1e-10);
+    }
 }

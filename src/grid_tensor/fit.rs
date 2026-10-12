@@ -3,15 +3,15 @@ use rand::Rng;
 
 use crate::{
     grid_tensor::{
-        histogram_binning::apply_histogram_binning_mask,
         identification::l2_identify,
-        reducer::fitting_reducer,
+        reducer::{fitting_reducer_with_candidate_refresh, CandidateRefresh},
+        refinement::RefinementStrategy,
+        splitting::SplitStrategy,
         state::FittingState,
         GridTensor, GridTensorParams,
     },
     FitResult,
 };
-
 
 const MAX_ITERATIONS_MULTIPLIER: usize = 3;
 
@@ -28,6 +28,28 @@ pub fn fit<R: Rng + ?Sized>(
     hyperparameters: &GridTensorParams,
     rng: &mut R,
 ) -> (FitResult, GridTensor) {
+    let state = initialize_state(x.view(), y.view(), hyperparameters);
+    fit_initialized(state, hyperparameters, rng)
+}
+
+/// Prepare the deterministic statistics and candidate caches for one stage.
+pub(crate) fn initialize_state<'a>(
+    x: ndarray::ArrayView2<'a, f64>,
+    y: ndarray::ArrayView1<'a, f64>,
+    hyperparameters: &GridTensorParams,
+) -> FittingState<'a> {
+    initialize_state_with_input(x, y, hyperparameters, None)
+}
+
+pub(crate) fn initialize_state_with_input<'a>(
+    x: ndarray::ArrayView2<'a, f64>,
+    y: ndarray::ArrayView1<'a, f64>,
+    hyperparameters: &GridTensorParams,
+    prepared: Option<&super::prepared_input::PreparedInput<'_>>,
+) -> FittingState<'a> {
+    if let Some(prepared) = prepared {
+        prepared.assert_matches(x, hyperparameters.max_bins);
+    }
     let refinement_strategy = hyperparameters
         .refinement_strategy_params
         .get_refinement_strategy();
@@ -35,70 +57,146 @@ pub fn fit<R: Rng + ?Sized>(
     let split_strategy = hyperparameters.split_strategy_params.get_split_strategy();
 
     // Initialize state
-    let mut state = FittingState::new(x.view(), y.view());
+    let mut state = FittingState::new(x, y);
 
     // Initialize logging state if logging is enabled
     #[cfg(feature = "evo-logging")]
     {
-        use crate::logging::is_logging_enabled;
         use crate::grid_tensor::logging_helpers::LoggingState;
+        use crate::logging::is_logging_enabled;
         if is_logging_enabled() {
             state.logging_state = Some(LoggingState::new());
         }
     }
 
-    let state = refinement_strategy.initialize(state);
-    // Histogram binning prologue: if max_bins is set, mark non-bin-boundary
-    // positions as NaN in the split-candidate caches. This restricts the inner
-    // solver loop to O(n_bins) candidates per interval. No-op when max_bins=None.
-    let state = apply_histogram_binning_mask(state, hyperparameters.max_bins);
+    let state =
+        refinement_strategy.initialize_with_input(state, prepared, hyperparameters.max_bins);
     let mut state = state;
     state.current_error = refinement_strategy.weighted_squared_error(&state.residuals);
-    let mut state = split_strategy.initialize(state);
+    split_strategy.initialize(state)
+}
 
-    let n_iter = hyperparameters.n_iter;
-    let max_iterations = n_iter * MAX_ITERATIONS_MULTIPLIER;
+/// Fit from a state initialized with the same data and hyperparameters.
+pub(crate) fn fit_initialized<R: Rng + ?Sized>(
+    mut state: FittingState<'_>,
+    hyperparameters: &GridTensorParams,
+    rng: &mut R,
+) -> (FitResult, GridTensor) {
+    let refinement_strategy = hyperparameters
+        .refinement_strategy_params
+        .get_refinement_strategy();
+    let split_strategy = hyperparameters.split_strategy_params.get_split_strategy();
 
-    for iter in 0..max_iterations {
-        state.iteration = iter;
-
-        if !state.split_strategy_state.merge_enabled && state.loop_state.fineness >= n_iter {
+    for iter in 0..max_iterations(hyperparameters.n_iter) {
+        let advanced;
+        (state, advanced) = fit_step(
+            state,
+            iter,
+            hyperparameters.n_iter,
+            &refinement_strategy,
+            &split_strategy,
+            rng,
+        );
+        if !advanced {
             break;
-        }
-
-        // The fineness budget excludes new splits but leaves resplits and merges
-        // available under the same objective. A merge frees capacity for a later split.
-        let allow_split = state.loop_state.fineness < n_iter;
-        let Some(action) =
-            split_strategy.propose_next_action_with_split_budget(&state, rng, allow_split)
-        else {
-            log::debug!("No objective-improving structural action remains, stopping");
-            break;
-        };
-
-        // Apply action through reducer (which calls logging reducer internally)
-        state = fitting_reducer(state, action, &refinement_strategy, &split_strategy);
-        if state.terminated {
-            break;
-        }
-
-        // Log component states and f+/f- statistics every iteration
-        // Use reducer pattern - always call it, even if logging_state is None (no-op)
-        // Feature flag is encapsulated inside the reducers
-        #[cfg(feature = "evo-logging")]
-        use crate::logging::reducer::{log_component_reducer, log_f_component_reducer};
-
-        // Log f+/f- statistics (reducer computes stats internally from state)
-        #[cfg(feature = "evo-logging")]
-        {
-            state.logging_state =
-                log_f_component_reducer(state.logging_state.take(), &state, iter);
-
-            state.logging_state =
-                log_component_reducer(state.logging_state.take(), &state, iter);
         }
     }
+    finish_fit(state)
+}
 
+/// Upper bound on structural actions for a grid with fineness budget `n_iter`.
+pub(crate) fn max_iterations(n_iter: usize) -> usize {
+    n_iter * MAX_ITERATIONS_MULTIPLIER
+}
+
+/// Propose and apply one structural action.
+///
+/// Returns `false` once the grid is finished: the split budget is exhausted with merges
+/// disabled, no objective-improving action remains, or the reducer terminated the fit.
+pub(crate) fn fit_step<'a, R: Rng + ?Sized>(
+    state: FittingState<'a>,
+    iter: usize,
+    n_iter: usize,
+    refinement_strategy: &RefinementStrategy,
+    split_strategy: &SplitStrategy,
+    rng: &mut R,
+) -> (FittingState<'a>, bool) {
+    fit_step_with_candidate_refresh(
+        state,
+        iter,
+        n_iter,
+        refinement_strategy,
+        split_strategy,
+        rng,
+        CandidateRefresh::Eager,
+    )
+}
+
+/// Take one action, retaining row and prefix statistics under either refresh policy.
+/// Deferred candidate scores require a full statistics refresh before the next proposal.
+pub(crate) fn fit_step_with_candidate_refresh<'a, R: Rng + ?Sized>(
+    mut state: FittingState<'a>,
+    iter: usize,
+    n_iter: usize,
+    refinement_strategy: &RefinementStrategy,
+    split_strategy: &SplitStrategy,
+    rng: &mut R,
+    candidate_refresh: CandidateRefresh,
+) -> (FittingState<'a>, bool) {
+    state.iteration = iter;
+
+    if !state.split_strategy_state.merge_enabled && state.loop_state.fineness >= n_iter {
+        return (state, false);
+    }
+
+    // The fineness budget excludes new splits but leaves resplits and merges
+    // available under the same objective. A merge frees capacity for a later split.
+    let allow_split = state.loop_state.fineness < n_iter;
+    let action = if state.sampled_split_scoring || state.split_scores_stale {
+        split_strategy.propose_next_action_with_sampled_scores(
+            &mut state,
+            refinement_strategy,
+            rng,
+            allow_split,
+        )
+    } else {
+        split_strategy.propose_next_action_with_split_budget(&state, rng, allow_split)
+    };
+    let Some(action) = action else {
+        log::debug!("No objective-improving structural action remains, stopping");
+        return (state, false);
+    };
+
+    // Apply action through reducer (which calls logging reducer internally)
+    state = fitting_reducer_with_candidate_refresh(
+        state,
+        action,
+        refinement_strategy,
+        split_strategy,
+        candidate_refresh,
+    );
+    if state.terminated {
+        return (state, false);
+    }
+
+    // Log component states and f+/f- statistics every iteration
+    // Use reducer pattern - always call it, even if logging_state is None (no-op)
+    // Feature flag is encapsulated inside the reducers
+    #[cfg(feature = "evo-logging")]
+    use crate::logging::reducer::{log_component_reducer, log_f_component_reducer};
+
+    // Log f+/f- statistics (reducer computes stats internally from state)
+    #[cfg(feature = "evo-logging")]
+    {
+        state.logging_state = log_f_component_reducer(state.logging_state.take(), &state, iter);
+
+        state.logging_state = log_component_reducer(state.logging_state.take(), &state, iter);
+    }
+    (state, true)
+}
+
+/// Identify the fitted grid and log its final component states.
+pub(crate) fn finish_grid(mut state: FittingState<'_>) -> GridTensor {
     log::debug!(
         "Split/Resplit/Merge counts: {}/{}/{}",
         state.loop_state.split_count,
@@ -109,10 +207,10 @@ pub fn fit<R: Rng + ?Sized>(
     // Extract logging state before conversion (for final state logging)
     #[cfg(feature = "evo-logging")]
     let logging_state = state.logging_state.take();
+    #[cfg(feature = "evo-logging")]
     let final_iteration = state.iteration;
 
-    // Convert FittingState to output types
-    let (fit_result, grid_tensor) = convert_state_to_result(state);
+    let grid_tensor = convert_state_to_grid(state);
 
     // Add component state logging for final state AFTER identification has been applied
     // This ensures we save the identified components (including λ_±), not pre-identification ones.
@@ -120,12 +218,30 @@ pub fn fit<R: Rng + ?Sized>(
     // Always call it - it handles None internally
     #[cfg(feature = "evo-logging")]
     {
-    use crate::grid_tensor::logging_helpers::log_final_component_states;
-    log_final_component_states(logging_state, &grid_tensor, final_iteration);
+        use crate::grid_tensor::logging_helpers::log_final_component_states;
+        log_final_component_states(logging_state, &grid_tensor, final_iteration);
     }
-    (fit_result, grid_tensor)
+    grid_tensor
 }
 
+/// Identify the fitted grid and evaluate it on the training rows.
+pub(crate) fn finish_fit(state: FittingState<'_>) -> (FitResult, GridTensor) {
+    let (x, labels) = (state.x, state.labels);
+    let grid_tensor = finish_grid(state);
+    // `FitResult` is consistent with the returned `GridTensor`: after identification the
+    // returned y_hat/residuals/err equal `grid_tensor.predict(x)` and its residuals.
+    let y_hat = grid_tensor.predict(x.view());
+    let residuals = (labels.to_owned() - y_hat.view()).to_owned();
+    let err = residuals.pow2().mean().unwrap();
+    (
+        FitResult {
+            err,
+            residuals,
+            y_hat,
+        },
+        grid_tensor,
+    )
+}
 
 /// Compute real intervals from state boundaries and sorted indices
 fn compute_real_intervals(
@@ -207,11 +323,8 @@ fn compute_observation_counts(
 }
 
 /// Convert FittingState into the final output types
-fn convert_state_to_result(
-    state: FittingState,
-) -> (FitResult, GridTensor) {
+fn convert_state_to_grid(state: FittingState) -> GridTensor {
     let x = state.x;
-    let labels = state.labels;
     let boundaries = state.boundaries;
     let precomputed_statistics = state.precomputed_statistics;
 
@@ -238,7 +351,7 @@ fn convert_state_to_result(
         &mut lambda_minus,
     );
 
-    let grid_tensor = GridTensor::new_two_tensor(
+    GridTensor::new_two_tensor(
         splits,
         observation_counts,
         real_intervals,
@@ -246,22 +359,7 @@ fn convert_state_to_result(
         tilt_values,
         lambda_plus,
         lambda_minus,
-    );
-
-    // Ensure `FitResult` is consistent with the returned `GridTensor`.
-    // In particular: after any end-of-stage transformations (identification / normalization),
-    // the returned y_hat/residuals/err must match `grid_tensor.predict(x)`.
-    let y_hat = grid_tensor.predict(x.view());
-    let residuals = (labels.to_owned() - y_hat.view()).to_owned();
-    let err = residuals.pow2().mean().unwrap();
-
-    let fit_res = FitResult {
-        err,
-        residuals,
-        y_hat,
-    };
-
-    (fit_res, grid_tensor)
+    )
 }
 
 #[cfg(test)]
@@ -270,16 +368,14 @@ mod tests {
     use ndarray::{Array1, Array2};
     use rand::{rngs::StdRng, SeedableRng};
 
-    use crate::{
-        grid_tensor::{
-            action::FittingAction,
-            fit,
-            reducer::fitting_reducer,
-            refinement::RefinementStrategy,
-            splitting::{MergeCandidate, SplitCandidate, SplitStrategy},
-            state::FittingState,
-            GridTensorParamsBuilder,
-        },
+    use crate::grid_tensor::{
+        action::FittingAction,
+        fit,
+        reducer::fitting_reducer,
+        refinement::RefinementStrategy,
+        splitting::{MergeCandidate, SplitCandidate, SplitStrategy},
+        state::FittingState,
+        GridTensorParamsBuilder,
     };
 
     pub fn setup_data_hardcoded() -> (Array2<f64>, Array1<f64>) {
@@ -977,9 +1073,9 @@ mod tests {
 
         // Resplitting again should do nothing (idempotence)
         let gain = state.precomputed_statistics.error_reductions_resplit[0][0];
-        
+
         // NOTE: Resplit idempotence doesn't hold exactly when clamping occurs!
-        // 
+        //
         // Why resplit idempotence fails:
         // 1. During split, the solver computes optimal parameters, but they get clamped
         //    (e.g., backbone clamped to MIN_BACKBONE/MAX_BACKBONE, tilt to MAX_TILT)
@@ -992,13 +1088,15 @@ mod tests {
         //
         // The gain is typically small (O(1e-4) or less) when clamping is minimal,
         // but can be larger when parameters are heavily clamped.
-        
+
         // Use a lenient tolerance that accounts for clamping effects
         // In practice, if parameters aren't heavily clamped, gain should be very small
-        assert!(gain.abs() < 1e-3, 
+        assert!(
+            gain.abs() < 1e-3,
             "Resplit gain should be small after split (idempotence). gain={}. \
-             Note: Non-zero gain is expected when parameters are clamped during split application.", 
-             gain);
+             Note: Non-zero gain is expected when parameters are clamped during split application.",
+            gain
+        );
     }
 
     #[test]
@@ -1078,85 +1176,8 @@ mod tests {
     }
 
     #[test]
-    fn interval_ids_follow_inserted_and_removed_boundaries() {
-        let x = Array2::from_shape_vec((6, 1), vec![5.0, 0.0, 3.0, 1.0, 4.0, 2.0])
-            .unwrap();
-        let y = Array1::from_vec(vec![6.0, 1.0, 4.0, 2.0, 5.0, 3.0]);
-        let refinement_strategy = RefinementStrategy::L2Refinement {
-            alpha: 0.1,
-            tilt_tau: 0.0,
-            tilt_rho: 0.0,
-            prior_sample_size: 0.0,
-            update_clamp: f64::INFINITY,
-        };
-        let split_strategy = SplitStrategy::Best {
-            min_interval_samples: 1,
-            complexity_penalty: 1.0,
-            min_split_loss: 0.0,
-        };
-
-        let mut state = FittingState::new(x.view(), y.view());
-        state = refinement_strategy.initialize(state);
-        state = split_strategy.initialize(state);
-
-        for index in [2, 4] {
-            let allowed_interval_idx = state.split_strategy_state.allowed_intervals[0]
-                .iter()
-                .position(|interval| interval.contains(index))
-                .unwrap();
-            let split = SplitCandidate {
-                col: 0,
-                error_reduction: state.precomputed_statistics.error_reductions_split[0][index],
-                allowed_interval_idx,
-                index,
-                update_left: state.precomputed_statistics.update_pairs_split_left[0][index],
-                update_right: state.precomputed_statistics.update_pairs_split_right[0][index],
-            };
-            state = fitting_reducer(
-                state,
-                FittingAction::ApplySplit { split },
-                &refinement_strategy,
-                &split_strategy,
-            );
-        }
-        assert_eq!(state.boundaries[0], vec![2, 4]);
-        assert_eq!(state.interval_id[0], vec![2, 0, 1, 0, 2, 1]);
-
-        let merge_first = MergeCandidate {
-            col: 0,
-            error_reduction: state.precomputed_statistics.error_reductions_merge[0][0],
-            interval_idx: 0,
-            index: 2,
-        };
-        state = fitting_reducer(
-            state,
-            FittingAction::ApplyMerge { merge: merge_first },
-            &refinement_strategy,
-            &split_strategy,
-        );
-        assert_eq!(state.boundaries[0], vec![4]);
-        assert_eq!(state.interval_id[0], vec![1, 0, 0, 0, 1, 0]);
-
-        let merge_last = MergeCandidate {
-            col: 0,
-            error_reduction: state.precomputed_statistics.error_reductions_merge[0][0],
-            interval_idx: 0,
-            index: 4,
-        };
-        state = fitting_reducer(
-            state,
-            FittingAction::ApplyMerge { merge: merge_last },
-            &refinement_strategy,
-            &split_strategy,
-        );
-        assert!(state.boundaries[0].is_empty());
-        assert_eq!(state.interval_id[0], vec![0; 6]);
-    }
-
-    #[test]
     fn repeated_merges_refresh_every_remaining_merge_cache() {
-        let x = Array2::from_shape_vec((8, 1), (0..8).map(|value| value as f64).collect())
-            .unwrap();
+        let x = Array2::from_shape_vec((8, 1), (0..8).map(|value| value as f64).collect()).unwrap();
         let y = Array1::from_vec(vec![1.0, 2.0, 1.0, 2.0, 3.0, 4.0, 3.0, 4.0]);
         let refinement_strategy = RefinementStrategy::L2Refinement {
             alpha: 0.1,
@@ -1201,12 +1222,7 @@ mod tests {
         let mut merge_count = 0;
         while let Some(action) = split_strategy.propose_next_merge(&state) {
             let old_boundary_count = state.boundaries[0].len();
-            state = fitting_reducer(
-                state,
-                action,
-                &refinement_strategy,
-                &split_strategy,
-            );
+            state = fitting_reducer(state, action, &refinement_strategy, &split_strategy);
             merge_count += 1;
 
             assert_eq!(state.boundaries[0].len() + 1, old_boundary_count);
@@ -1224,8 +1240,7 @@ mod tests {
             );
 
             for (interval_idx, &index) in state.boundaries[0].iter().enumerate() {
-                let raw_gain =
-                    state.precomputed_statistics.error_reductions_merge[0][interval_idx];
+                let raw_gain = state.precomputed_statistics.error_reductions_merge[0][interval_idx];
                 let merged_factors =
                     state.precomputed_statistics.update_pairs_merge[0][interval_idx];
                 assert!(raw_gain.is_finite());
@@ -1284,8 +1299,7 @@ mod tests {
 
     #[test]
     fn penalty_enabled_huber_actions_track_the_current_irls_surrogate() {
-        let x = Array2::from_shape_vec((6, 1), (0..6).map(|value| value as f64).collect())
-            .unwrap();
+        let x = Array2::from_shape_vec((6, 1), (0..6).map(|value| value as f64).collect()).unwrap();
         let y = Array1::from_vec(vec![0.0, 2.0, -20.0, 1.0, 3.0, 20.0]);
         let refinement_strategy = RefinementStrategy::HuberRefinement {
             alpha: 0.0,
@@ -1306,8 +1320,7 @@ mod tests {
         state = split_strategy.initialize(state);
         state.current_error = refinement_strategy.weighted_squared_error(&state.residuals);
         assert!(
-            (state.current_error - state.residuals.iter().map(|r| r * r).sum::<f64>()).abs()
-                > 1.0
+            (state.current_error - state.residuals.iter().map(|r| r * r).sum::<f64>()).abs() > 1.0
         );
 
         let index = 3;
@@ -1330,9 +1343,8 @@ mod tests {
             &split_strategy,
         );
         assert!(
-            (state.current_error
-                - refinement_strategy.weighted_squared_error(&state.residuals))
-            .abs()
+            (state.current_error - refinement_strategy.weighted_squared_error(&state.residuals))
+                .abs()
                 < 1e-12
         );
 
@@ -1349,13 +1361,11 @@ mod tests {
             &split_strategy,
         );
         assert!(
-            (state.current_error
-                - refinement_strategy.weighted_squared_error(&state.residuals))
-            .abs()
+            (state.current_error - refinement_strategy.weighted_squared_error(&state.residuals))
+                .abs()
                 < 1e-12
         );
     }
-
 }
 
 #[cfg(test)]

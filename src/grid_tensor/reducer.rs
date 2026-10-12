@@ -10,6 +10,14 @@ use crate::grid_tensor::{
 #[cfg(feature = "evo-logging")]
 use crate::logging::reducer::log_split_reducer;
 
+/// Whether candidate scores are needed before the next full statistics refresh.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CandidateRefresh {
+    Eager,
+    /// Requires `refresh_statistics` before another action is proposed.
+    Deferred,
+}
+
 /// Central reducer function that consumes state and action
 /// Returns the new state (using move semantics, no cloning)
 pub fn fitting_reducer<'a>(
@@ -18,18 +26,53 @@ pub fn fitting_reducer<'a>(
     refinement_strategy: &RefinementStrategy,
     split_strategy: &SplitStrategy,
 ) -> FittingState<'a> {
-    match action {
+    fitting_reducer_with_candidate_refresh(
+        state,
+        action,
+        refinement_strategy,
+        split_strategy,
+        CandidateRefresh::Eager,
+    )
+}
+
+pub(crate) fn fitting_reducer_with_candidate_refresh<'a>(
+    mut state: FittingState<'a>,
+    action: FittingAction,
+    refinement_strategy: &RefinementStrategy,
+    split_strategy: &SplitStrategy,
+    candidate_refresh: CandidateRefresh,
+) -> FittingState<'a> {
+    state.require_current_statistics();
+    let sampled_split_scoring = state.sampled_split_scoring;
+    let eager = candidate_refresh == CandidateRefresh::Eager
+        || matches!(&action, FittingAction::Composite { .. });
+    if eager {
+        // Untouched intervals retain scores computed before prefix-tail shifts.
+        // Materialize pending scores before an action that permits another local proposal.
+        if state.split_scores_stale {
+            refinement_strategy.refresh_all_split_scores(&mut state);
+        }
+        state.sampled_split_scoring = false;
+    }
+    let mut state = match action {
         FittingAction::ApplyScaling { factor } => reduce_apply_scaling(state, factor),
         FittingAction::Terminate { reason } => reduce_terminate(state, reason),
         FittingAction::Composite { actions } => {
+            // Consecutive subactions can consume the candidate caches.
             reduce_composite(state, actions, refinement_strategy, split_strategy)
         }
         FittingAction::ApplyMerge { .. }
         | FittingAction::ApplyResplit { .. }
-        | FittingAction::ApplySplit { .. } => {
-            reduce_apply_transformation(state, action, refinement_strategy, split_strategy)
-        }
-    }
+        | FittingAction::ApplySplit { .. } => reduce_apply_transformation(
+            state,
+            action,
+            refinement_strategy,
+            split_strategy,
+            candidate_refresh,
+        ),
+    };
+    state.sampled_split_scoring = sampled_split_scoring;
+    state
 }
 
 /// Apply a split/resplit/merge with all associated side effects
@@ -39,11 +82,24 @@ fn reduce_apply_transformation<'a>(
     transformation: FittingAction,
     refinement_strategy: &RefinementStrategy,
     split_strategy: &SplitStrategy,
+    candidate_refresh: CandidateRefresh,
 ) -> FittingState<'a> {
-    // Capture state for logging (always capture, reducer handles None)
-    let old_error = state.current_error;
-    // Clone the action before transformation to avoid borrowing issues
-    let action_for_logging = transformation.clone();
+    #[cfg(feature = "evo-logging")]
+    let logging_event = state
+        .logging_state
+        .as_ref()
+        .map(|_| (transformation.clone(), state.current_error));
+    let fused_binned_curvature = candidate_refresh == CandidateRefresh::Deferred
+        && matches!(refinement_strategy, RefinementStrategy::L2Refinement { .. })
+        && state
+            .branch_consensus
+            .as_ref()
+            .is_some_and(|reference| reference.anchors.is_none())
+        && state
+            .precomputed_statistics
+            .bin_edges
+            .iter()
+            .all(|edges| !edges.is_empty());
 
     // Step 1: Update tree structure (insert/remove/update boundaries and grid_values)
 
@@ -58,8 +114,7 @@ fn reduce_apply_transformation<'a>(
             let (u_plus_l, u_minus_l) = split_candidate.update_left;
             let (u_plus_r, u_minus_r) = split_candidate.update_right;
 
-            let v_min = crate::grid_tensor::two_tensor_solver::DEFAULT_V_MIN;
-            let v_max = crate::grid_tensor::two_tensor_solver::DEFAULT_V_MAX;
+            let (v_min, v_max) = refinement_strategy.multiplier_bounds();
 
             let is_stage1 = state.is_stage1_positive_only();
             let (v_b_l, delta_d_l, v_b_r, delta_d_r) = if is_stage1 {
@@ -94,7 +149,8 @@ fn reduce_apply_transformation<'a>(
 
             state =
                 reduce_grid_split_two_tensor(state, v_b_l, delta_d_l, v_b_r, delta_d_r, col, idx);
-            let affected_ranges = state.get_affected_ranges(col, original_affected_interval);
+            let affected_ranges = (!fused_binned_curvature)
+                .then(|| state.get_affected_ranges(col, original_affected_interval));
 
             // Compute new axis factors after split using the *clamped* child parameters stored in state.
             let b_l = state.backbone_values[col][insert_at];
@@ -123,8 +179,9 @@ fn reduce_apply_transformation<'a>(
                 state,
                 col,
                 &original_affected_interval,
-                &affected_ranges,
+                affected_ranges.as_deref(),
                 refinement_strategy,
+                candidate_refresh,
             );
 
             state = reduce_forbid_around_split(state, &split_candidate, split_strategy);
@@ -152,7 +209,8 @@ fn reduce_apply_transformation<'a>(
                 b_merged_optimal,
                 d_merged_optimal,
             );
-            let affected_ranges = state.get_affected_ranges(col, original_affected_interval);
+            let affected_ranges = (!fused_binned_curvature)
+                .then(|| state.get_affected_ranges(col, original_affected_interval));
 
             let b_merged = state.backbone_values[col][interval_idx];
             let d_merged = state.tilt_values[col][interval_idx];
@@ -173,8 +231,9 @@ fn reduce_apply_transformation<'a>(
                 state,
                 col,
                 &original_affected_interval,
-                &affected_ranges,
+                affected_ranges.as_deref(),
                 refinement_strategy,
+                candidate_refresh,
             );
 
             state.current_error = refinement_strategy.weighted_squared_error(&state.residuals);
@@ -194,8 +253,7 @@ fn reduce_apply_transformation<'a>(
             // Convert two-tensor updates to (v_b, delta_d) for each side
             let (u_plus_l, u_minus_l) = resplit_candidate.update_left;
             let (u_plus_r, u_minus_r) = resplit_candidate.update_right;
-            let v_min = crate::grid_tensor::two_tensor_solver::DEFAULT_V_MIN;
-            let v_max = crate::grid_tensor::two_tensor_solver::DEFAULT_V_MAX;
+            let (v_min, v_max) = refinement_strategy.multiplier_bounds();
 
             let is_stage1 = state.is_stage1_positive_only();
             let (v_b_l, delta_d_l, v_b_r, delta_d_r) = if is_stage1 {
@@ -240,7 +298,8 @@ fn reduce_apply_transformation<'a>(
                 col,
                 interval_idx,
             );
-            let affected_ranges = state.get_affected_ranges(col, original_affected_interval);
+            let affected_ranges = (!fused_binned_curvature)
+                .then(|| state.get_affected_ranges(col, original_affected_interval));
 
             // Compute new factors (after param update) for both intervals using stored (clamped) params.
             let b_left_new = state.backbone_values[col][interval_idx];
@@ -271,8 +330,9 @@ fn reduce_apply_transformation<'a>(
                 state,
                 col,
                 &original_affected_interval,
-                &affected_ranges,
+                affected_ranges.as_deref(),
                 refinement_strategy,
+                candidate_refresh,
             );
 
             state.current_error = refinement_strategy.weighted_squared_error(&state.residuals);
@@ -282,12 +342,8 @@ fn reduce_apply_transformation<'a>(
         _ => unreachable!(),
     };
 
-    // Last step: apply logging reducer for transformation event
-    // Reducer pattern: logging is integrated as last step
-    // Takes ownership of logging_state, returns updated state (no cloning)
-    // Feature flag is encapsulated inside the reducer
     #[cfg(feature = "evo-logging")]
-    {
+    if let Some((action_for_logging, old_error)) = logging_event {
         let split_event = create_simple_split_event(&state, &action_for_logging, old_error);
         state.logging_state = log_split_reducer(state.logging_state.take(), split_event);
     }
@@ -309,9 +365,6 @@ fn reduce_grid_split_two_tensor(
 
     // Insert new boundary at the correct position
     state.boundaries[col].insert(insert_at, index);
-    for &row in &state.precomputed_statistics.sorted_indices[col][index..] {
-        state.interval_id[col][row] += 1;
-    }
 
     // Parent parameters
     let b_p = state.backbone_values[col][insert_at];
@@ -384,13 +437,14 @@ fn reduce_grid_split_two_tensor(
     state.precomputed_statistics.error_reductions_resplit_pairs[col]
         .insert(insert_at, (f64::NAN, f64::NAN));
     state.precomputed_statistics.error_reductions_merge[col].insert(insert_at, f64::NAN);
-    state.precomputed_statistics.update_pairs_merge[col]
-        .insert(insert_at, (f64::NAN, f64::NAN));
+    state.precomputed_statistics.update_pairs_merge[col].insert(insert_at, (f64::NAN, f64::NAN));
 
     // Split interval stats: insert placeholder for the new right interval
     // (actual values will be computed in update_statistics)
-    state.precomputed_statistics.interval_stats[col]
-        .insert(insert_at + 1, crate::grid_tensor::state::IntervalStats::default());
+    state.precomputed_statistics.interval_stats[col].insert(
+        insert_at + 1,
+        crate::grid_tensor::state::IntervalStats::default(),
+    );
 
     state
 }
@@ -414,31 +468,17 @@ fn reduce_grid_predictions_and_residuals_two_tensor_factors<'a>(
 ) -> FittingState<'a> {
     let &(start, end) = original_affected_interval;
 
-    let left_grid_points = &state.precomputed_statistics.sorted_indices[col][start..index];
-    let right_grid_points = &state.precomputed_statistics.sorted_indices[col][index..end];
-
     let ratio_plus_left = g_plus_new_l / g_plus_old;
     let ratio_minus_left = g_minus_new_l / g_minus_old;
     let ratio_plus_right = g_plus_new_r / g_plus_old;
     let ratio_minus_right = g_minus_new_r / g_minus_old;
 
-    for &i in left_grid_points {
-        state.f_plus[i] *= ratio_plus_left;
-        state.f_minus[i] *= ratio_minus_left;
-        state.f[i] = state.f_plus[i] - state.f_minus[i];
-        state.y_hat[i] = state.f[i];
-        state.residuals[i] = state.labels[i] - state.y_hat[i];
-        state.r_tilde[i] = state.residuals[i];
-    }
-
-    for &i in right_grid_points {
-        state.f_plus[i] *= ratio_plus_right;
-        state.f_minus[i] *= ratio_minus_right;
-        state.f[i] = state.f_plus[i] - state.f_minus[i];
-        state.y_hat[i] = state.f[i];
-        state.residuals[i] = state.labels[i] - state.y_hat[i];
-        state.r_tilde[i] = state.residuals[i];
-    }
+    update_prediction_caches(&mut state, col, start, index, |_, plus, minus| {
+        (plus * ratio_plus_left, minus * ratio_minus_left)
+    });
+    update_prediction_caches(&mut state, col, index, end, |_, plus, minus| {
+        (plus * ratio_plus_right, minus * ratio_minus_right)
+    });
 
     state
 }
@@ -460,31 +500,17 @@ fn reduce_grid_predictions_and_residuals_resplit_two_tensor_factors<'a>(
 ) -> FittingState<'a> {
     let &(start, end) = original_affected_interval;
 
-    let left_grid_points = &state.precomputed_statistics.sorted_indices[col][start..index];
-    let right_grid_points = &state.precomputed_statistics.sorted_indices[col][index..end];
-
     let ratio_plus_left = g_plus_new_l / g_plus_old_l;
     let ratio_minus_left = g_minus_new_l / g_minus_old_l;
     let ratio_plus_right = g_plus_new_r / g_plus_old_r;
     let ratio_minus_right = g_minus_new_r / g_minus_old_r;
 
-    for &i in left_grid_points {
-        state.f_plus[i] *= ratio_plus_left;
-        state.f_minus[i] *= ratio_minus_left;
-        state.f[i] = state.f_plus[i] - state.f_minus[i];
-        state.y_hat[i] = state.f[i];
-        state.residuals[i] = state.labels[i] - state.y_hat[i];
-        state.r_tilde[i] = state.residuals[i];
-    }
-
-    for &i in right_grid_points {
-        state.f_plus[i] *= ratio_plus_right;
-        state.f_minus[i] *= ratio_minus_right;
-        state.f[i] = state.f_plus[i] - state.f_minus[i];
-        state.y_hat[i] = state.f[i];
-        state.residuals[i] = state.labels[i] - state.y_hat[i];
-        state.r_tilde[i] = state.residuals[i];
-    }
+    update_prediction_caches(&mut state, col, start, index, |_, plus, minus| {
+        (plus * ratio_plus_left, minus * ratio_minus_left)
+    });
+    update_prediction_caches(&mut state, col, index, end, |_, plus, minus| {
+        (plus * ratio_plus_right, minus * ratio_minus_right)
+    });
 
     state
 }
@@ -550,12 +576,6 @@ fn reduce_grid_merge_optimal<'a>(
     b_merged_optimal: f64,
     d_merged_optimal: f64,
 ) -> FittingState<'a> {
-    let index = state.boundaries[col][interval_idx];
-    for &row in &state.precomputed_statistics.sorted_indices[col][index..] {
-        debug_assert!(state.interval_id[col][row] > 0);
-        state.interval_id[col][row] -= 1;
-    }
-
     // Remove the boundary inserted by the split
     state.boundaries[col].remove(interval_idx);
 
@@ -595,16 +615,67 @@ fn reduce_grid_predictions_and_residuals_merge_from_partial_products<'a>(
     g_minus_new: f64,
 ) -> FittingState<'a> {
     let &(start, end) = original_affected_interval;
-    for &row in &state.precomputed_statistics.sorted_indices[col][start..end] {
-        state.f_plus[row] = partial_plus[row] * g_plus_new;
-        state.f_minus[row] = partial_minus[row] * g_minus_new;
-        state.f[row] = state.f_plus[row] - state.f_minus[row];
-        state.y_hat[row] = state.f[row];
-        state.residuals[row] = state.labels[row] - state.y_hat[row];
-        state.r_tilde[row] = state.residuals[row];
-    }
+    update_prediction_caches(&mut state, col, start, end, |row, _, _| {
+        (
+            partial_plus[row] * g_plus_new,
+            partial_minus[row] * g_minus_new,
+        )
+    });
 
     state
+}
+
+/// Scatter branch predictions and their dependent caches in sorted-row order.
+fn update_prediction_caches(
+    state: &mut FittingState<'_>,
+    col: usize,
+    start: usize,
+    end: usize,
+    update_branches: impl Fn(usize, f64, f64) -> (f64, f64),
+) {
+    let rows = &state.precomputed_statistics.sorted_indices[col][start..end];
+    if let (
+        Some(f_plus),
+        Some(f_minus),
+        Some(f),
+        Some(y_hat),
+        Some(residuals),
+        Some(r_tilde),
+        Some(labels),
+    ) = (
+        state.f_plus.as_slice_mut(),
+        state.f_minus.as_slice_mut(),
+        state.f.as_slice_mut(),
+        state.y_hat.as_slice_mut(),
+        state.residuals.as_slice_mut(),
+        state.r_tilde.as_slice_mut(),
+        state.labels.as_slice(),
+    ) {
+        for &row in rows {
+            let (plus, minus) = update_branches(row, f_plus[row], f_minus[row]);
+            let prediction = plus - minus;
+            let residual = labels[row] - prediction;
+            f_plus[row] = plus;
+            f_minus[row] = minus;
+            f[row] = prediction;
+            y_hat[row] = prediction;
+            residuals[row] = residual;
+            r_tilde[row] = residual;
+        }
+    } else {
+        // Views and externally supplied state arrays may have non-unit strides.
+        for &row in rows {
+            let (plus, minus) = update_branches(row, state.f_plus[row], state.f_minus[row]);
+            let prediction = plus - minus;
+            let residual = state.labels[row] - prediction;
+            state.f_plus[row] = plus;
+            state.f_minus[row] = minus;
+            state.f[row] = prediction;
+            state.y_hat[row] = prediction;
+            state.residuals[row] = residual;
+            state.r_tilde[row] = residual;
+        }
+    }
 }
 
 /// Forbid splits around the given position (ported from SplitStrategy::forbid_around_split)
@@ -621,10 +692,15 @@ fn reduce_grid_statistics_and_refresh_caches<'a>(
     mut state: FittingState<'a>,
     col: usize,
     original_affected_interval: &(usize, usize),
-    affected_ranges: &[AffectedRange],
+    affected_ranges: Option<&[AffectedRange]>,
     refinement: &RefinementStrategy,
+    candidate_refresh: CandidateRefresh,
 ) -> FittingState<'a> {
     let &(start, end) = original_affected_interval;
+    let Some(affected_ranges) = affected_ranges else {
+        assert_eq!(candidate_refresh, CandidateRefresh::Deferred);
+        return refinement.update_binned_curvature_statistics(state, col, start, end);
+    };
     // Convert AffectedRange to point ranges for update_statistics
     // update_statistics expects a Vec indexed by column number, so we need to build
     // a full vector with empty ranges (1, 0) for unaffected columns
@@ -632,8 +708,20 @@ fn reduce_grid_statistics_and_refresh_caches<'a>(
     for affected_range in affected_ranges {
         affected_points_range[affected_range.col] = affected_range.point_range;
     }
-    state = refinement.update_statistics(state, col, start, end, &affected_points_range);
-    state = refinement.refresh_error_reduction_caches_for_affected(state, affected_ranges);
+    state = if candidate_refresh == CandidateRefresh::Deferred
+        && matches!(refinement, RefinementStrategy::L2Refinement { .. })
+        && state
+            .branch_consensus
+            .as_ref()
+            .is_some_and(|reference| reference.anchors.is_none())
+    {
+        refinement.update_curvature_statistics(state, col, start, end, &affected_points_range)
+    } else {
+        refinement.update_statistics(state, col, start, end, &affected_points_range)
+    };
+    if candidate_refresh == CandidateRefresh::Eager {
+        state = refinement.refresh_error_reduction_caches_for_affected(state, affected_ranges);
+    }
     state
 }
 
@@ -709,7 +797,8 @@ fn reduce_apply_scaling(mut state: FittingState<'_>, factor: f64) -> FittingStat
 /// Compute partial products g_{\pm}^{(-j)} for all points by dividing out axis j factor.
 ///
 /// Uses the efficient approach: g_{+,i}^{(-j)} = f_{+,i} / a_{+,j}^{k_j(i)}
-/// where a_{+,j}^{k_j(i)} = b_{j,i} * exp(d_{j,i})
+/// where a_{+,j}^{k_j(i)} = b_{j,i} * exp(d_{j,i}) and k_j(i) is the number of boundaries
+/// at or below the row's rank on axis j.
 ///
 /// # Arguments
 /// * `col` - The axis index j
@@ -726,9 +815,11 @@ pub(crate) fn compute_partial_products_for_axis(
     let n = state.n;
     let mut g_plus = Vec::with_capacity(n);
     let mut g_minus = Vec::with_capacity(n);
+    let boundaries = &state.boundaries[col];
+    let ranks = &state.precomputed_statistics.sort_order[col];
 
     for i in 0..n {
-        let interval_idx = state.interval_id[col][i];
+        let interval_idx = boundaries.partition_point(|&b| b <= ranks[i]);
 
         let b_j = state.backbone_values[col][interval_idx];
         let d_j = state.tilt_values[col][interval_idx];

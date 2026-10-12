@@ -2,6 +2,7 @@
 use crate::grid_tensor::logging_helpers::LoggingState;
 use crate::grid_tensor::splitting::SplitStrategyState;
 use ndarray::{Array1, ArrayView1, ArrayView2};
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct FittingState<'a> {
@@ -20,9 +21,6 @@ pub struct FittingState<'a> {
     pub f_minus: Array1<f64>, // f_-(x_i) for each point i
     pub f: Array1<f64>,       // f(x_i) = f_plus[i] - f_minus[i]
     pub r_tilde: Array1<f64>, // within-stage residual: R_i - f(x_i)
-
-    // Interval tracking
-    pub interval_id: Vec<Vec<usize>>, // interval_id[j][i] = k_j(i), current interval index per axis per point
 
     // Predictions and residuals (outer residuals for forest-level)
     pub y_hat: Array1<f64>,
@@ -50,6 +48,16 @@ pub struct FittingState<'a> {
 
     pub terminated: bool,
 
+    /// Proximal pull of each branch toward reference branch functions.
+    pub branch_consensus: Option<BranchConsensus>,
+
+    /// Consensus Random proposals evaluate split scores at their sampled positions.
+    pub(crate) sampled_split_scoring: bool,
+    /// Some split scores require evaluation against the current prefix statistics.
+    pub(crate) split_scores_stale: bool,
+    /// Linear row/prefix statistics require a full rebuild before another action.
+    pub(crate) linear_statistics_stale: bool,
+
     // Logging state (optional: only when logging enabled)
     // Note: LoggingState is not Clone (contains Sender), so FittingState is not Clone
     #[cfg(feature = "evo-logging")]
@@ -70,7 +78,6 @@ impl<'a> Clone for FittingState<'a> {
             f_minus: self.f_minus.clone(),
             f: self.f.clone(),
             r_tilde: self.r_tilde.clone(),
-            interval_id: self.interval_id.clone(),
             y_hat: self.y_hat.clone(),
             residuals: self.residuals.clone(),
             current_error: self.current_error,
@@ -83,10 +90,23 @@ impl<'a> Clone for FittingState<'a> {
             split_strategy_state: self.split_strategy_state.clone(),
             iteration: self.iteration,
             terminated: self.terminated,
+            branch_consensus: self.branch_consensus.clone(),
+            sampled_split_scoring: self.sampled_split_scoring,
+            split_scores_stale: self.split_scores_stale,
+            linear_statistics_stale: self.linear_statistics_stale,
             #[cfg(feature = "evo-logging")]
             logging_state: None, // Can't clone LoggingState (contains Sender)
         }
     }
+}
+
+/// A zero-filled contiguous array whose data begins `slot` KiB into its allocation.
+///
+/// Row caches built with distinct slots keep one row's elements in distinct L1 sets
+/// when their allocations share a page alignment; the padding is never read.
+pub(crate) fn staggered_zeros(n: usize, slot: usize) -> Array1<f64> {
+    let pad = slot * 128;
+    Array1::zeros(n + pad).slice_move(ndarray::s![pad..])
 }
 
 impl<'a> FittingState<'a> {
@@ -101,9 +121,6 @@ impl<'a> FittingState<'a> {
         let backbone_values = vec![vec![1.0]; p];
         let tilt_values = vec![vec![0.0]; p];
 
-        // All points start in interval 0 on every axis.
-        let interval_id = vec![vec![0; n]; p];
-
         // Initialize lambdas from residuals (will be properly initialized in refinement::initialize)
         // For now, set to small positive values
         const EPS_LAMBDA: f64 = 1e-10;
@@ -112,18 +129,32 @@ impl<'a> FittingState<'a> {
 
         // Initialize per-point caches
         // Initially f_plus = lambda_plus, f_minus = lambda_minus (since all b=1, d=0)
-        let f_plus = Array1::from_elem(n, lambda_plus);
-        let f_minus = Array1::from_elem(n, lambda_minus);
-        let f = &f_plus - &f_minus;
+        // Each cache starts a different number of KiB into its own allocation, so one
+        // row's caches occupy distinct L1 sets even when the allocations are page-aligned.
+        let mut f_plus = staggered_zeros(n, 1);
+        f_plus.fill(lambda_plus);
+        let mut f_minus = staggered_zeros(n, 2);
+        f_minus.fill(lambda_minus);
+        let mut f = staggered_zeros(n, 3);
+        ndarray::Zip::from(&mut f)
+            .and(&f_plus)
+            .and(&f_minus)
+            .for_each(|f, &plus, &minus| *f = plus - minus);
 
         // Initially y_hat = f (stage prediction)
-        let y_hat = f.clone();
-        let residuals = (y.to_owned() - y_hat.view()).to_owned();
+        let mut y_hat = staggered_zeros(n, 4);
+        y_hat.assign(&f);
+        let mut residuals = staggered_zeros(n, 5);
+        ndarray::Zip::from(&mut residuals)
+            .and(&y)
+            .and(&y_hat)
+            .for_each(|residual, &label, &prediction| *residual = label - prediction);
         let current_error = residuals.iter().map(|r| r * r).sum();
 
         // Initially r_tilde = R (within-stage residual equals outer residual when f=0)
         // But since we initialized f, we need to compute r_tilde = R - f
-        let r_tilde = residuals.clone();
+        let mut r_tilde = staggered_zeros(n, 6);
+        r_tilde.assign(&residuals);
 
         Self {
             x,
@@ -138,7 +169,6 @@ impl<'a> FittingState<'a> {
             f_minus,
             f,
             r_tilde,
-            interval_id,
             y_hat,
             residuals,
             current_error,
@@ -149,9 +179,59 @@ impl<'a> FittingState<'a> {
             split_strategy_state,
             iteration: 0,
             terminated: false,
+            branch_consensus: None,
+            sampled_split_scoring: false,
+            split_scores_stale: false,
+            linear_statistics_stale: false,
             #[cfg(feature = "evo-logging")]
             logging_state: None,
         }
+    }
+
+    /// Per-row sufficient statistics of the penalized local objective.
+    ///
+    /// With branch consensus `ρ, c₊, c₋`, the objective adds
+    /// `ρ (f₊ − c₊)² + ρ (f₋ − c₋)²` per row, which contributes to `s11`, `s22`, `t1` and `t2`.
+    #[inline]
+    pub(crate) fn point_statistics(&self, row: usize, weight: f64) -> PrefixStats {
+        self.point_statistics_impl::<true>(row, weight)
+    }
+
+    #[inline]
+    pub(crate) fn point_curvature_statistics(&self, row: usize, weight: f64) -> PrefixStats {
+        self.point_statistics_impl::<false>(row, weight)
+    }
+
+    #[inline]
+    fn point_statistics_impl<const LINEAR: bool>(&self, row: usize, weight: f64) -> PrefixStats {
+        let (fp, fm, rt) = (self.f_plus[row], self.f_minus[row], self.r_tilde[row]);
+        let mut stats = PrefixStats {
+            s11: weight * fp * fp,
+            s22: weight * fm * fm,
+            s12: weight * fp * fm,
+            t1: if LINEAR { weight * rt * fp } else { 0.0 },
+            t2: if LINEAR { weight * rt * fm } else { 0.0 },
+        };
+        if let Some((rho, target_plus, target_minus)) = self
+            .branch_consensus
+            .as_ref()
+            .and_then(|consensus| consensus.target(row))
+        {
+            stats.s11 += rho * fp * fp;
+            stats.s22 += rho * fm * fm;
+            if LINEAR {
+                stats.t1 += rho * (target_plus - fp) * fp;
+                stats.t2 += rho * (fm - target_minus) * fm;
+            }
+        }
+        stats
+    }
+
+    pub(crate) fn require_current_statistics(&self) {
+        assert!(
+            !self.linear_statistics_stale,
+            "linear statistics require a full refresh"
+        );
     }
 
     /// Check if we're in Stage 1 positive-only mode
@@ -166,6 +246,13 @@ impl<'a> FittingState<'a> {
         self.tilt_values
             .iter()
             .all(|d_vec| d_vec.iter().all(|&d| d.abs() < EPS))
+    }
+
+    /// Index of the interval on `col` that holds `row`: the number of boundaries at or
+    /// below the row's rank, since an interval begins at its boundary rank.
+    pub fn interval_index(&self, col: usize, row: usize) -> usize {
+        let rank = self.precomputed_statistics.sort_order[col][row];
+        self.boundaries[col].partition_point(|&b| b <= rank)
     }
 
     pub fn interval_range(&self, col: usize, interval_idx: usize) -> (usize, usize) {
@@ -370,6 +457,72 @@ impl<'a> FittingState<'a> {
     }
 }
 
+/// Fixed training rows on which branch consensus is evaluated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsensusAnchors {
+    pub rows: Vec<usize>,
+    pub row_to_anchor: Vec<usize>,
+}
+
+impl ConsensusAnchors {
+    pub fn new(n: usize, rows: Vec<usize>) -> Self {
+        assert!(!rows.is_empty(), "consensus anchors must not be empty");
+        assert!(
+            rows.windows(2).all(|pair| pair[0] < pair[1]),
+            "anchor rows must be sorted and unique"
+        );
+        assert!(
+            rows.last().is_some_and(|&row| row < n),
+            "anchor row is outside the training data"
+        );
+        let mut row_to_anchor = vec![usize::MAX; n];
+        for (index, &row) in rows.iter().enumerate() {
+            row_to_anchor[row] = index;
+        }
+        Self {
+            rows,
+            row_to_anchor,
+        }
+    }
+}
+
+pub(crate) fn same_consensus_support(
+    left: &Option<Arc<ConsensusAnchors>>,
+    right: &Option<Arc<ConsensusAnchors>>,
+) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+        _ => false,
+    }
+}
+
+/// Reference branches and their per-row penalty weight.
+/// Anchored references have one entry per anchor and weight `ρ n / m`.
+#[derive(Debug, Clone)]
+pub struct BranchConsensus {
+    pub weight: f64,
+    pub plus: Array1<f64>,
+    pub minus: Array1<f64>,
+    pub anchors: Option<Arc<ConsensusAnchors>>,
+}
+
+impl BranchConsensus {
+    pub fn target(&self, row: usize) -> Option<(f64, f64, f64)> {
+        let index = match &self.anchors {
+            Some(anchors) => {
+                let index = anchors.row_to_anchor[row];
+                if index == usize::MAX {
+                    return None;
+                }
+                index
+            }
+            None => row,
+        };
+        Some((self.weight, self.plus[index], self.minus[index]))
+    }
+}
+
 /// Per-interval aggregate statistics for O(1) resplit/merge lookups
 #[derive(Debug, Clone, Copy, Default)]
 pub struct IntervalStats {
@@ -466,21 +619,28 @@ impl std::ops::AddAssign for PrefixStats {
     }
 }
 
+/// Entry budget for the rank-ordered bin streams (32 MiB of `u16`).
+pub const MAX_RANK_STREAM_ENTRIES: usize = 1 << 24;
+
+/// One row's curvature contributions, `s11 = wᵢ f₊²`, `s22 = wᵢ f₋²` and `s12 = wᵢ f₊ f₋`,
+/// with the consensus weight folded into `s11` and `s22`; stored together so a row's
+/// cache is one cache line.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct CurvatureCache {
+    pub s11: f64,
+    pub s22: f64,
+    pub s12: f64,
+}
+
 /// Working buffers containing pre-computed performance caches
 #[derive(Debug, Clone)]
 pub struct PrecomputedStatistics {
     /// Prefix sums of (s11, s22, s12, t1, t2) by sorted position [col][pos].
     /// Empty for binned columns (`binned_prefix_sums[col]` used instead).
     pub prefix_sums: Vec<Vec<PrefixStats>>,
-    /// Per-point S11 contributions: c_s11[i] = w_i * f_plus[i]²
-    /// Stored once (not per-column) since these are point-specific
-    pub c_s11: Vec<f64>,
-    /// Per-point S22 contributions: c_s22[i] = w_i * f_minus[i]²
-    /// Stored once (not per-column) since these are point-specific
-    pub c_s22: Vec<f64>,
-    /// Per-point S12 contributions: c_s12[i] = w_i * f_plus[i] * f_minus[i]
-    /// Stored once (not per-column) since these are point-specific
-    pub c_s12: Vec<f64>,
+    /// Per-point curvature contributions, stored once since they are point-specific.
+    pub curvature: Vec<CurvatureCache>,
     /// Per-point t1 contributions: c_t1[i] = w_i * r_tilde[i] * f_plus[i]
     /// Stored once (not per-column) since these are point-specific
     pub c_t1: Vec<f64>,
@@ -519,6 +679,17 @@ pub struct PrecomputedStatistics {
     /// "no binning for this column — iterate all positions as candidates".
     pub bin_edges: BinEdges,
 
+    /// Immutable row-to-bin mappings shared by cloned grid fitting states.
+    /// Exact and constant columns have empty mappings.
+    pub bin_indices: Vec<std::sync::Arc<[u16]>>,
+    /// Every feature's bin mapping in each column's sorted-row order,
+    /// `bin_ranks[col][feature * n + rank]`, so an action's affected ranks read each
+    /// feature's bins as one contiguous stream. Empty unless every column is binned and
+    /// the `p * p * n` entries fit [`MAX_RANK_STREAM_ENTRIES`].
+    pub bin_ranks: Vec<std::sync::Arc<[u16]>>,
+    /// Reusable per-action curvature deltas in affected-row order; empty between actions.
+    pub curvature_deltas: Vec<[f64; 3]>,
+
     /// Bin-cumulative prefix sums (length B = bin_edges[col].len() + 1) used in
     /// the binned path. `binned_prefix_sums[col][k]` equals the cumulative
     /// stats sum for all sorted positions in bins `0..=k`. Empty when
@@ -526,15 +697,17 @@ pub struct PrecomputedStatistics {
     pub binned_prefix_sums: Vec<Vec<PrefixStats>>,
 
     pub initialized: bool,
+    /// Branch-consensus weight folded into the stored `s11`/`s22` statistics.
+    pub consensus_weight: f64,
+    /// Anchor support folded into the stored curvature statistics.
+    pub consensus_anchors: Option<Arc<ConsensusAnchors>>,
 }
 
 impl PrecomputedStatistics {
     pub fn new(n: usize, p: usize) -> Self {
         Self {
             prefix_sums: vec![vec![]; p],
-            c_s11: vec![0.0; n],
-            c_s22: vec![0.0; n],
-            c_s12: vec![0.0; n],
+            curvature: vec![CurvatureCache::default(); n],
             c_t1: vec![0.0; n],
             c_t2: vec![0.0; n],
             // Each column starts with one interval covering all points
@@ -552,8 +725,13 @@ impl PrecomputedStatistics {
             sorted_indices: vec![vec![]; p],
             sort_order: vec![vec![0; n]; p],
             bin_edges: vec![vec![]; p],
+            bin_indices: vec![std::sync::Arc::from([]); p],
+            bin_ranks: Vec::new(),
+            curvature_deltas: Vec::new(),
             binned_prefix_sums: vec![vec![]; p],
             initialized: false,
+            consensus_weight: 0.0,
+            consensus_anchors: None,
         }
     }
 }

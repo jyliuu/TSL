@@ -817,10 +817,16 @@ impl TSLPy {
         top_k=10,
         must_fill_all_k=true,
         similarity_threshold=0.0,
+        consensus=0.0,
         bagged=false,
         seed=42,
         verbosity=1,
-        visualdb=None
+        visualdb=None,
+        *,
+        max_bins=None,
+        consensus_interval=1,
+        nonnegative_scaling=false,
+        consensus_anchors=None
     ))]
     #[allow(clippy::too_many_arguments)]
     pub fn _fit<'py>(
@@ -846,11 +852,36 @@ impl TSLPy {
         top_k: usize,
         must_fill_all_k: bool,
         similarity_threshold: f64,
+        consensus: f64,
         bagged: bool,
         seed: u64,
         verbosity: u8,
         visualdb: Option<String>,
+        max_bins: Option<u16>,
+        consensus_interval: usize,
+        nonnegative_scaling: bool,
+        consensus_anchors: Option<usize>,
     ) -> PyResult<(TSLPy, FitResultPy)> {
+        if !(consensus.is_finite() && consensus >= 0.0) {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "consensus must be finite and nonnegative, got {consensus}"
+            )));
+        }
+        if max_bins.is_some_and(|bins| bins < 2) {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "max_bins must be at least 2",
+            ));
+        }
+        if consensus_interval == 0 {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "consensus_interval must be at least 1",
+            ));
+        }
+        if consensus_anchors == Some(0) {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "consensus_anchors must be positive",
+            ));
+        }
         let x = x.as_array();
         let y = y.as_array();
         let x_contiguous = x.as_standard_layout();
@@ -918,6 +949,11 @@ impl TSLPy {
             .split_strategy(split_strategy_params)
             .refinement_strategy(refinement_strategy_params)
             .similarity_threshold(similarity_threshold)
+            .consensus(consensus)
+            .consensus_interval(consensus_interval)
+            .nonnegative_scaling(nonnegative_scaling)
+            .consensus_anchors(consensus_anchors)
+            .max_bins(max_bins)
             .seed(seed)
             .log_level(match verbosity {
                 0 => "off",

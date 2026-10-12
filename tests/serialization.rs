@@ -11,6 +11,28 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn json_preserves_split_boundaries_and_predictions_bitwise() {
+        use ndarray::Array2;
+        use tsl::grid_tensor::GridTensor;
+
+        for cut in [0.9619511996472115_f64, 0.11351420094652015, 24.217381236226846] {
+            let grid = GridTensor::new_two_tensor(
+                vec![vec![cut]], vec![vec![1, 2]],
+                vec![vec![(f64::NEG_INFINITY, cut), (cut, f64::INFINITY)]],
+                vec![vec![0.3, 1.234]], vec![vec![-0.2, 0.7]], 2.0, 0.1,
+            );
+            let points = Array2::from_shape_vec((3, 1), vec![
+                f64::from_bits(cut.to_bits()-1), cut, f64::from_bits(cut.to_bits()+1),
+            ]).unwrap();
+            let restored: GridTensor = serde_json::from_slice(&serde_json::to_vec(&grid).unwrap()).unwrap();
+            assert_eq!(bincode::serialize(&grid).unwrap(), bincode::serialize(&restored).unwrap());
+            let expected = grid.predict(points.view());
+            assert_ne!(expected[0], expected[1]);
+            assert_eq!(expected, restored.predict(points.view()));
+        }
+    }
+
+    #[test]
     fn test_tsl_save_and_load() {
         // Setup data
         let (x, y) = setup_data_csv("./data/2covars.csv");

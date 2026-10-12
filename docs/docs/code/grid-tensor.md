@@ -27,6 +27,11 @@ $\hat{m}_+ - \hat{m}_- = \lambda_+\prod_j b_j e^{d_j} - \lambda_-\prod_j b_j e^{
 | `new_two_tensor(...)` | construct from the two-tensor fields (sets `scaling = 1.0`) |
 | `predict_single_unscaled(x)` / `predict_unscaled(X)` | **unscaled** $\tilde{m}_+ - \tilde{m}_-$ (one point / batch) |
 | `predict_single_backbone_and_tilt(x)` / `predict_backbone_and_tilt(X)` | decompose into $(\prod_j b_j,\ \sum_j d_j)$ |
+| `coalesce_equal_bins()` | merge adjacent bins with bitwise-equal backbone and tilt values, summing their observation counts |
+
+Batch prediction caches the two branch factors per bin when there are enough input
+values to amortize their construction. Multiplication follows feature order, preserving
+the scalar prediction calculation.
 
 !!! warning "Use the unscaled path"
     `predict_unscaled` returns $\tilde{m}_+ - \tilde{m}_-$ **without** $\lambda$ scaling beyond what is
@@ -38,9 +43,10 @@ $\hat{m}_+ - \hat{m}_- = \lambda_+\prod_j b_j e^{d_j} - \lambda_-\prod_j b_j e^{
 `grid_tensor::fit` (`src/grid_tensor/fit.rs`) iterates the action/reducer pattern:
 
 1. build a `FittingState` from `(x, y)`;
-2. initialize the `RefinementStrategy` (precomputes all candidate scores) and the
-   `SplitStrategy` (builds allowed intervals);
-3. optionally apply the histogram-binning mask (`max_bins`);
+2. initialize the `RefinementStrategy` row statistics and prefix sums, then apply the
+   optional histogram-binning mask (`max_bins`);
+3. score the retained candidate positions and initialize the `SplitStrategy`
+   allowed intervals;
 4. score eligible split, resplit, and merge actions under one fixed-scale cost-complexity
    objective, then apply the highest positive-gain action through the **reducer**;
 5. at the `n_iter` fineness budget, exclude new splits while leaving resplits and merges
@@ -71,6 +77,8 @@ enabling $O(1)$ split-candidate scoring. Holds an optional `LoggingState`.
 A `SplitCandidate` carries the column, position, parameter-regularized gain, and the
 left/right $(u_+, u_-)$ updates. A `MergeCandidate` identifies the removed boundary and its
 parameter-regularized gain; the absolute merged factors live in the aligned precomputed cache.
+A `ResplitCandidate` refits the factors in the two intervals adjacent to an existing
+boundary, keeping its position fixed.
 `SplitStrategyState` tracks valid positions and the fixed boundary cost. After a split at
 position `idx`, the neighborhood is forbidden from further splitting.
 
@@ -78,9 +86,62 @@ position `idx`, the neighborhood is forbidden from further splitting.
 
 `fitting_reducer` matches on the action and applies it: it inserts the split into the grid,
 updates backbone/tilt on the two new sub-intervals, recomputes the affected per-point caches
-and the prefix-sum/interval statistics, and (under `evo-logging`) emits log events. For a
-merge, it removes one boundary, stores the candidate's absolute factors, and assigns the
-affected branch predictions directly from the other-axis partial products.
+and the prefix-sum/interval statistics. With `evo-logging` and an active logging state,
+it constructs and emits transformation events. For a merge, it removes one boundary, stores the candidate's absolute factors, and assigns the
+affected branch predictions directly from the other-axis partial products. Prediction
+updates scatter through contiguous cache slices when available; strided arrays use
+indexed access. Each row retains the same branch, prediction and residual arithmetic.
+
+Initialization scores all retained split positions eagerly. Ordinary fitting also
+refreshes affected candidate scores after each action. For two-branch `Random` consensus
+proposals following a global reference refresh, the split evaluator computes gains and
+updates only at the sampled positions. The existing sampling order, eligibility masks,
+and action comparison apply; interval statistics and resplit/merge scores are current.
+Positive-only states and other split strategies use eager scoring. This execution policy
+has no public parameter.
+
+Before an intermediate consensus action or a composite action, pending split scores are
+materialized and local refreshes remain eager. Untouched intervals retain their cached
+scores: recomputing them from shifted prefix sums can change floating-point rounding.
+The batch's final action defers interval sums and candidate scores until the next
+round's reference refresh. With L2 and a full-row consensus reference, it updates the
+curvature row and prefix statistics $s_{11},s_{22},s_{12}$ in the same arithmetic order
+and defers the linear statistics $t_1,t_2$. The next full reference refresh reconstructs
+both linear row arrays and their prefixes before rebuilding interval and candidate
+scores. The refresh writes each row directly to its statistic caches. Constant L2
+weights with unchanged consensus support retain the curvature caches; other refreshes
+write all five statistics. Full-row references with contiguous prediction, within-stage residual and
+reference buffers rebuild the two linear fields through slices, preserving each product
+and penalty addition. Strided or incomplete buffers use the indexed row evaluation.
+An internal stale-state marker rejects proposals and incremental updates until
+that reconstruction. Anchored references, Huber fitting and eager updates maintain all
+five statistics. When every feature has a binned cache, the full-row L2 deferred update
+locates touched bins while scattering curvature deltas in affected-row order. It stores
+each row's curvature immediately and retains only the three deltas for the feature
+passes. Nonchanged features share the row/delta traversal in pairs, using separate
+zero-initialized histograms in a reusable buffer. Each feature preserves its row-ordered
+additions and prefix sweep; an unpaired feature and the changed column use individual
+traversals. Each prefix update starts at the first touched bin, includes zero-delta rows in
+its bounds, and preserves the existing cumulative and tail arithmetic. Exact or constant
+columns use the affected-rank scan. Split solves
+are saved when the post-reference proposal leads directly to this deferred final action,
+as in one-action batches; intermediate actions materialize the pending split cache.
+Logging and finalization read the selected action, factors and predictions independently
+of the deferred statistics. Eager/on-demand parity tests compare random-number
+state, action logs, branch values, and serialized models across loss and binning settings.
+
+For anchored consensus, `BranchConsensus` stores a shared row-to-anchor lookup and
+reference values only on the sampled rows. `point_statistics` adds the consensus
+term only at anchors, weighted by $\rho n/m$; its supervised contribution uses every
+row. Merge scoring applies the same anchor weights in its direct objective scan.
+
+`refresh_consensus_reference` can update reference-dependent $t_1,t_2$ contributions
+using the anchors and existing bin prefixes. It retains curvature and data statistics
+when the anchor support and weight are unchanged, every feature has a binned cache,
+and merges are disabled. The reference update then costs $\mathcal O(p(m+K))$ plus
+candidate solves, where $K$ bounds bins per feature. Initialization, changed support
+or weights, exact or constant columns, and merge-enabled fits use a full weighted
+refresh. Ordinary structural actions retain their all-row data updates.
 
 ## The two-tensor solver
 
@@ -104,6 +165,12 @@ $\beta=\tfrac12(\log v_++\log v_-)$ and
 $\delta=\tfrac12(\log v_+-\log v_-)$. The full derivation is in
 [Fitting → the closed-form solver](../math/fitting.md#the-closed-form-2x2-solver).
 
+Numerical rank is determined relative to the system's scale. For a positive-semidefinite
+rank-deficient system, the solver proposes a minimum-norm step in its retained range,
+clamps it to the multiplier bounds, and backtracks against the exact log-penalized
+objective. With a tilt $\ell_1$ penalty, it also considers the signed tilt regions and
+the zero-tilt boundary. A finite positive-gain update is required on this path.
+
 ### Refinement strategies (`refinement.rs`)
 
 `RefinementStrategy` has two variants that differ only in the weights $w_i$:
@@ -115,6 +182,13 @@ Both expose `alpha` (log-backbone $\ell_2$), `tilt_tau` (tilt $\ell_2$), `tilt_r
 $\ell_1$), `prior_sample_size`, and `update_clamp`. `initialize` precomputes the penalized
 gain of every candidate position.
 
+`update_clamp` accepts nonnegative values and positive infinity. With cap $c$,
+branch multipliers lie in $[\max(0.05,e^{-c}),\min(20,e^c)]$; infinity retains the
+numerical bounds. Split and boundary-refit updates use the current factors as
+their reference. Merge updates use the count-weighted geometric reference of
+the neighboring factors. Proposal scoring and action application share these
+bounds; see [Fitting](../math/fitting.md).
+
 ## Identification
 
 `l2_identify` (`src/grid_tensor/identification.rs`) applies the prediction-preserving
@@ -122,18 +196,26 @@ gain of every candidate position.
 axis's backbone to unit weighted $L^2$ (pushing the scale into $\lambda_\pm$) and centers
 each tilt by its weighted mean (pushing the offset into $\lambda_+ \mathrel{*}= e^{\sum c_j}$,
 $\lambda_- \mathrel{*}= e^{-\sum c_j}$). It does **not** flip orientation (which would change
-predictions). The same routine runs before averaging bagged grids
+predictions). The same routine normalizes the combined grid after factor averaging
 ([Bagging & aggregation](../math/bagging-aggregation.md)).
 
 ## Histogram binning
 
 `apply_histogram_binning_mask` (`src/grid_tensor/histogram_binning.rs`) is an optional
-prologue enabled by `max_bins: Some(u16)`. It computes deterministic quantile bin edges per
-feature, forbids non-edge split positions, and replaces per-position prefix sums with
-per-bin cumulative sums. This cuts the per-candidate cost from $O(n)$ to $O(\text{bins})$
-with little accuracy loss on larger datasets. With `max_bins: None` the exact path
-(every position a candidate) is used. Parity between the two paths is tested in
+prologue enabled by `max_bins >= 2`. Quantile targets snap to the nearest boundary between
+distinct values, with lower-rank ties selected deterministically. Features with at most
+`max_bins` distinct values retain every distinct-value boundary. Repeated targets share a
+boundary, so a feature can have fewer candidates than the requested bin count.
+
+The mask excludes other positions before initial candidate scoring and replaces
+per-position prefix sums with per-bin cumulative sums. Each candidate uses constant-time
+prefix lookups; statistic updates traverse retained bin boundaries. With `max_bins: None`
+the exact candidate path is used. Parity between the two paths is tested in
 `tests/histogram_binning.rs`.
+
+Each binned feature stores a `u16` bin index for every training row. Statistic updates
+use this mapping to place row deltas into bin buckets. The immutable mappings are shared
+across cloned fitting states and reused across stages when `PreparedInput` is available.
 
 ## Parameters (`params.rs`)
 

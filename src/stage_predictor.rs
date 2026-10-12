@@ -1,12 +1,15 @@
 use super::grid_tensor::GridTensor;
-pub use fitter::fit_ensemble;
+pub use fitter::{fit_ensemble, fit_grid_bag};
+pub(crate) use fitter::fit_ensemble_with_input;
 use ndarray::{Array1, ArrayView2};
 use serde::{Deserialize, Serialize};
 pub mod params;
 
 mod aggregate_bagged;
 mod combine_grids;
+mod consensus;
 mod fitter;
+pub use aggregate_bagged::aggregate_bagged_two_tensor;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StagePredictor {
@@ -31,7 +34,8 @@ impl Aggregation {
         // Extract UNSCALED f+ and f- predictions from primary_grid_tensor (two-tensor fields)
         // IMPORTANT: Extract directly from two-tensor fields, do NOT use grid.predict()
         // which might apply scaling. We want raw f+ and f- values.
-        let (f_plus, f_minus) = extract_two_tensor_predictions_unscaled(&tgf.primary_grid_tensor, x);
+        let (f_plus, f_minus) =
+            extract_two_tensor_predictions_unscaled(&tgf.primary_grid_tensor, x);
 
         // Apply scalings from OLS solution: scaling_plus * f_+ + scaling_minus * (-f_-)
         // Note: scaling_minus is the coefficient for the -f_- column in the design matrix
@@ -84,38 +88,41 @@ pub fn extract_two_tensor_predictions_unscaled(
     grid: &GridTensor,
     x: ArrayView2<f64>,
 ) -> (Array1<f64>, Array1<f64>) {
-    let n = x.nrows();
-    let mut f_plus = Array1::zeros(n);
-    let mut f_minus = Array1::zeros(n);
-
-    // For each point, compute directly from two-tensor fields:
-    // f_+ = lambda_+ * prod_j (backbone[j][k] * exp(tilt[j][k]))
-    // f_- = lambda_- * prod_j (backbone[j][k] * exp(-tilt[j][k]))
-    //
-    // CRITICAL: Do NOT multiply by grid.scaling!
-    // - grid.scaling is ONLY used in legacy mode (when backbone_values is None)
-    // - For two-tensor mode, GridTensor::predict_single_unscaled() does NOT apply scaling
-    // - We extract f+ and f- using ONLY: lambda_+, lambda_-, backbone_values, tilt_values
-    // - Scaling will be applied LATER via scaling_plus and scaling_minus from OLS solution
-    // - This ensures scaling is applied exactly ONCE (in StagePredictor::predict())
-
-    for i in 0..n {
-        let mut fp = grid.lambda_plus;
-        let mut fm = grid.lambda_minus;
-        for j in 0..x.ncols() {
-            let val = x[[i, j]];
-            let col_idx = grid.splits[j].partition_point(|&split| split <= val);
-            let col_idx = col_idx.min(grid.backbone_values[j].len() - 1);
-            let b = grid.backbone_values[j][col_idx];
-            let d = grid.tilt_values[j][col_idx];
-            fp *= b * d.exp();
-            fm *= b * (-d).exp();
+    fn extract<F: Fn(usize, usize) -> (f64, f64)>(
+        grid: &GridTensor,
+        x: ArrayView2<f64>,
+        factor_at: F,
+    ) -> (Array1<f64>, Array1<f64>) {
+        let mut f_plus = Array1::zeros(x.nrows());
+        let mut f_minus = Array1::zeros(x.nrows());
+        for i in 0..x.nrows() {
+            let mut fp = grid.lambda_plus;
+            let mut fm = grid.lambda_minus;
+            for j in 0..x.ncols() {
+                let val = x[[i, j]];
+                let col_idx = grid.splits[j].partition_point(|&split| split <= val);
+                let col_idx = col_idx.min(grid.backbone_values[j].len() - 1);
+                let (a_plus, a_minus) = factor_at(j, col_idx);
+                fp *= a_plus;
+                fm *= a_minus;
+            }
+            f_plus[i] = fp;
+            f_minus[i] = fm;
         }
-        f_plus[i] = fp;
-        f_minus[i] = fm;
+        (f_plus, f_minus)
     }
 
-    (f_plus, f_minus)
+    let n_factor_bins: usize = grid.backbone_values.iter().map(Vec::len).sum();
+    if x.nrows().saturating_mul(x.ncols()) > n_factor_bins {
+        let factors = grid.two_tensor_factors();
+        extract(grid, x, |axis, bin| factors[axis][bin])
+    } else {
+        extract(grid, x, |axis, bin| {
+            let b = grid.backbone_values[axis][bin];
+            let d = grid.tilt_values[axis][bin];
+            (b * d.exp(), b * (-d).exp())
+        })
+    }
 }
 
 impl StagePredictor {
@@ -166,7 +173,6 @@ impl StagePredictor {
     pub fn predict_unscaled(&self, x: ArrayView2<f64>) -> Array1<f64> {
         self.aggregation_method.predict_unscaled(x, self)
     }
-
 }
 
 impl StagePredictor {
