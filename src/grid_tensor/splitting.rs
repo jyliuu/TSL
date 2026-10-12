@@ -28,7 +28,7 @@ const ACTION_SCORE_RELATIVE_TOLERANCE: f64 = 1e-12;
 pub enum SplitStrategy {
     Random {
         split_try: usize,
-        colsample_bytree: f64,
+        colsample_bysplit: f64,
         min_interval_samples: usize,
         /// Cost-complexity strength for every structural action.
         complexity_penalty: f64,
@@ -116,18 +116,18 @@ impl SplitStrategy {
         state.require_current_statistics();
         let sampled = match self {
             Self::Random {
-                colsample_bytree,
+                colsample_bysplit,
                 split_try,
                 ..
             } if state.sampled_split_scoring
                 && state.split_scores_stale
                 && !state.is_stage1_positive_only() =>
             {
-                Some((*colsample_bytree, *split_try))
+                Some((*colsample_bysplit, *split_try))
             }
             _ => None,
         };
-        let Some((colsample_bytree, split_try)) = sampled else {
+        let Some((colsample_bysplit, split_try)) = sampled else {
             if state.split_scores_stale {
                 refinement.refresh_all_split_scores(state);
             }
@@ -137,7 +137,7 @@ impl SplitStrategy {
             let positions = sample_random_split_positions(
                 &state.split_strategy_state.allowed_intervals,
                 &state.split_strategy_state.total_positions,
-                colsample_bytree,
+                colsample_bysplit,
                 split_try,
                 rng,
                 state.p,
@@ -293,13 +293,13 @@ impl SplitStrategy {
     ) -> Option<SplitCandidate> {
         let best_split_info = match self {
             SplitStrategy::Random {
-                colsample_bytree,
+                colsample_bysplit,
                 split_try,
                 ..
             } => sample_random_split(
                 &state.split_strategy_state.allowed_intervals,
                 &state.split_strategy_state.total_positions,
-                *colsample_bytree,
+                *colsample_bysplit,
                 *split_try,
                 rng,
                 &state.precomputed_statistics.error_reductions_split,
@@ -556,7 +556,7 @@ mod tests {
     fn random_proposes_the_best_sampled_split_above_min_split_loss() {
         let random = |min_split_loss| SplitStrategy::Random {
             split_try: 10,
-            colsample_bytree: 1.0,
+            colsample_bysplit: 1.0,
             min_interval_samples: 1,
             complexity_penalty: 0.0,
             min_split_loss,
@@ -625,7 +625,11 @@ mod tests {
             assert_eq!(columns.len(), 2, "half of four columns per proposal");
             proposed_ever.extend(columns);
         }
-        assert_eq!(proposed_ever.len(), 4, "every column is proposed over many draws");
+        assert_eq!(
+            proposed_ever.len(),
+            4,
+            "every column is proposed over many draws"
+        );
 
         // Columns without positions are never proposed; fewer remaining columns than the
         // fraction are all proposed.

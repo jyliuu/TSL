@@ -55,7 +55,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         The decay rate for the number of splits in each epoch.
     split_try : int, default=10
         Number of split points to try for each feature.
-    colsample_bytree : float, default=1.0
+    colsample_bysplit : float, default=1.0
         Fraction of the features each split proposal draws from, among those that still
         have split positions (at least one).
     alpha: float, default=0.0
@@ -123,7 +123,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         n_iter: int = 10,
         decay: float = 1.0,
         split_try: int = 10,
-        colsample_bytree: float = 1.0,
+        colsample_bysplit: float = 1.0,
         alpha: float = 0.0,
         complexity_penalty: float = 0.0,
         min_split_loss: float = 0.0,
@@ -152,7 +152,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         self.n_iter = n_iter
         self.decay = decay
         self.split_try = split_try
-        self.colsample_bytree = colsample_bytree
+        self.colsample_bysplit = colsample_bysplit
         self.alpha = alpha
         self.complexity_penalty = complexity_penalty
         self.min_split_loss = min_split_loss
@@ -198,7 +198,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
             n_trees=self.n_trees,
             n_iter=self.n_iter,
             split_try=self.split_try,
-            colsample_bytree=self.colsample_bytree,
+            colsample_bysplit=self.colsample_bysplit,
             alpha=self.alpha,
             complexity_penalty=self.complexity_penalty,
             min_split_loss=self.min_split_loss,

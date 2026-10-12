@@ -34,7 +34,7 @@ def fitted():
         n_trees=4,
         n_iter=8,
         split_try=4,
-        colsample_bytree=1.0,
+        colsample_bysplit=1.0,
         seed=0,
         verbosity=0,
     )
@@ -58,7 +58,7 @@ def fitted_2stage():
         n_trees=4,
         n_iter=8,
         split_try=4,
-        colsample_bytree=1.0,
+        colsample_bysplit=1.0,
         seed=0,
         verbosity=0,
     )
@@ -270,7 +270,7 @@ def test_plot_tilt_diagnostics_stage1_positive_only():
     y = np.abs(0.7 * X[:, 0] + 0.4 * X[:, 1]) + 0.1 * np.abs(rng.randn(n))
     model, _ = TSL.fit(
         X, y, epochs=3, n_trees=4, n_iter=8, split_try=4,
-        colsample_bytree=1.0, seed=0, verbosity=0,
+        colsample_bysplit=1.0, seed=0, verbosity=0,
     )
     res = plot_tilt_diagnostics(
         model, X, feature_names=["a", "b", "c"], grid_points=20,

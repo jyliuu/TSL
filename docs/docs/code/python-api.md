@@ -26,7 +26,7 @@ hyperparameters; no fitting happens until [`fit`](#meth-tslregressor-fit). See t
 
 ```python
 TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
-             colsample_bytree=1.0, alpha=0.0, complexity_penalty=0.0,
+             colsample_bysplit=1.0, alpha=0.0, complexity_penalty=0.0,
              min_split_loss=0.0, min_interval_samples=1, refinement_strategy="l2",
              update_clamp=float("inf"), tilt_tau=0.01,
              tilt_rho=0.0, split_strategy="random", top_k=10, must_fill_all_k=True,
@@ -43,7 +43,7 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
 | `n_iter` | `int` | `10` | split budget per grid |
 | `decay` | `float` | `1.0` | multiply `n_iter` by this after epoch 1 |
 | `split_try` | `int` | `10` | candidate split positions per (feature, interval) |
-| `colsample_bytree` | `float` | `1.0` | fraction of features proposed per split, from those that still have split positions |
+| `colsample_bysplit` | `float` | `1.0` | fraction of features proposed per split, from those that still have split positions |
 | `alpha` | `float` | `0.0` | $\ell_2$ penalty on the log-backbone update $\beta=\log v_b$ |
 | `complexity_penalty` | `float` | `0.0` | fixed-scale boundary cost for unified structural selection (`0.0` disables merges) |
 | `min_split_loss` | `float` | `0.0` | minimum objective reduction to accept a structural action |
@@ -182,7 +182,7 @@ hyperparameters as the [`TSLRegressor` constructor](#cls-tslregressor); see the
 ### `fit` { #cmeth-tsl-fit }
 
 ```python
-TSL.fit(x, y, epochs, decay, n_trees, n_iter, split_try, colsample_bytree, alpha,
+TSL.fit(x, y, epochs, decay, n_trees, n_iter, split_try, colsample_bysplit, alpha,
         complexity_penalty, min_split_loss, min_interval_samples, refinement_strategy,
         update_clamp, tilt_tau, tilt_rho, split_strategy, top_k,
         must_fill_all_k, similarity_threshold, consensus, seed, verbosity,
@@ -439,7 +439,7 @@ One fitted separable component (internals: [GridTensor](grid-tensor.md)).
 ### `fit` { #cmeth-gridtensor-fit }
 
 ```python
-GridTensor.fit(x, y, n_iter, split_try, colsample_bytree,
+GridTensor.fit(x, y, n_iter, split_try, colsample_bysplit,
                complexity_penalty=0.0, seed=42) -> tuple[GridTensor, FitResult]
 ```
 
@@ -453,7 +453,7 @@ Fit a single grid tensor (no boosting, no bagging).
 | `y` | `ndarray (n_samples,)` | _required_ | training targets |
 | `n_iter` | `int` | _required_ | split budget |
 | `split_try` | `int` | _required_ | candidate split positions |
-| `colsample_bytree` | `float` | _required_ | fraction of features proposed per split, from those that still have split positions |
+| `colsample_bysplit` | `float` | _required_ | fraction of features proposed per split, from those that still have split positions |
 | `complexity_penalty` | `float` | `0.0` | fixed-scale boundary cost for unified structural selection (`0.0` disables merges) |
 | `seed` | `int` | `42` | RNG seed |
 

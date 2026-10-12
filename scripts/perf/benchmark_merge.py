@@ -184,7 +184,7 @@ def main() -> None:
         "n_trees": args.n_trees,
         "n_iter": args.n_iter,
         "split_try": args.split_try,
-        "colsample_bytree": 1.0,
+        "colsample_bysplit": 1.0,
         "alpha": 0.0,
         "complexity_penalty": args.complexity_penalty,
         "min_split_loss": 0.0,

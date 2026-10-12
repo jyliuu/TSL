@@ -277,7 +277,7 @@ fn main() {
         .n_trees(4)
         .split_strategy(SplitStrategyParams::RandomSplit {
             split_try: 12,
-            colsample_bytree: 1.0,
+            colsample_bysplit: 1.0,
         })
         .seed(42)
         .build();

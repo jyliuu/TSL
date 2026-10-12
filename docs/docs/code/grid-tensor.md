@@ -69,7 +69,7 @@ enabling $O(1)$ split-candidate scoring. Holds an optional `LoggingState`.
 `FittingAction` enumerates the three structural actions: `ApplySplit`, `ApplyResplit` and
 `ApplyMerge`. The `SplitStrategy` enum proposes them:
 
-- **`Random`** — sample up to `split_try` valid positions over `colsample_bytree` of the
+- **`Random`** — sample up to `split_try` valid positions over `colsample_bysplit` of the
   features (the default; usually best for speed);
 - **`Best`** — greedily take the highest-gain split (better on small data);
 - **`TopK`** — sample from the top-`k` candidates (`must_fill_all_k` controls strictness).
@@ -222,7 +222,7 @@ across cloned fitting states and reused across stages when `PreparedInput` is av
 ## Parameters (`params.rs`)
 
 `GridTensorParams` bundles `n_iter` (the split budget), a `SplitStrategyParams`
-(`split_try`, `colsample_bytree`, `min_interval_samples`, `min_split_loss`,
+(`split_try`, `colsample_bysplit`, `min_interval_samples`, `min_split_loss`,
 `complexity_penalty`, kind), a
 `RefinementStrategyParams` (`alpha`, `tilt_tau`, `tilt_rho`, …, kind), and `max_bins`. All
 have fluent `…Builder` types. The Python flat hyperparameters map onto these — see

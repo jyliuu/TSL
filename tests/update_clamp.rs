@@ -37,7 +37,7 @@ fn default_model_bytes(huber: bool, positive: bool, bins: Option<u16>, clamp: f6
             SplitStrategyParamsBuilder::new()
                 .random_split()
                 .split_try(9)
-                .colsample_bytree(1.0)
+                .colsample_bysplit(1.0)
                 .min_interval_samples(2)
                 .build(),
         )

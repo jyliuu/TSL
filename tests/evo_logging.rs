@@ -24,7 +24,7 @@ mod evo_logging_tests {
                 SplitStrategyParamsBuilder::new()
                     .random_split()
                     .split_try(3)
-                    .colsample_bytree(0.8828809775150922)
+                    .colsample_bysplit(0.8828809775150922)
                     .min_interval_samples(1)
                     .min_split_loss(0.0)
                     .build(),
@@ -81,7 +81,7 @@ mod evo_logging_tests {
                 SplitStrategyParamsBuilder::new()
                     .random_split()
                     .split_try(20)
-                    .colsample_bytree(0.631161799847988)
+                    .colsample_bysplit(0.631161799847988)
                     .min_interval_samples(6)
                     .min_split_loss(0.0)
                     .build(),
@@ -125,7 +125,7 @@ mod evo_logging_tests {
                 SplitStrategyParamsBuilder::new()
                     .random_split()
                     .split_try(2)
-                    .colsample_bytree(0.39588592353906327)
+                    .colsample_bysplit(0.39588592353906327)
                     .min_interval_samples(38)
                     .min_split_loss(0.7540167160231375)
                     .build(),
@@ -170,7 +170,7 @@ mod evo_logging_tests {
                 SplitStrategyParamsBuilder::new()
                     .random_split()
                     .split_try(10)
-                    .colsample_bytree(1.0)
+                    .colsample_bysplit(1.0)
                     .min_interval_samples(20)
                     .min_split_loss(0.9)
                     .build(),
@@ -204,7 +204,7 @@ mod evo_logging_tests {
                 SplitStrategyParamsBuilder::new()
                     .random_split()
                     .split_try(3)
-                    .colsample_bytree(0.652015893646319)
+                    .colsample_bysplit(0.652015893646319)
                     .min_interval_samples(43)
                     .min_split_loss(0.060839473717718556)
                     .build(),
@@ -251,7 +251,7 @@ mod evo_logging_tests {
                 SplitStrategyParamsBuilder::new()
                     .random_split()
                     .split_try(16)
-                    .colsample_bytree(0.7030641276642211)
+                    .colsample_bysplit(0.7030641276642211)
                     .min_interval_samples(5)
                     .min_split_loss(0.3530290549534714)
                     .build(),

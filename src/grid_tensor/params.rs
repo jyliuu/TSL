@@ -123,7 +123,7 @@ impl Default for RefinementStrategyParamsBuilder {
 pub enum SplitStrategyParams {
     RandomSplit {
         split_try: usize,
-        colsample_bytree: f64,
+        colsample_bysplit: f64,
         min_interval_samples: usize,
         min_split_loss: f64,
         complexity_penalty: f64,
@@ -147,13 +147,13 @@ impl SplitStrategyParams {
         match self {
             SplitStrategyParams::RandomSplit {
                 split_try,
-                colsample_bytree,
+                colsample_bysplit,
                 min_interval_samples,
                 min_split_loss,
                 complexity_penalty,
             } => SplitStrategy::Random {
                 split_try: *split_try,
-                colsample_bytree: *colsample_bytree,
+                colsample_bysplit: *colsample_bysplit,
                 min_interval_samples: *min_interval_samples,
                 min_split_loss: *min_split_loss,
                 complexity_penalty: *complexity_penalty,
@@ -190,7 +190,7 @@ impl SplitStrategyParams {
 pub struct SplitStrategyParamsBuilder {
     variant: SplitVariant,
     split_try: usize,
-    colsample_bytree: f64,
+    colsample_bysplit: f64,
     min_interval_samples: usize,
     top_k: usize,
     must_fill_all_k: bool,
@@ -210,7 +210,7 @@ impl SplitStrategyParamsBuilder {
         Self {
             variant: SplitVariant::RandomSplit,
             split_try: 10,
-            colsample_bytree: 1.0,
+            colsample_bysplit: 1.0,
             min_interval_samples: 1,
             min_split_loss: 0.0,
             complexity_penalty: 0.0,
@@ -239,8 +239,8 @@ impl SplitStrategyParamsBuilder {
         self
     }
 
-    pub fn colsample_bytree(mut self, colsample_bytree: f64) -> Self {
-        self.colsample_bytree = colsample_bytree;
+    pub fn colsample_bysplit(mut self, colsample_bysplit: f64) -> Self {
+        self.colsample_bysplit = colsample_bysplit;
         self
     }
 
@@ -282,7 +282,7 @@ impl SplitStrategyParamsBuilder {
         match self.variant {
             SplitVariant::RandomSplit => SplitStrategyParams::RandomSplit {
                 split_try: self.split_try,
-                colsample_bytree: self.colsample_bytree,
+                colsample_bysplit: self.colsample_bysplit,
                 min_interval_samples: self.min_interval_samples,
                 min_split_loss: self.min_split_loss,
                 complexity_penalty: self.complexity_penalty,

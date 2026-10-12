@@ -28,7 +28,7 @@ def test_marginal_expectation_equals_averaged_predictions():
         n_trees=10,
         n_iter=5,
         split_try=5,
-        colsample_bytree=0.8,
+        colsample_bysplit=0.8,
         seed=42,
         verbosity=0,
     )
@@ -122,7 +122,7 @@ def test_ice_curves_average_equals_pd_function():
         n_trees=10,
         n_iter=5,
         split_try=5,
-        colsample_bytree=0.8,
+        colsample_bysplit=0.8,
         seed=42,
         verbosity=0,
     )

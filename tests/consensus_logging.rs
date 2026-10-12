@@ -31,7 +31,7 @@ fn logged_consensus_ensemble_reports_every_member() {
             SplitStrategyParamsBuilder::new()
                 .random_split()
                 .split_try(9)
-                .colsample_bytree(0.8)
+                .colsample_bysplit(0.8)
                 .min_interval_samples(3)
                 .complexity_penalty(0.001)
                 .build(),

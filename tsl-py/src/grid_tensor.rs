@@ -83,14 +83,14 @@ impl GridTensorPy {
 
     #[classmethod]
     #[pyo3(name = "fit")]
-    #[pyo3(signature = (x, y, n_iter, split_try, colsample_bytree, complexity_penalty=0.0, seed=42))]
+    #[pyo3(signature = (x, y, n_iter, split_try, colsample_bysplit, complexity_penalty=0.0, seed=42))]
     pub fn _fit<'py>(
         _cls: &Bound<'_, PyType>,
         x: PyReadonlyArray2<'py, f64>,
         y: PyReadonlyArray1<'py, f64>,
         n_iter: usize,
         split_try: usize,
-        colsample_bytree: f64,
+        colsample_bysplit: f64,
         complexity_penalty: f64,
         seed: u64,
     ) -> PyResult<(GridTensorPy, FitResultPy)> {
@@ -99,7 +99,7 @@ impl GridTensorPy {
         let x_contiguous = x.as_standard_layout();
         let y_contiguous = y.as_standard_layout();
         let params =
-            params::grid_tensor_params(n_iter, split_try, colsample_bytree, complexity_penalty);
+            params::grid_tensor_params(n_iter, split_try, colsample_bysplit, complexity_penalty);
         let mut rng = StdRng::seed_from_u64(seed);
         let (fit_result, tg) =
             grid_tensor::fit(x_contiguous.view(), y_contiguous.view(), &params, &mut rng);
