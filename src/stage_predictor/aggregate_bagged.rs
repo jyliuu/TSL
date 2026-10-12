@@ -72,27 +72,17 @@ pub fn aggregate_bagged_two_tensor(
 
     // Step 1: align every bag to the union grid and count the rows in each union bin.
     let mut aligned_grids = refine_grids_to_union_two_tensor(grids);
-    let num_axes = aligned_grids[0].intervals.len();
-    let mut union_observation_counts: Vec<Vec<usize>> = Vec::with_capacity(num_axes);
-    for axis in 0..num_axes {
-        let n_bins = aligned_grids[0].intervals[axis].len();
-        let mut counts: Vec<usize> = vec![0; n_bins];
-        let splits = &aligned_grids[0].splits[axis];
-
-        let mut vals: Vec<f64> = points.column(axis).iter().copied().collect();
-        vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-        let mut s_idx: usize = 0;
-        let b_len = splits.len();
-        for v in vals {
-            while s_idx < b_len && v >= splits[s_idx] {
-                s_idx += 1;
+    let union_observation_counts: Vec<Vec<usize>> = (0..aligned_grids[0].intervals.len())
+        .map(|axis| {
+            let splits = &aligned_grids[0].splits[axis];
+            let mut counts = vec![0; aligned_grids[0].intervals[axis].len()];
+            // Union splits are sorted; a row on a split falls in the bin to its right.
+            for &value in points.column(axis).iter() {
+                counts[splits.partition_point(|&split| split <= value)] += 1;
             }
-            counts[s_idx] += 1;
-        }
-
-        union_observation_counts.push(counts);
-    }
+            counts
+        })
+        .collect();
 
     // Step 2: per-bag gauge fixing.
     for grid in &mut aligned_grids {
