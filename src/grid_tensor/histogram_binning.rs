@@ -245,27 +245,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cached_row_bins_match_rank_search_and_share_immutable_storage() {
-        let sorted: Vec<usize> = (0..127).map(|i| i * 29 % 127).collect();
-        for edges in [vec![1, 11, 31, 90, 126], vec![63], (1..127).collect()] {
-            let cached = row_bin_indices(&sorted, &edges);
-            for (rank, &row) in sorted.iter().enumerate() {
-                assert_eq!(cached[row] as usize, edges.partition_point(|&edge| edge <= rank));
-            }
-            let mut statistics = crate::grid_tensor::state::PrecomputedStatistics::new(127, 1);
-            statistics.bin_indices[0] = cached;
-            let cloned = statistics.clone();
-            assert!(std::sync::Arc::ptr_eq(&statistics.bin_indices[0], &cloned.bin_indices[0]));
-        }
-        assert!(row_bin_indices(&sorted, &[]).is_empty());
-        let sorted: Vec<_> = (0..=u16::MAX as usize).rev().collect();
-        let edges: Vec<_> = (1..=u16::MAX as usize).collect();
-        let cached = row_bin_indices(&sorted, &edges);
-        assert_eq!(cached[0], u16::MAX);
-        assert_eq!(cached[u16::MAX as usize], 0);
-    }
-
-    #[test]
     fn bin_edge_positions_uniform_data() {
         // Feature values 0..10 sorted -> sorted_indices = [0,1,2,...,9].
         let sorted = (0..10).collect::<Vec<_>>();

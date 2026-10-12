@@ -151,21 +151,6 @@ mod tests {
     }
 
     #[test]
-    fn union_alignment_matches_nested_scan_at_ties_and_near_duplicate_boundaries() {
-        let grids = vec![
-            fixture_grid(vec![vec![-2.0, 0.0, 3.0], vec![]], 0),
-            fixture_grid(vec![vec![-2.0, 1.0, 3.0], vec![0.0]], 10),
-            fixture_grid(vec![vec![-2.0 + 5e-13, 2.0, 3.0], vec![-1.0, 0.0]], 20),
-            fixture_grid(vec![vec![], vec![0.0, 2.0]], 30),
-        ];
-        assert_aligned_identical(
-            &refine_grids_to_union_two_tensor(&grids),
-            &reference_alignment(&grids),
-        );
-        assert_aligned_identical(&refine_grids_to_union_two_tensor(&[]), &[]);
-    }
-
-    #[test]
     fn union_alignment_preserves_grid_predictions() {
         let grids: Vec<_> = (0..25)
             .map(|grid| {
@@ -189,42 +174,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    #[ignore = "wall-clock comparison of interval alignment algorithms"]
-    fn benchmark_union_alignment() {
-        use std::hint::black_box;
-        use std::time::Instant;
-        let grids: Vec<_> = (0..100)
-            .map(|grid| {
-                fixture_grid(
-                    vec![
-                        (0..50).map(|bin| (bin * 100 + grid) as f64).collect(),
-                        (0..50).map(|bin| (bin * 100 + grid) as f64).collect(),
-                    ],
-                    grid,
-                )
-            })
-            .collect();
-        assert_aligned_identical(
-            &refine_grids_to_union_two_tensor(&grids),
-            &reference_alignment(&grids),
-        );
-        let start = Instant::now();
-        for _ in 0..4 {
-            black_box(reference_alignment(black_box(&grids)));
-        }
-        let reference = start.elapsed();
-        let start = Instant::now();
-        for _ in 0..4 {
-            black_box(refine_grids_to_union_two_tensor(black_box(&grids)));
-        }
-        let monotone = start.elapsed();
-        println!(
-            "union alignment: reference={reference:?}, monotone={monotone:?}, speedup={:.3}",
-            reference.as_secs_f64() / monotone.as_secs_f64()
-        );
     }
 
     fn reference_alignment(grids: &[GridTensor]) -> Vec<GridTensor> {

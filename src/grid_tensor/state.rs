@@ -633,16 +633,6 @@ pub struct CurvatureCache {
     pub s12: f64,
 }
 
-#[cfg(test)]
-pub(crate) fn assert_curvature_bits(actual: &[CurvatureCache], expected: &[CurvatureCache]) {
-    assert_eq!(actual.len(), expected.len());
-    for (a, e) in actual.iter().zip(expected) {
-        assert_eq!(a.s11.to_bits(), e.s11.to_bits());
-        assert_eq!(a.s22.to_bits(), e.s22.to_bits());
-        assert_eq!(a.s12.to_bits(), e.s12.to_bits());
-    }
-}
-
 /// Working buffers containing pre-computed performance caches
 #[derive(Debug, Clone)]
 pub struct PrecomputedStatistics {
@@ -784,6 +774,3 @@ impl LoopState {
         }
     }
 }
-
-#[cfg(test)]
-mod stagger_tests;

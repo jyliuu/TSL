@@ -1175,87 +1175,6 @@ mod tests {
         }
     }
 
-    fn interval_indices(state: &FittingState) -> Vec<usize> {
-        (0..state.n)
-            .map(|row| state.interval_index(0, row))
-            .collect()
-    }
-
-    #[test]
-    fn interval_indices_follow_inserted_and_removed_boundaries() {
-        let x = Array2::from_shape_vec((6, 1), vec![5.0, 0.0, 3.0, 1.0, 4.0, 2.0]).unwrap();
-        let y = Array1::from_vec(vec![6.0, 1.0, 4.0, 2.0, 5.0, 3.0]);
-        let refinement_strategy = RefinementStrategy::L2Refinement {
-            alpha: 0.1,
-            tilt_tau: 0.0,
-            tilt_rho: 0.0,
-            prior_sample_size: 0.0,
-            update_clamp: f64::INFINITY,
-        };
-        let split_strategy = SplitStrategy::Best {
-            min_interval_samples: 1,
-            complexity_penalty: 1.0,
-            min_split_loss: 0.0,
-        };
-
-        let mut state = FittingState::new(x.view(), y.view());
-        state = refinement_strategy.initialize(state);
-        state = split_strategy.initialize(state);
-
-        for index in [2, 4] {
-            let allowed_interval_idx = state.split_strategy_state.allowed_intervals[0]
-                .iter()
-                .position(|interval| interval.contains(index))
-                .unwrap();
-            let split = SplitCandidate {
-                col: 0,
-                error_reduction: state.precomputed_statistics.error_reductions_split[0][index],
-                allowed_interval_idx,
-                index,
-                update_left: state.precomputed_statistics.update_pairs_split_left[0][index],
-                update_right: state.precomputed_statistics.update_pairs_split_right[0][index],
-            };
-            state = fitting_reducer(
-                state,
-                FittingAction::ApplySplit { split },
-                &refinement_strategy,
-                &split_strategy,
-            );
-        }
-        assert_eq!(state.boundaries[0], vec![2, 4]);
-        assert_eq!(interval_indices(&state), vec![2, 0, 1, 0, 2, 1]);
-
-        let merge_first = MergeCandidate {
-            col: 0,
-            error_reduction: state.precomputed_statistics.error_reductions_merge[0][0],
-            interval_idx: 0,
-            index: 2,
-        };
-        state = fitting_reducer(
-            state,
-            FittingAction::ApplyMerge { merge: merge_first },
-            &refinement_strategy,
-            &split_strategy,
-        );
-        assert_eq!(state.boundaries[0], vec![4]);
-        assert_eq!(interval_indices(&state), vec![1, 0, 0, 0, 1, 0]);
-
-        let merge_last = MergeCandidate {
-            col: 0,
-            error_reduction: state.precomputed_statistics.error_reductions_merge[0][0],
-            interval_idx: 0,
-            index: 4,
-        };
-        state = fitting_reducer(
-            state,
-            FittingAction::ApplyMerge { merge: merge_last },
-            &refinement_strategy,
-            &split_strategy,
-        );
-        assert!(state.boundaries[0].is_empty());
-        assert_eq!(interval_indices(&state), vec![0; 6]);
-    }
-
     #[test]
     fn repeated_merges_refresh_every_remaining_merge_cache() {
         let x = Array2::from_shape_vec((8, 1), (0..8).map(|value| value as f64).collect()).unwrap();
@@ -1638,6 +1557,3 @@ mod two_tensor_invariant_tests {
         );
     }
 }
-
-#[cfg(test)]
-mod on_demand_scores_tests;

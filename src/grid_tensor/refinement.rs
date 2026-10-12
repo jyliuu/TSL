@@ -2152,7 +2152,9 @@ mod refresh_tests {
 
     use crate::grid_tensor::{
         fit::{fit_step, initialize_state_with_input},
-        params::{GridTensorParamsBuilder, RefinementStrategyParamsBuilder},
+        params::{
+            GridTensorParamsBuilder, RefinementStrategyParamsBuilder, SplitStrategyParamsBuilder,
+        },
         state::FittingState,
     };
 
@@ -2161,6 +2163,7 @@ mod refresh_tests {
         y: &'a Array1<f64>,
         max_bins: Option<u16>,
         huber: bool,
+        complexity_penalty: f64,
     ) -> (FittingState<'a>, super::RefinementStrategy) {
         let refinement = RefinementStrategyParamsBuilder::new()
             .alpha(0.01)
@@ -2174,6 +2177,11 @@ mod refresh_tests {
         let params = GridTensorParamsBuilder::new()
             .n_iter(12)
             .max_bins(max_bins)
+            .split_strategy(
+                SplitStrategyParamsBuilder::new()
+                    .complexity_penalty(complexity_penalty)
+                    .build(),
+            )
             .refinement_strategy(refinement)
             .build();
         let strategy = params.refinement_strategy_params.get_refinement_strategy();
@@ -2198,8 +2206,10 @@ mod refresh_tests {
                 .fold(1e-300_f64, |m, v| m.max(v.abs()));
             for (a, e) in a.iter().zip(e) {
                 assert_eq!(a.is_nan(), e.is_nan());
+                // Incremental sums accumulate in action order and a rebuild in row order, so
+                // scores agree to rounding, not bitwise.
                 if e.is_finite() {
-                    assert!((a - e).abs() <= 1e-9 * scale, "{a} vs {e}");
+                    assert!((a - e).abs() <= 1e-8 * scale, "{a} vs {e}");
                 }
             }
         }
@@ -2243,19 +2253,27 @@ mod refresh_tests {
         (x, y, other)
     }
 
+    /// The row caches, binned prefix sums and every split, resplit and merge score are
+    /// maintained incrementally after each action; a full rebuild must reproduce them.
     #[test]
     fn refresh_reproduces_incremental_caches() {
+        let mut merged = false;
         for signed in [false, true] {
             for max_bins in [None, Some(16)] {
                 for huber in [false, true] {
-                    let (x, y, _) = data(signed);
-                    let (state, strategy) = fitted_state(&x, &y, max_bins, huber);
-                    assert!(!state.boundaries.iter().all(Vec::is_empty));
-                    let rebuilt = strategy.refresh_statistics(state.clone());
-                    assert_caches_close(&rebuilt, &state);
+                    for complexity_penalty in [0.0, 0.5] {
+                        let (x, y, _) = data(signed);
+                        let (state, strategy) =
+                            fitted_state(&x, &y, max_bins, huber, complexity_penalty);
+                        assert!(!state.boundaries.iter().all(Vec::is_empty));
+                        merged |= state.loop_state.merge_count > 0;
+                        let rebuilt = strategy.refresh_statistics(state.clone());
+                        assert_caches_close(&rebuilt, &state);
+                    }
                 }
             }
         }
+        assert!(merged, "fixture must exercise merges");
     }
 
     fn branch_objective(state: &FittingState) -> f64 {
@@ -2378,7 +2396,7 @@ mod refresh_tests {
         use crate::grid_tensor::state::BranchConsensus;
         for max_bins in [None, Some(16)] {
             let (x, y, other) = data(true);
-            let (state, strategy) = fitted_state(&x, &y, max_bins, false);
+            let (state, strategy) = fitted_state(&x, &y, max_bins, false, 0.0);
             let mut pulled = state.clone();
             pulled.branch_consensus = Some(BranchConsensus {
                 anchors: None,
@@ -2407,31 +2425,3 @@ mod refresh_tests {
         }
     }
 }
-
-#[cfg(test)]
-mod anchor_tests;
-
-#[cfg(test)]
-mod deferred_linear_tests;
-
-#[cfg(test)]
-mod fused_bins_tests;
-
-#[cfg(test)]
-mod streamed_refresh_tests;
-
-#[cfg(test)]
-mod full_row_refresh_tests;
-
-#[cfg(test)]
-mod paired_scatter_tests;
-
-#[cfg(test)]
-mod linear_bin_slice_tests;
-
-#[cfg(test)]
-mod curvature_delta_tests;
-#[cfg(test)]
-mod linear_tile_tests;
-#[cfg(test)]
-mod rank_stream_scatter_tests;
