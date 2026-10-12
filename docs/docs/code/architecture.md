@@ -66,9 +66,8 @@ Grid-tensor fitting (`src/grid_tensor/`) is structured as an action/reducer loop
 mutable `FittingState`:
 
 - a `SplitStrategy` (`splitting.rs`: `Random` / `Best` / `TopK`) **proposes** a
-  `FittingAction` (`ApplySplit`, `ApplyResplit`, `ApplyMerge`, `ApplyScaling`, `Terminate`,
-  `Composite`);
-- `fitting_reducer` (`reducer.rs`) **applies** it, calling the `RefinementStrategy`
+  `FittingAction` (`ApplySplit`, `ApplyResplit` or `ApplyMerge`);
+- `fitting_reducer` (`reducer.rs`, one submodule per action) **applies** it, calling the `RefinementStrategy`
   (`refinement.rs`: `L2Refinement` / `HuberRefinement`) which solves the per-node $2\times2$
   problem via `two_tensor_solver.rs`.
 

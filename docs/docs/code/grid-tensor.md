@@ -66,8 +66,8 @@ enabling $O(1)$ split-candidate scoring. Holds an optional `LoggingState`.
 
 ### Actions (`action.rs`) and splitting (`splitting.rs`)
 
-`FittingAction` enumerates the state mutations: `ApplySplit`, `ApplyResplit`, `ApplyMerge`,
-`ApplyScaling`, `Terminate`, `Composite`. The `SplitStrategy` enum proposes them:
+`FittingAction` enumerates the three structural actions: `ApplySplit`, `ApplyResplit` and
+`ApplyMerge`. The `SplitStrategy` enum proposes them:
 
 - **`Random`** — sample up to `split_try` valid positions over `colsample_bytree` of the
   features (the default; usually best for speed);
@@ -84,11 +84,13 @@ position `idx`, the neighborhood is forbidden from further splitting.
 
 ### The reducer (`reducer.rs`)
 
-`fitting_reducer` matches on the action and applies it: it inserts the split into the grid,
+`fitting_reducer` matches on the action and applies it through the action's submodule
+(`reducer/split.rs`, `resplit.rs`, `merge.rs`): it inserts the split into the grid,
 updates backbone/tilt on the two new sub-intervals, recomputes the affected per-point caches
 and the prefix-sum/interval statistics. With `evo-logging` and an active logging state,
-it constructs and emits transformation events. For a merge, it removes one boundary, stores the candidate's absolute factors, and assigns the
-affected branch predictions directly from the other-axis partial products. Prediction
+it constructs and emits transformation events. For a merge, it removes one boundary, stores the candidate's absolute factors, and rescales
+the rows of the two merged intervals by the ratio of the merged factors to their side's
+previous factors. Prediction
 updates scatter through contiguous cache slices when available; strided arrays use
 indexed access. Each row retains the same branch, prediction and residual arithmetic.
 
@@ -100,7 +102,7 @@ and action comparison apply; interval statistics and resplit/merge scores are cu
 Positive-only states and other split strategies use eager scoring. This execution policy
 has no public parameter.
 
-Before an intermediate consensus action or a composite action, pending split scores are
+Before an intermediate consensus action, pending split scores are
 materialized and local refreshes remain eager. Untouched intervals retain their cached
 scores: recomputing them from shifted prefix sums can change floating-point rounding.
 The batch's final action defers interval sums and candidate scores until the next
