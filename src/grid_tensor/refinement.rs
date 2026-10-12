@@ -1,8 +1,14 @@
-//! Refinement module for updating tree statistics after splits
+//! Refinement strategies: the L2 and Huber local objectives and the sufficient statistics
+//! that score every structural action.
 //!
-//! This module contains the refinement strategies that update precomputed statistics
-//! after each split/resplit/merge operation. The actual tree updates are handled by
-//! the reducer in `grid/reducer.rs`.
+//! A [`RefinementStrategy`] maintains the precomputed statistics of a fitting state: the
+//! per-row caches, the exact and bin-cumulative prefix sums, the interval statistics and
+//! the split, resplit and merge score caches. It builds them when a fit starts
+//! (`initialize`), applies per-action deltas (`update_statistics` and its curvature-only
+//! variants), rebuilds them after a residual or consensus change (`refresh_statistics`,
+//! `refresh_consensus_reference`) and rescores the ranges an action touched
+//! (`refresh_error_reduction_caches_for_affected`). The structural updates themselves are
+//! applied by [`crate::grid_tensor::reducer`].
 
 mod binned_curvature;
 mod boundary_scores;

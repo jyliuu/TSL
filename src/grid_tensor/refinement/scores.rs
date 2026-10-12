@@ -6,6 +6,8 @@ use super::RefinementStrategy;
 use crate::grid_tensor::state::{AffectedRange, FittingState};
 
 impl RefinementStrategy {
+    /// Rescore the split, interval, resplit and merge caches over each affected range.
+    /// Stale split scores are rebuilt first unless sampled scoring defers them.
     pub fn refresh_error_reduction_caches_for_affected<'a>(
         &self,
         mut state: FittingState<'a>,
@@ -22,8 +24,8 @@ impl RefinementStrategy {
 
             Self::update_error_reductions_split_for_col_range(&mut state, &evaluator, c, lo, hi);
 
-            // `interval_range` indexes allowed intervals; the boundary caches are indexed
-            // from the point range instead.
+            // Boundary caches are located from the point range; `interval_range` indexes
+            // allowed intervals.
             if state.boundaries[c].is_empty() {
                 continue;
             }
@@ -54,7 +56,7 @@ impl RefinementStrategy {
         state
     }
 
-    /// Recompute interval stats for affected intervals using prefix sums
+    /// Recompute the statistics of intervals `blo..=bhi + 1` of `col` from its prefix sums.
     pub(super) fn update_interval_stats_for_col_range(
         state: &mut FittingState,
         col: usize,

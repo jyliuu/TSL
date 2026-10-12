@@ -144,8 +144,8 @@ impl RefinementStrategy {
 
     /// Scatter the linear row terms of a tile of binned columns in one row pass.
     ///
-    /// Every bucket receives its rows in ascending row order from `+0.0`, as the
-    /// per-column loop does; columns are independent accumulators.
+    /// Every bucket accumulates its rows in ascending row order from `+0.0`; columns are
+    /// independent accumulators.
     fn scatter_linear_tile(
         maps: &[&[u16]],
         t1: &[f64],
