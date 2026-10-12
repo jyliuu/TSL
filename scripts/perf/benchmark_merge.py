@@ -190,7 +190,6 @@ def main() -> None:
         "min_split_loss": 0.0,
         "min_interval_samples": args.min_interval_samples,
         "refinement_strategy": "l2",
-        "prior_sample_size": 0.0,
         "update_clamp": float("inf"),
         "tilt_tau": 0.01,
         "tilt_rho": 0.0,

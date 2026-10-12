@@ -93,7 +93,6 @@ fn main() {
             RefinementStrategyParamsBuilder::new()
                 .l2()
                 .alpha(0.01)
-                .prior_sample_size(0.0)
                 .build(),
         )
         .max_bins(Some(255))

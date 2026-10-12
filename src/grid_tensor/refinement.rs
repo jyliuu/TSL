@@ -33,9 +33,6 @@ pub enum RefinementStrategy {
         tilt_tau: f64,
         /// L1 penalty on the tilt update.
         tilt_rho: f64,
-        /// Prior sample size for parent anchoring (tau_0).
-        /// Interpreted as "how many samples worth of confidence in the parent".
-        prior_sample_size: f64,
         update_clamp: f64,
     },
     HuberRefinement {
@@ -43,7 +40,6 @@ pub enum RefinementStrategy {
         c: f64,
         tilt_tau: f64,
         tilt_rho: f64,
-        prior_sample_size: f64,
         update_clamp: f64,
     },
 }
@@ -112,23 +108,6 @@ impl RefinementStrategy {
             .sum()
     }
 
-    /// Returns the prior sample size (tau_0) for parent anchoring.
-    ///
-    /// This represents "how many samples worth of confidence we have that
-    /// children should equal their parent". With tau_0 = 30, a child interval
-    /// with 10 samples will be heavily shrunk toward the parent, while a child
-    /// with 100 samples will mostly trust its own data.
-    pub fn prior_sample_size(&self) -> f64 {
-        match self {
-            RefinementStrategy::L2Refinement {
-                prior_sample_size, ..
-            } => *prior_sample_size,
-            RefinementStrategy::HuberRefinement {
-                prior_sample_size, ..
-            } => *prior_sample_size,
-        }
-    }
-
     pub fn update_clamp(&self) -> f64 {
         match self {
             RefinementStrategy::L2Refinement { update_clamp, .. } => *update_clamp,
@@ -160,7 +139,6 @@ mod tests {
             c: 1.0,
             tilt_tau: 0.0,
             tilt_rho: 0.0,
-            prior_sample_size: 0.0,
             update_clamp: f64::INFINITY,
         };
         let residuals = ndarray::Array1::from_vec(vec![0.5, 2.0, -4.0]);

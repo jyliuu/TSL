@@ -24,7 +24,6 @@ constructor defaults; native-only options are listed separately.
 | `n_trees` | `10` | grid tensors fit per stage ($n_{\text{grids}}$); more reduces variance |
 | `similarity_threshold` | `0.0` | trim $\xi$ — keep top $\lceil(1-\xi)n_{\text{trees}}\rceil$ bags by similarity (`0` keeps all) |
 | `consensus` | `0.0` | [consensus](../math/bagging-aggregation.md#consensus-fitting) strength $\rho$: penalize disagreement with the other grids' training branches (`0` fits grids independently) |
-| `bagged` | `False` | enable the bagged-aggregation path |
 
 The aggregation mode (`Mean` / `GeometricMean` / `Combined`) is set internally; see
 [Bagging & aggregation](../math/bagging-aggregation.md).
@@ -75,7 +74,6 @@ the exact logarithmic penalties.
 
 | Param | Default | Meaning |
 |-------|:------:|---------|
-| `prior_sample_size` | `0.0` | parent-anchoring strength ($\tau_0$); the default `0.0` disables anchoring |
 | `update_clamp` | `inf` | nonnegative log-step cap $c$; branch multipliers are bounded by $[\max(0.05,e^{-c}),\min(20,e^c)]$ |
 
 !!! note

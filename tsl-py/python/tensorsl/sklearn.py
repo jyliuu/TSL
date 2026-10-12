@@ -72,11 +72,6 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         Strategy for selecting split points ("random", "best_split", "top_k").
     refinement_strategy : str, default="l2"
         Strategy for refining grid values ("l2", "huber").
-    prior_sample_size : float, default=0.0
-        Prior sample size (tau_0) for parent anchoring. Interpreted as "how many samples worth of confidence
-        we have that children should equal their parent". With tau_0=30, a child with 10 samples will be
-        heavily shrunk toward the parent, while a child with 100 samples will mostly trust its own data.
-        Default: 0.0 (no anchoring). Typical values: 10-50.
     update_clamp : float, default=float('inf')
         Nonnegative log-step cap for refinement updates. Branch multipliers lie in
         [max(0.05, exp(-update_clamp)), min(20, exp(update_clamp))]. Positive infinity
@@ -102,8 +97,6 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         where ``c_plus`` and ``c_minus`` are the mean branches of the other grids. The
         grids converge to one latent representation; the term also damps updates.
         ``0.0`` fits the grids independently.
-    bagged : bool, default=False
-        Whether to use bagging.
     seed : int, default=42
         Random seed for reproducibility.
     verbosity : int, default=1
@@ -135,7 +128,6 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         min_split_loss: float = 0.0,
         min_interval_samples: int = 1,
         refinement_strategy: str = "l2",
-        prior_sample_size: float = 0.0,
         update_clamp: float = float("inf"),
         tilt_tau: float = 0.01,
         tilt_rho: float = 0.0,
@@ -144,7 +136,6 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         must_fill_all_k: bool = True,
         similarity_threshold: float = 0.0,
         consensus: float = 0.0,
-        bagged: bool = False,
         seed: int = 42,
         verbosity: int = 1,
         visualdb: Optional[str] = None,
@@ -166,7 +157,6 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         self.min_split_loss = min_split_loss
         self.min_interval_samples = min_interval_samples
         self.refinement_strategy = refinement_strategy
-        self.prior_sample_size = prior_sample_size
         self.update_clamp = update_clamp
         self.tilt_tau = tilt_tau
         self.tilt_rho = tilt_rho
@@ -175,7 +165,6 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         self.must_fill_all_k = must_fill_all_k
         self.similarity_threshold = similarity_threshold
         self.consensus = consensus
-        self.bagged = bagged
         self.seed = seed
         self.verbosity = verbosity
         self.visualdb = visualdb
@@ -214,7 +203,6 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
             min_split_loss=self.min_split_loss,
             min_interval_samples=self.min_interval_samples,
             refinement_strategy=self.refinement_strategy,
-            prior_sample_size=self.prior_sample_size,
             update_clamp=self.update_clamp,
             tilt_tau=self.tilt_tau,
             tilt_rho=self.tilt_rho,
@@ -223,7 +211,6 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
             must_fill_all_k=self.must_fill_all_k,
             similarity_threshold=self.similarity_threshold,
             consensus=self.consensus,
-            bagged=self.bagged,
             seed=self.seed,
             verbosity=self.verbosity,
             visualdb=self.visualdb,

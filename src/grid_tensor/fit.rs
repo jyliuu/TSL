@@ -644,7 +644,6 @@ mod tests {
             RefinementStrategyParamsBuilder::new()
                 .l2()
                 .alpha(0.01)
-                .prior_sample_size(20.0)
                 .update_clamp(1.0),
             RefinementStrategyParamsBuilder::new()
                 .huber()

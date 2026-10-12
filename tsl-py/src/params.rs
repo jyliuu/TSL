@@ -25,7 +25,6 @@ pub struct BoostedFitOptions<'a> {
     pub min_split_loss: f64,
     pub min_interval_samples: usize,
     pub refinement_strategy: &'a str,
-    pub prior_sample_size: f64,
     pub update_clamp: f64,
     pub tilt_tau: f64,
     pub tilt_rho: f64,
@@ -140,7 +139,6 @@ impl BoostedFitOptions<'_> {
         };
         Ok(builder
             .alpha(self.alpha)
-            .prior_sample_size(self.prior_sample_size)
             .update_clamp(self.update_clamp)
             .tilt_tau(self.tilt_tau)
             .tilt_rho(self.tilt_rho)

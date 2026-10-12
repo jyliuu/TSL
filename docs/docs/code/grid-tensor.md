@@ -181,7 +181,7 @@ the zero-tilt boundary. A finite positive-gain update is required on this path.
 - **`HuberRefinement`** — robust weights $w_i = \min(1, c/|r_i|)$, $c\approx1.345$.
 
 Both expose `alpha` (log-backbone $\ell_2$), `tilt_tau` (tilt $\ell_2$), `tilt_rho` (tilt
-$\ell_1$), `prior_sample_size`, and `update_clamp`. `initialize` precomputes the penalized
+$\ell_1$) and `update_clamp`. `initialize` precomputes the penalized
 gain of every candidate position.
 
 `update_clamp` accepts nonnegative values and positive infinity. With cap $c$,

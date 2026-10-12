@@ -71,7 +71,6 @@ mod evo_logging_tests {
                 RefinementStrategyParamsBuilder::new()
                     .l2()
                     .alpha(0.0008761191731033688)
-                    .prior_sample_size(0.0)
                     .update_clamp(3.1388455603935297)
                     .build(),
             )
@@ -214,7 +213,6 @@ mod evo_logging_tests {
                 RefinementStrategyParamsBuilder::new()
                     .l2()
                     .alpha(2.196_807_874_090_684_2e-9)
-                    .prior_sample_size(0.0)
                     .build(),
             )
             .similarity_threshold(0.0)
