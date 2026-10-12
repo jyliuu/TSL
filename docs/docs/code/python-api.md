@@ -26,11 +26,11 @@ hyperparameters; no fitting happens until [`fit`](#meth-tslregressor-fit). See t
 
 ```python
 TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
-             colsample_bytree=0.8, alpha=0.0, complexity_penalty=0.0,
+             colsample_bysplit=1.0, alpha=0.0, complexity_penalty=0.0,
              min_split_loss=0.0, min_interval_samples=1, refinement_strategy="l2",
-             prior_sample_size=0.0, update_clamp=float("inf"), tilt_tau=0.01,
+             update_clamp=float("inf"), tilt_tau=0.01,
              tilt_rho=0.0, split_strategy="random", top_k=10, must_fill_all_k=True,
-             similarity_threshold=0.0, consensus=0.0, bagged=False, seed=42, verbosity=1,
+             similarity_threshold=0.0, consensus=0.0, seed=42, verbosity=1,
              visualdb=None)
 ```
 
@@ -43,13 +43,12 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
 | `n_iter` | `int` | `10` | split budget per grid |
 | `decay` | `float` | `1.0` | multiply `n_iter` by this after epoch 1 |
 | `split_try` | `int` | `10` | candidate split positions per (feature, interval) |
-| `colsample_bytree` | `float` | `0.8` | fraction of features sampled per split |
+| `colsample_bysplit` | `float` | `1.0` | fraction of features proposed per split, from those that still have split positions |
 | `alpha` | `float` | `0.0` | $\ell_2$ penalty on the log-backbone update $\beta=\log v_b$ |
 | `complexity_penalty` | `float` | `0.0` | fixed-scale boundary cost for unified structural selection (`0.0` disables merges) |
 | `min_split_loss` | `float` | `0.0` | minimum objective reduction to accept a structural action |
 | `min_interval_samples` | `int` | `1` | minimum observations either side of a split |
 | `refinement_strategy` | `str` | `"l2"` | `"l2"` or `"huber"` |
-| `prior_sample_size` | `float` | `0.0` | parent-anchoring strength (advanced; `0.0` = off) |
 | `update_clamp` | `float` | `inf` | nonnegative log-step cap; `inf` retains numerical multiplier bounds $[0.05,20]$ |
 | `tilt_tau` | `float` | `0.01` | $\ell_2$ penalty on the tilt update $\delta=\frac12\log(v_+/v_-)$ |
 | `tilt_rho` | `float` | `0.0` | $\ell_1$ penalty on $\delta$; can produce zero tilt updates |
@@ -58,7 +57,6 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
 | `must_fill_all_k` | `bool` | `True` | (for `top_k`) require all $k$ slots |
 | `similarity_threshold` | `float` | `0.0` | bag trim $\xi$ (`0` keeps all) |
 | `consensus` | `float` | `0.0` | lockstep [consensus](../math/bagging-aggregation.md#consensus-fitting) strength $\rho\ge0$ (`0` fits grids independently) |
-| `bagged` | `bool` | `False` | enable the bagged-aggregation path |
 | `seed` | `int` | `42` | RNG seed (fits are deterministic) |
 | `verbosity` | `int` | `1` | log verbosity |
 | `visualdb` | `str | None` | `None` | evo-logging SQLite path |
@@ -184,10 +182,10 @@ hyperparameters as the [`TSLRegressor` constructor](#cls-tslregressor); see the
 ### `fit` { #cmeth-tsl-fit }
 
 ```python
-TSL.fit(x, y, epochs, decay, n_trees, n_iter, split_try, colsample_bytree, alpha,
+TSL.fit(x, y, epochs, decay, n_trees, n_iter, split_try, colsample_bysplit, alpha,
         complexity_penalty, min_split_loss, min_interval_samples, refinement_strategy,
-        prior_sample_size, update_clamp, tilt_tau, tilt_rho, split_strategy, top_k,
-        must_fill_all_k, similarity_threshold, consensus, bagged, seed, verbosity,
+        update_clamp, tilt_tau, tilt_rho, split_strategy, top_k,
+        must_fill_all_k, similarity_threshold, consensus, seed, verbosity,
         visualdb=None, *, max_bins=None, consensus_interval=1,
         nonnegative_scaling=False, consensus_anchors=None)
         -> tuple[TSL, FitResult]
@@ -441,7 +439,7 @@ One fitted separable component (internals: [GridTensor](grid-tensor.md)).
 ### `fit` { #cmeth-gridtensor-fit }
 
 ```python
-GridTensor.fit(x, y, n_iter, split_try, colsample_bytree,
+GridTensor.fit(x, y, n_iter, split_try, colsample_bysplit,
                complexity_penalty=0.0, seed=42) -> tuple[GridTensor, FitResult]
 ```
 
@@ -455,7 +453,7 @@ Fit a single grid tensor (no boosting, no bagging).
 | `y` | `ndarray (n_samples,)` | _required_ | training targets |
 | `n_iter` | `int` | _required_ | split budget |
 | `split_try` | `int` | _required_ | candidate split positions |
-| `colsample_bytree` | `float` | _required_ | fraction of features per split |
+| `colsample_bysplit` | `float` | _required_ | fraction of features proposed per split, from those that still have split positions |
 | `complexity_penalty` | `float` | `0.0` | fixed-scale boundary cost for unified structural selection (`0.0` disables merges) |
 | `seed` | `int` | `42` | RNG seed |
 

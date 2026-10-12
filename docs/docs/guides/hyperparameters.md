@@ -24,7 +24,6 @@ constructor defaults; native-only options are listed separately.
 | `n_trees` | `10` | grid tensors fit per stage ($n_{\text{grids}}$); more reduces variance |
 | `similarity_threshold` | `0.0` | trim $\xi$ — keep top $\lceil(1-\xi)n_{\text{trees}}\rceil$ bags by similarity (`0` keeps all) |
 | `consensus` | `0.0` | [consensus](../math/bagging-aggregation.md#consensus-fitting) strength $\rho$: penalize disagreement with the other grids' training branches (`0` fits grids independently) |
-| `bagged` | `False` | enable the bagged-aggregation path |
 
 The aggregation mode (`Mean` / `GeometricMean` / `Combined`) is set internally; see
 [Bagging & aggregation](../math/bagging-aggregation.md).
@@ -36,7 +35,7 @@ The aggregation mode (`Mean` / `GeometricMean` / `Combined`) is set internally; 
 | `n_iter` | `10` | split budget per grid ($T$); larger captures more structure |
 | `split_strategy` | `"random"` | `"random"`, `"best_split"`, or `"top_k"` |
 | `split_try` | `10` | candidate split positions sampled per (feature, interval) |
-| `colsample_bytree` | `0.8` | fraction of features sampled per split proposal |
+| `colsample_bysplit` | `1.0` | fraction of features proposed per split, from those that still have split positions |
 | `min_interval_samples` | `1` | minimum observations on each side of a split |
 | `min_split_loss` | `0.0` | minimum objective reduction to accept any structural action |
 | `complexity_penalty` | `0.0` | fixed-scale boundary cost used by split, resplit, and merge (`0.0` disables merge candidates) |
@@ -75,7 +74,6 @@ the exact logarithmic penalties.
 
 | Param | Default | Meaning |
 |-------|:------:|---------|
-| `prior_sample_size` | `0.0` | parent-anchoring strength ($\tau_0$); the default `0.0` disables anchoring |
 | `update_clamp` | `inf` | nonnegative log-step cap $c$; branch multipliers are bounded by $[\max(0.05,e^{-c}),\min(20,e^c)]$ |
 
 !!! note
@@ -121,7 +119,6 @@ TSLRegressor(
     n_trees=16,          # moderate bagging
     n_iter=30,           # enough splits to capture structure
     split_try=16,
-    colsample_bytree=0.8,
     alpha=0.01,          # light log-backbone shrinkage
     seed=0,
 )

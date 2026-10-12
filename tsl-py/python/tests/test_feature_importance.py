@@ -31,7 +31,7 @@ def fitted_model():
         n_trees=5,
         n_iter=10,
         split_try=5,
-        colsample_bytree=1.0,
+        colsample_bysplit=1.0,
         seed=42,
         verbosity=0,
     )
@@ -377,7 +377,7 @@ def test_feature_importance_with_single_stage():
         n_trees=3,
         n_iter=5,
         split_try=5,
-        colsample_bytree=1.0,
+        colsample_bysplit=1.0,
         seed=123,
         verbosity=0,
     )
@@ -430,7 +430,7 @@ def test_feature_importance_edge_case_zero_variance():
         n_trees=3,
         n_iter=5,
         split_try=5,
-        colsample_bytree=1.0,
+        colsample_bysplit=1.0,
         seed=42,
         verbosity=0,
     )

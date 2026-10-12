@@ -84,7 +84,7 @@ fn main() {
             SplitStrategyParamsBuilder::new()
                 .random_split()
                 .split_try(10)
-                .colsample_bytree(1.0)
+                .colsample_bysplit(1.0)
                 .min_interval_samples(3)
                 .min_split_loss(0.0)
                 .build(),
@@ -93,7 +93,6 @@ fn main() {
             RefinementStrategyParamsBuilder::new()
                 .l2()
                 .alpha(0.01)
-                .prior_sample_size(0.0)
                 .build(),
         )
         .max_bins(Some(255))

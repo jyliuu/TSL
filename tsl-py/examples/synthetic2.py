@@ -368,7 +368,7 @@ def main(
         n_trees=n_trees,
         n_iter=n_iter,
         split_try=split_try,
-        colsample_bytree=1.0,
+        colsample_bysplit=1.0,
         alpha=alpha,
         min_interval_samples=min_interval_samples,
         tilt_tau=0.0,

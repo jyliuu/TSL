@@ -32,7 +32,7 @@ def test_grid_tensor_fit(training_data, test_data):
     X_test, y_test = test_data
 
     # Train the TSL estimator
-    tg, fr = GridTensor.fit(X, y, n_iter=100, split_try=15, colsample_bytree=1.0)
+    tg, fr = GridTensor.fit(X, y, n_iter=100, split_try=15, colsample_bysplit=1.0)
 
     print("Fit result: ", fr)
     # TSL predictions and loss
@@ -58,7 +58,7 @@ def test_tsl_boosted_fit(training_data, test_data):
 
     # Train the TSL estimator
     tsl, fr = TSL.fit(
-        X, y, epochs=3, n_trees=37, n_iter=30, split_try=16, colsample_bytree=1.0
+        X, y, epochs=3, n_trees=37, n_iter=30, split_try=16, colsample_bysplit=1.0
     )
 
     print("Fit result: ", fr)
@@ -96,7 +96,7 @@ def test_tsl_predict_is_layout_invariant(training_data, test_data):
     X_test = np.ascontiguousarray(X_test)
 
     tsl, _ = TSL.fit(
-        X, y, epochs=3, n_trees=37, n_iter=30, split_try=16, colsample_bytree=1.0,
+        X, y, epochs=3, n_trees=37, n_iter=30, split_try=16, colsample_bysplit=1.0,
         verbosity=0,
     )
     baseline = tsl.predict(X_test)
@@ -135,7 +135,7 @@ def test_tsl_fit_is_layout_invariant(training_data):
     def fit_then_predict(X_in):
         model, _ = TSL.fit(
             X_in, y, epochs=3, n_trees=8, n_iter=25, split_try=12,
-            colsample_bytree=1.0, seed=7, verbosity=0,
+            colsample_bysplit=1.0, seed=7, verbosity=0,
         )
         return model.predict(X)
 

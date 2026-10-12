@@ -24,10 +24,12 @@ pub(super) fn sample_best_split(
     best_scored_position(positions, |col, index| Some(error_reductions[col][index]))
 }
 
+/// Up to `split_try` random allowed positions on each of a `colsample_bysplit` fraction of the
+/// columns that still have positions, as `(col, position, allowed interval)`.
 pub(super) fn sample_random_split_positions<R: Rng + ?Sized>(
     allowed_intervals: &[Vec<Interval>],
     total_positions: &[usize],
-    colsample_bytree: f64,
+    colsample_bysplit: f64,
     split_try: usize,
     rng: &mut R,
     ncols: usize,
@@ -38,12 +40,18 @@ pub(super) fn sample_random_split_positions<R: Rng + ?Sized>(
         .filter_map(|(idx, &positions)| if positions == 0 { None } else { Some(idx) })
         .collect();
 
-    let ncols_to_sample = (colsample_bytree * ncols as f64) as usize;
-
-    let cols = if cols_can_be_sampled.len() < ncols_to_sample {
-        sample(rng, ncols, ncols_to_sample).into_vec()
-    } else {
+    // `colsample_bysplit` is a fraction of all features; at least one is proposed. When no
+    // more columns than that still have positions, every one of them is proposed.
+    let ncols_to_sample = ((colsample_bysplit * ncols as f64) as usize).max(1);
+    let cols = if ncols_to_sample >= cols_can_be_sampled.len() {
         cols_can_be_sampled
+    } else {
+        let mut cols: Vec<usize> = sample(rng, cols_can_be_sampled.len(), ncols_to_sample)
+            .into_iter()
+            .map(|i| cols_can_be_sampled[i])
+            .collect();
+        cols.sort_unstable();
+        cols
     };
 
     let mut positions = Vec::new();
@@ -71,7 +79,7 @@ pub(super) fn sample_random_split_positions<R: Rng + ?Sized>(
 pub(super) fn sample_random_split<R: Rng + ?Sized>(
     allowed_intervals: &[Vec<Interval>],
     total_positions: &[usize],
-    colsample_bytree: f64,
+    colsample_bysplit: f64,
     split_try: usize,
     rng: &mut R,
     error_reductions: &[Vec<f64>],
@@ -79,7 +87,7 @@ pub(super) fn sample_random_split<R: Rng + ?Sized>(
     let positions = sample_random_split_positions(
         allowed_intervals,
         total_positions,
-        colsample_bytree,
+        colsample_bysplit,
         split_try,
         rng,
         error_reductions.len(),

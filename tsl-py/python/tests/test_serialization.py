@@ -23,7 +23,7 @@ def test_tsl_save_and_load():
 
     # Fit a model
     original_model, _ = TSL.fit(
-        X, y, epochs=1, n_trees=1, n_iter=5, split_try=5, colsample_bytree=1.0, seed=2
+        X, y, epochs=1, n_trees=1, n_iter=5, split_try=5, colsample_bysplit=1.0, seed=2
     )
 
     # Get predictions from original model
@@ -85,7 +85,7 @@ def test_tsl_save_and_load_with_different_data():
         n_trees=3,
         n_iter=5,
         split_try=5,
-        colsample_bytree=1.0,
+        colsample_bysplit=1.0,
         seed=42,
     )
 
@@ -162,7 +162,7 @@ def test_tsl_save_invalid_path():
     """Test that saving to an invalid path raises an error."""
     X, y = generate_test_data()
     model, _ = TSL.fit(
-        X, y, epochs=1, n_trees=1, n_iter=1, split_try=1, colsample_bytree=1.0, seed=42
+        X, y, epochs=1, n_trees=1, n_iter=1, split_try=1, colsample_bysplit=1.0, seed=42
     )
 
     # Try to save to a directory that doesn't exist

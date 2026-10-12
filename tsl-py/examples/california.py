@@ -740,7 +740,7 @@ def main(data_root: Path, model_dir: Optional[Path], out: Path, variant: str, re
         model, _ = TSL.fit(
             X, y,
             epochs=5, n_trees=16, n_iter=30, split_try=16,
-            colsample_bytree=1.0, seed=0, verbosity=0,
+            colsample_bysplit=1.0, seed=0, verbosity=0,
         )
     pred = model.predict(X)
     rmse = float(np.sqrt(np.mean((pred - y) ** 2)))

@@ -23,10 +23,6 @@ pub struct RefinementStrategyParams {
     pub tilt_tau: f64,
     /// L1 penalty on the multiplicative tilt update.
     pub tilt_rho: f64,
-    /// Prior sample size for parent anchoring (tau_0).
-    /// Interpreted as "how many samples worth of confidence in the parent".
-    /// Default: 0.0 (no anchoring). Typical values: 10–50.
-    pub prior_sample_size: f64,
     pub update_clamp: f64,
 }
 
@@ -37,7 +33,6 @@ impl RefinementStrategyParams {
                 alpha: self.alpha,
                 tilt_tau: self.tilt_tau,
                 tilt_rho: self.tilt_rho,
-                prior_sample_size: self.prior_sample_size,
                 update_clamp: self.update_clamp,
             },
             RefinementKind::Huber => RefinementStrategy::HuberRefinement {
@@ -45,7 +40,6 @@ impl RefinementStrategyParams {
                 c: 1.345,
                 tilt_tau: self.tilt_tau,
                 tilt_rho: self.tilt_rho,
-                prior_sample_size: self.prior_sample_size,
                 update_clamp: self.update_clamp,
             },
         }
@@ -58,7 +52,6 @@ pub struct RefinementStrategyParamsBuilder {
     alpha: f64,
     tilt_tau: f64,
     tilt_rho: f64,
-    prior_sample_size: f64,
     update_clamp: f64,
 }
 
@@ -69,7 +62,6 @@ impl RefinementStrategyParamsBuilder {
             alpha: 0.0,
             tilt_tau: crate::grid_tensor::two_tensor_solver::DEFAULT_TAU,
             tilt_rho: crate::grid_tensor::two_tensor_solver::DEFAULT_RHO,
-            prior_sample_size: 0.0,
             update_clamp: f64::INFINITY,
         }
     }
@@ -102,12 +94,6 @@ impl RefinementStrategyParamsBuilder {
         self
     }
 
-    /// Prior sample size for parent anchoring (tau_0). Default: 0.0 (no anchoring).
-    pub fn prior_sample_size(mut self, prior_sample_size: f64) -> Self {
-        self.prior_sample_size = prior_sample_size;
-        self
-    }
-
     pub fn update_clamp(mut self, update_clamp: f64) -> Self {
         self.update_clamp = update_clamp;
         self
@@ -119,7 +105,6 @@ impl RefinementStrategyParamsBuilder {
             alpha: self.alpha,
             tilt_tau: self.tilt_tau,
             tilt_rho: self.tilt_rho,
-            prior_sample_size: self.prior_sample_size,
             update_clamp: self.update_clamp,
         }
     }
@@ -138,7 +123,7 @@ impl Default for RefinementStrategyParamsBuilder {
 pub enum SplitStrategyParams {
     RandomSplit {
         split_try: usize,
-        colsample_bytree: f64,
+        colsample_bysplit: f64,
         min_interval_samples: usize,
         min_split_loss: f64,
         complexity_penalty: f64,
@@ -162,13 +147,13 @@ impl SplitStrategyParams {
         match self {
             SplitStrategyParams::RandomSplit {
                 split_try,
-                colsample_bytree,
+                colsample_bysplit,
                 min_interval_samples,
                 min_split_loss,
                 complexity_penalty,
             } => SplitStrategy::Random {
                 split_try: *split_try,
-                colsample_bytree: *colsample_bytree,
+                colsample_bysplit: *colsample_bysplit,
                 min_interval_samples: *min_interval_samples,
                 min_split_loss: *min_split_loss,
                 complexity_penalty: *complexity_penalty,
@@ -205,7 +190,7 @@ impl SplitStrategyParams {
 pub struct SplitStrategyParamsBuilder {
     variant: SplitVariant,
     split_try: usize,
-    colsample_bytree: f64,
+    colsample_bysplit: f64,
     min_interval_samples: usize,
     top_k: usize,
     must_fill_all_k: bool,
@@ -225,7 +210,7 @@ impl SplitStrategyParamsBuilder {
         Self {
             variant: SplitVariant::RandomSplit,
             split_try: 10,
-            colsample_bytree: 1.0,
+            colsample_bysplit: 1.0,
             min_interval_samples: 1,
             min_split_loss: 0.0,
             complexity_penalty: 0.0,
@@ -254,8 +239,8 @@ impl SplitStrategyParamsBuilder {
         self
     }
 
-    pub fn colsample_bytree(mut self, colsample_bytree: f64) -> Self {
-        self.colsample_bytree = colsample_bytree;
+    pub fn colsample_bysplit(mut self, colsample_bysplit: f64) -> Self {
+        self.colsample_bysplit = colsample_bysplit;
         self
     }
 
@@ -297,7 +282,7 @@ impl SplitStrategyParamsBuilder {
         match self.variant {
             SplitVariant::RandomSplit => SplitStrategyParams::RandomSplit {
                 split_try: self.split_try,
-                colsample_bytree: self.colsample_bytree,
+                colsample_bysplit: self.colsample_bysplit,
                 min_interval_samples: self.min_interval_samples,
                 min_split_loss: self.min_split_loss,
                 complexity_penalty: self.complexity_penalty,

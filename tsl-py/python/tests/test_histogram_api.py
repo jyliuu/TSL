@@ -15,7 +15,7 @@ def test_histogram_candidates_bound_every_bag(consensus):
     x, y = data()
     model, _ = TSL.fit(
         x, y, epochs=2, n_trees=3, n_iter=16, split_try=32,
-        colsample_bytree=1.0, consensus=consensus, max_bins=4, verbosity=0,
+        colsample_bysplit=1.0, consensus=consensus, max_bins=4, verbosity=0,
     )
     for stage in model.stage_predictors:
         for grid in stage.grid_tensors:

@@ -37,7 +37,7 @@ fn default_model_bytes(huber: bool, positive: bool, bins: Option<u16>, clamp: f6
             SplitStrategyParamsBuilder::new()
                 .random_split()
                 .split_try(9)
-                .colsample_bytree(1.0)
+                .colsample_bysplit(1.0)
                 .min_interval_samples(2)
                 .build(),
         )
@@ -68,7 +68,6 @@ fn refinement(huber: bool, clamp: f64) -> RefinementStrategy {
             c: 1.345,
             tilt_tau: 0.03,
             tilt_rho: 0.01,
-            prior_sample_size: 0.0,
             update_clamp: clamp,
         }
     } else {
@@ -76,7 +75,6 @@ fn refinement(huber: bool, clamp: f64) -> RefinementStrategy {
             alpha: 0.1,
             tilt_tau: 0.03,
             tilt_rho: 0.01,
-            prior_sample_size: 0.0,
             update_clamp: clamp,
         }
     }
