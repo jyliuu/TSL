@@ -415,4 +415,217 @@ pub fn convert_multipliers_to_backbone_tilt(v_plus: f64, v_minus: f64) -> (f64, 
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+
+    const NO_UPDATE: (f64, f64, f64) = (0.0, 0.0, 0.0);
+
+    /// [`solve_two_tensor`] for `[s11, s22, s12, t1, t2]` and penalties `[α, τ, ρ]` within
+    /// the default multiplier bounds.
+    fn solve([s11, s22, s12, t1, t2]: [f64; 5], [alpha, tau, rho]: [f64; 3]) -> (f64, f64, f64) {
+        solve_two_tensor(
+            s11,
+            s22,
+            s12,
+            t1,
+            t2,
+            alpha,
+            tau,
+            rho,
+            DEFAULT_V_MIN,
+            DEFAULT_V_MAX,
+        )
+    }
+
+    /// The multipliers `1 + u±` lie within the bounds and the gain is the data gain less the
+    /// exact log-coordinate penalty at those multipliers.
+    fn assert_exact_gain(system: [f64; 5], penalties: [f64; 3], solution: (f64, f64, f64)) {
+        let ([s11, s22, s12, t1, t2], [alpha, tau, rho]) = (system, penalties);
+        let (u_plus, u_minus, gain) = solution;
+        for v in [1.0 + u_plus, 1.0 + u_minus] {
+            assert!((DEFAULT_V_MIN - 1e-12..=DEFAULT_V_MAX + 1e-12).contains(&v));
+        }
+        let expected = data_loss_gain(u_plus, u_minus, s11, s22, s12, t1, t2)
+            - log_coordinate_penalty(1.0 + u_plus, 1.0 + u_minus, alpha, tau, rho);
+        assert!(
+            (gain - expected).abs() <= 1e-12 * expected.abs().max(1.0),
+            "{system:?} {penalties:?}: gain {gain}, expected {expected}"
+        );
+    }
+
+    /// Full-rank, coupled and rank-one systems, with targets inside and beyond the multiplier
+    /// bounds, under every penalty combination.
+    #[test]
+    fn gain_is_the_exact_penalized_decrease_at_bounded_multipliers() {
+        let systems = [
+            [1.0, 1.0, 0.0, 1.0, 0.0],
+            [2.0, 3.0, -0.25, 1.5, -0.5],
+            [1.0, 1.0, -1.0, 0.2, -0.2],
+            [100.0, 1.0, 0.0, 1e4, 0.0],
+            [1.0, 1.0, 0.0, 0.0, -5.0],
+        ];
+        let penalties = [
+            [0.0; 3],
+            [0.1, 0.01, 0.0],
+            [0.7, 0.4, 0.2],
+            [0.0, 5.0, 0.1],
+            [100.0, 100.0, 1.0],
+        ];
+        for system in systems {
+            for penalties in penalties {
+                assert_exact_gain(system, penalties, solve(system, penalties));
+            }
+        }
+        let (u_plus, _, _) = solve([100.0, 1.0, 0.0, 1e4, 0.0], [0.0; 3]);
+        assert!((1.0 + u_plus - DEFAULT_V_MAX).abs() < 1e-12);
+        let (_, u_minus, _) = solve([1.0, 1.0, 0.0, 0.0, -5.0], [0.0; 3]);
+        assert!((1.0 + u_minus - DEFAULT_V_MIN).abs() < 1e-12);
+    }
+
+    /// Scaling the statistics and penalties by a common factor leaves the update unchanged
+    /// and scales the gain, up to the extremes of the floating-point range.
+    #[test]
+    fn update_is_invariant_to_uniform_system_scale() {
+        for [s11, s22, s12, alpha, tau] in [
+            [2.0, 2.0, -2.0, 0.0, 0.01],
+            [2.0, 3.0, -0.4, 0.3, 0.01],
+            [1.002001, 1.0, -1.001, 0.0, 0.0],
+        ] {
+            for rho in [0.0, 0.001, 0.1] {
+                let (system, penalties) = ([s11, s22, s12, 0.4, -0.4], [alpha, tau, rho]);
+                let reference = solve(system, penalties);
+                for scale in [1e-100, 1e100] {
+                    let result = solve(system.map(|v| v * scale), penalties.map(|v| v * scale));
+                    assert!((result.0 - reference.0).abs() < 1e-10);
+                    assert!((result.1 - reference.1).abs() < 1e-10);
+                    assert!((result.2 / scale - reference.2).abs() < 1e-10);
+                }
+            }
+        }
+    }
+
+    /// Rank-one systems get a bounded descent update with exact positive gain: the
+    /// minimum-norm step along the identified range direction, its tilt soft-thresholded by
+    /// the L1 penalty, or the zero-tilt step when that penalty outweighs the tilt.
+    #[test]
+    fn rank_one_systems_get_a_bounded_descent_update_with_exact_gain() {
+        // The pure-tilt step of the symmetric system, soft-thresholded by ρ.
+        let tilt_step = |rho: f64| {
+            let half = 0.5 * (0.4 - rho / 4.0) / (2.0 + 0.01 / 4.0);
+            Some((half, -half))
+        };
+        let zero_tilt_step = Some((0.2, 0.2));
+        let p = 1.001;
+        // System, penalties and the closed-form update (u₊, u₋) where one is known.
+        let cases = [
+            (
+                [2.0, 2.0, -2.0, 0.4, -0.4],
+                [0.0, 0.01, 0.0],
+                tilt_step(0.0),
+            ),
+            (
+                [2.0, 2.0, -2.0, 0.4, -0.4],
+                [0.0, 0.01, 0.2],
+                tilt_step(0.2),
+            ),
+            ([4.0, 1.0, -2.0, 0.8, -0.4], [0.0; 3], Some((0.16, -0.08))),
+            (
+                [1.0, 4.0, -2.0, -0.2, 0.4],
+                [0.0, 0.0, 10.0],
+                zero_tilt_step,
+            ),
+            ([p * p, 1.0, -p, p, -1.0], [0.0, 0.0, 0.001], None),
+            ([1.0, 1.0, -1.0, 0.2, -0.2], [0.0, 5.0, 0.1], None),
+            ([1.0, 1.0, -1.0, 20.0, -20.0], [0.0, 5.0, 0.1], None),
+            ([1.0, 1.0, -1.0, -20.0, 20.0], [0.0, 5.0, 0.1], None),
+        ];
+        for (system, penalties, expected) in cases {
+            let solution = solve(system, penalties);
+            assert!(solution.2 > 0.0, "{system:?} {penalties:?}: {solution:?}");
+            assert_exact_gain(system, penalties, solution);
+            if let Some((u_plus, u_minus)) = expected {
+                assert!((solution.0 - u_plus).abs() < 1e-12, "{solution:?}");
+                assert!((solution.1 - u_minus).abs() < 1e-12, "{solution:?}");
+            }
+        }
+        // Candidates are compared at their clamped multipliers, where the range step beats
+        // the far zero-tilt step.
+        assert!(solve([p * p, 1.0, -p, p, -1.0], [0.0, 0.0, 0.001]).2 > 0.99);
+    }
+
+    /// Non-finite or negative statistics, indefinite systems, and penalties or bounds that are
+    /// invalid give no update; a system indefinite only by roundoff still gets one.
+    #[test]
+    fn invalid_and_indefinite_systems_have_no_update() {
+        for bad in [f64::NAN, f64::INFINITY, -1.0] {
+            assert_eq!(solve([bad, 1.0, -0.5, 0.2, -0.2], [0.0; 3]), NO_UPDATE);
+            assert_eq!(
+                solve([1.0, 1.0, -0.5, 0.2, -0.2], [bad, 0.0, 0.0]),
+                NO_UPDATE
+            );
+        }
+        for rho in [0.0, 0.1] {
+            for cross in [-2.0, 2.0] {
+                assert_eq!(
+                    solve([1.0, 1.0, cross, 0.2, -0.2], [0.0, 0.0, rho]),
+                    NO_UPDATE
+                );
+            }
+        }
+        assert_eq!(
+            solve_two_tensor(1.0, 1.0, 0.0, 0.2, 0.0, 0.0, 0.0, 0.0, 1.5, DEFAULT_V_MAX),
+            NO_UPDATE
+        );
+        assert!(solve([1.0, 1.0, -1.0 - 1e-14, 0.2, -0.2], [0.0; 3]).2 > 0.0);
+    }
+
+    /// The L1 tilt penalty soft-thresholds the tilt: the tilt update shrinks as ρ grows and
+    /// vanishes beyond a threshold, leaving a pure backbone update, or no update at all when
+    /// the target is pure tilt.
+    #[test]
+    fn l1_tilt_penalty_soft_thresholds_the_tilt_update() {
+        let mut previous_tilt = f64::INFINITY;
+        for rho in [0.0, 0.1, 0.5, 1.0, 2.0, 10.0] {
+            let (u_plus, u_minus, gain) = solve([1.0, 1.0, 0.0, 1.0, 0.0], [0.0, 0.0, rho]);
+            let tilt = u_plus - u_minus;
+            assert!(gain > 0.0);
+            assert!(
+                tilt > -1e-12 && tilt <= previous_tilt + 1e-12,
+                "rho {rho}: tilt {tilt}"
+            );
+            previous_tilt = tilt;
+        }
+        assert!(previous_tilt.abs() < 1e-12);
+        assert_eq!(
+            solve([2.0, 2.0, -2.0, 0.4, -0.4], [0.0, 0.01, 2.0]),
+            NO_UPDATE
+        );
+    }
+
+    /// The backbone penalty acts only on β = ½ ln(v₊v₋) and the tilt penalties only on
+    /// δ = ½ ln(v₊/v₋) at every multiplier scale, so penalizing one coordinate leaves an
+    /// update along the other unchanged.
+    #[test]
+    fn penalties_act_on_separate_log_coordinates() {
+        assert!(log_coordinate_penalty(2.0, 0.5, 5.0, 0.0, 0.0).abs() < 1e-12);
+        assert!(log_coordinate_penalty(2.0, 2.0, 0.0, 5.0, 1.0).abs() < 1e-12);
+        let tilt_penalty = |v_plus, v_minus| log_coordinate_penalty(v_plus, v_minus, 0.0, 3.0, 0.0);
+        assert!((tilt_penalty(2.0, 0.5) - tilt_penalty(4.0, 1.0)).abs() < 1e-12);
+
+        for (target, penalties) in [(-0.2, [100.0, 0.0, 0.0]), (0.2, [0.0, 100.0, 0.0])] {
+            let system = [1.0, 1.0, 0.0, 0.2, target];
+            let (free, penalized) = (solve(system, [0.0; 3]), solve(system, penalties));
+            assert!((free.0 - penalized.0).abs() < 1e-12);
+            assert!((free.1 - penalized.1).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn multipliers_round_trip_through_backbone_and_tilt() {
+        for (v_plus, v_minus) in [(2.0, 0.5), (DEFAULT_V_MIN, DEFAULT_V_MAX), (3.0, 3.0)] {
+            let (v_b, delta_d) = convert_multipliers_to_backbone_tilt(v_plus, v_minus);
+            assert!((v_b * delta_d.exp() - v_plus).abs() <= 1e-12 * v_plus);
+            assert!((v_b * (-delta_d).exp() - v_minus).abs() <= 1e-12 * v_minus);
+        }
+    }
+}
