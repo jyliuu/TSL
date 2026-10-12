@@ -45,14 +45,19 @@ pub enum RefinementStrategy {
 }
 
 impl RefinementStrategy {
+    /// Panics unless `update_clamp` is nonnegative or positive infinity.
+    pub(crate) fn assert_valid_update_clamp(&self) {
+        assert!(
+            self.update_clamp() >= 0.0,
+            "update_clamp must be nonnegative or positive infinity"
+        );
+    }
+
     /// Multiplier limits combine the numerical box with the configured log-step cap.
     #[inline]
     pub(crate) fn multiplier_bounds(&self) -> (f64, f64) {
+        self.assert_valid_update_clamp();
         let clamp = self.update_clamp();
-        assert!(
-            clamp >= 0.0,
-            "update_clamp must be nonnegative or positive infinity"
-        );
         if clamp >= DEFAULT_V_MAX.ln() {
             (DEFAULT_V_MIN, DEFAULT_V_MAX)
         } else {

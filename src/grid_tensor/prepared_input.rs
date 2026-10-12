@@ -20,12 +20,7 @@ impl<'a> PreparedInput<'a> {
         let mut bin_edges = Vec::with_capacity(x.ncols());
         let mut bin_indices = Vec::with_capacity(x.ncols());
         for col in 0..x.ncols() {
-            let mut indices: Vec<_> = (0..x.nrows()).collect();
-            indices.sort_by(|&a, &b| x[[a, col]].partial_cmp(&x[[b, col]]).unwrap());
-            let mut ranks = vec![0; x.nrows()];
-            for (rank, &row) in indices.iter().enumerate() {
-                ranks[row] = rank;
-            }
+            let (indices, ranks) = sort_column(x, col);
             let edges = if let Some(bins) = max_bins.filter(|&bins| bins >= 2) {
                 let values: Vec<_> = x.column(col).iter().copied().collect();
                 quantile_bin_edge_positions(&indices, &values, bins as usize)
@@ -62,4 +57,18 @@ impl<'a> PreparedInput<'a> {
             "Prepared input must belong to the same feature view and bin configuration"
         );
     }
+}
+
+/// Rows of column `col` in stable ascending order, and each row's rank in that order.
+///
+/// # Panics
+/// If the column holds a NaN.
+pub(crate) fn sort_column(x: ArrayView2<f64>, col: usize) -> (Vec<usize>, Vec<usize>) {
+    let mut indices: Vec<_> = (0..x.nrows()).collect();
+    indices.sort_by(|&a, &b| x[[a, col]].partial_cmp(&x[[b, col]]).unwrap());
+    let mut ranks = vec![0; x.nrows()];
+    for (rank, &row) in indices.iter().enumerate() {
+        ranks[row] = rank;
+    }
+    (indices, ranks)
 }
