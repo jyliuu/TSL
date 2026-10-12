@@ -12,13 +12,12 @@ tsl(
   n_iter = 10L,
   decay = 1,
   split_try = 10L,
-  colsample_bytree = 0.8,
+  colsample_bysplit = 1,
   alpha = 0,
   complexity_penalty = 0,
   min_split_loss = 0,
   min_interval_samples = 1L,
   refinement_strategy = c("l2", "huber"),
-  prior_sample_size = 0,
   update_clamp = Inf,
   tilt_tau = 0.01,
   tilt_rho = 0,
@@ -26,7 +25,6 @@ tsl(
   top_k = 10L,
   must_fill_all_k = TRUE,
   similarity_threshold = 0,
-  bagged = FALSE,
   seed = 42L,
   verbosity = 1L
 )
@@ -48,7 +46,8 @@ predictors with rows = observations and columns = features.}
 \item{split_try}{Number of random split candidates (used by the
 \code{"random"} split strategy).}
 
-\item{colsample_bytree}{Fraction of features sampled per tree.}
+\item{colsample_bysplit}{Fraction of features proposed per split, from those
+that still have split positions (at least one).}
 
 \item{alpha}{L2 penalty on the multiplicative log-backbone update.}
 
@@ -60,8 +59,6 @@ and merge selection; \code{0.0} preserves split/resplit-only fitting.}
 \item{min_interval_samples}{Minimum number of samples per interval.}
 
 \item{refinement_strategy}{Refinement loss, one of \code{"l2"} or \code{"huber"}.}
-
-\item{prior_sample_size}{Prior pseudo-count for refinement shrinkage.}
 
 \item{update_clamp}{Maximum magnitude of a refinement update.}
 
@@ -80,8 +77,6 @@ candidates.}
 
 \item{similarity_threshold}{Threshold controlling bagged aggregation of
 trees within a stage.}
-
-\item{bagged}{Accepted for parity with the Python API; has no effect.}
 
 \item{seed}{Random seed.}
 

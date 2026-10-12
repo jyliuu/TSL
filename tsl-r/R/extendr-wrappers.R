@@ -5,7 +5,7 @@
 #' @useDynLib tensorsl, .registration = TRUE
 NULL
 
-tsl_fit <- function(x, y, epochs, decay, n_trees, n_iter, split_try, colsample_bytree, alpha, complexity_penalty, min_split_loss, min_interval_samples, refinement_strategy, prior_sample_size, update_clamp, tilt_tau, tilt_rho, split_strategy, top_k, must_fill_all_k, similarity_threshold, bagged, seed, verbosity) .Call(wrap__tsl_fit, x, y, epochs, decay, n_trees, n_iter, split_try, colsample_bytree, alpha, complexity_penalty, min_split_loss, min_interval_samples, refinement_strategy, prior_sample_size, update_clamp, tilt_tau, tilt_rho, split_strategy, top_k, must_fill_all_k, similarity_threshold, bagged, seed, verbosity)
+tsl_fit <- function(x, y, epochs, decay, n_trees, n_iter, split_try, colsample_bysplit, alpha, complexity_penalty, min_split_loss, min_interval_samples, refinement_strategy, update_clamp, tilt_tau, tilt_rho, split_strategy, top_k, must_fill_all_k, similarity_threshold, seed, verbosity) .Call(wrap__tsl_fit, x, y, epochs, decay, n_trees, n_iter, split_try, colsample_bysplit, alpha, complexity_penalty, min_split_loss, min_interval_samples, refinement_strategy, update_clamp, tilt_tau, tilt_rho, split_strategy, top_k, must_fill_all_k, similarity_threshold, seed, verbosity)
 
 tsl_predict <- function(model, x) .Call(wrap__tsl_predict, model, x)
 

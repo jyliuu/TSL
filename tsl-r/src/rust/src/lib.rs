@@ -24,13 +24,12 @@ fn tsl_fit(
     n_trees: i32,
     n_iter: i32,
     split_try: i32,
-    colsample_bytree: f64,
+    colsample_bysplit: f64,
     alpha: f64,
     complexity_penalty: f64,
     min_split_loss: f64,
     min_interval_samples: i32,
     refinement_strategy: &str,
-    prior_sample_size: f64,
     update_clamp: f64,
     tilt_tau: f64,
     tilt_rho: f64,
@@ -38,19 +37,14 @@ fn tsl_fit(
     top_k: i32,
     must_fill_all_k: bool,
     similarity_threshold: f64,
-    bagged: bool,
     seed: f64,
     verbosity: i32,
 ) -> List {
-    // `bagged` is accepted for parity with the Python API; the bagged
-    // aggregation path is selected by `similarity_threshold`, so it is unused here.
-    let _ = bagged;
-
     let split_strategy_params = match split_strategy {
         "random" => SplitStrategyParamsBuilder::new()
             .random_split()
             .split_try(split_try as usize)
-            .colsample_bytree(colsample_bytree)
+            .colsample_bysplit(colsample_bysplit)
             .min_interval_samples(min_interval_samples as usize)
             .min_split_loss(min_split_loss)
             .complexity_penalty(complexity_penalty)
@@ -78,7 +72,6 @@ fn tsl_fit(
         "l2" => RefinementStrategyParamsBuilder::new()
             .l2()
             .alpha(alpha)
-            .prior_sample_size(prior_sample_size)
             .update_clamp(update_clamp)
             .tilt_tau(tilt_tau)
             .tilt_rho(tilt_rho)
@@ -86,7 +79,6 @@ fn tsl_fit(
         "huber" => RefinementStrategyParamsBuilder::new()
             .huber()
             .alpha(alpha)
-            .prior_sample_size(prior_sample_size)
             .update_clamp(update_clamp)
             .tilt_tau(tilt_tau)
             .tilt_rho(tilt_rho)

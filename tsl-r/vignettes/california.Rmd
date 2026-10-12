@@ -95,7 +95,7 @@ y <- raw[, 9]                      # median house value, in $100k
 
 ```{r fit, eval = have_data}
 model <- tsl(X, y, epochs = 5L, n_trees = 12L, n_iter = 25L, split_try = 16L,
-             colsample_bytree = 1.0, seed = 0L, verbosity = 0L)
+             colsample_bysplit = 1.0, seed = 0L, verbosity = 0L)
 pred <- predict(model, X)
 cat(sprintf("stages = %d   train RMSE = %.3f ($100k)\n",
             length(tsl_components(model)), sqrt(mean((pred - y)^2))))
