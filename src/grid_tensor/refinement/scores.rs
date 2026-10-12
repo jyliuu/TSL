@@ -1,5 +1,6 @@
 //! Interval statistics and the score-cache refresh over the ranges an action touched.
 
+use super::gain::SplitEvaluator;
 use super::prefix::{binned_prefix_stats_range, prefix_stats_range};
 use super::RefinementStrategy;
 use crate::grid_tensor::state::{AffectedRange, FittingState};
@@ -11,52 +12,42 @@ impl RefinementStrategy {
         affected_ranges: &[AffectedRange],
     ) -> FittingState<'a> {
         state.require_current_statistics();
-        if state.split_scores_stale
-            && (!state.sampled_split_scoring || state.is_stage1_positive_only())
-        {
-            self.refresh_all_split_scores(&mut state);
+        let evaluator = SplitEvaluator::new(self, state.is_stage1_positive_only());
+        if state.split_scores_stale && (!state.sampled_split_scoring || evaluator.is_stage1()) {
+            Self::refresh_all_split_scores_with(&mut state, &evaluator);
         }
         for affected_range in affected_ranges {
             let c = affected_range.col;
             let (lo, hi) = affected_range.point_range;
 
-            // Update split error reductions using point range
-            self.update_error_reductions_split_for_col_range(&mut state, c, lo, hi);
+            Self::update_error_reductions_split_for_col_range(&mut state, &evaluator, c, lo, hi);
 
-            // Update interval stats and boundary caches using boundary interval range
-            // Note: interval_range in AffectedRange is for allowed_intervals,
-            // but we need boundary indices for cache refreshing, so compute from point range
-            let n_splits = state.boundaries[c].len();
-            if n_splits > 0 {
-                // Compute boundary interval indices from point range
-                let (blo, bhi) = state.compute_boundary_index_range(c, lo, hi);
+            // `interval_range` indexes allowed intervals; the boundary caches are indexed
+            // from the point range instead.
+            if state.boundaries[c].is_empty() {
+                continue;
+            }
+            let (blo, bhi) = state.compute_boundary_index_range(c, lo, hi);
+            Self::update_interval_stats_for_col_range(&mut state, c, blo, bhi);
 
-                // Update interval stats for affected intervals (O(1) lookup for resplit/merge)
-                Self::update_interval_stats_for_col_range(&mut state, c, blo, bhi);
-
-                // Convert interval range to boundary range
-                // Intervals [blo, bhi] affect boundaries [blo-1, bhi] (clamped to valid boundaries)
-                let n_boundaries = state.boundaries[c].len();
-                if n_boundaries > 0 {
-                    let boundary_lo = blo.saturating_sub(1);
-                    let boundary_hi = bhi.min(n_boundaries - 1);
-
-                    self.update_error_reductions_resplit_for_col_range(
-                        &mut state,
-                        c,
-                        boundary_lo,
-                        boundary_hi,
-                    );
-                    // Only update merge error reductions if merge is enabled
-                    if state.split_strategy_state.merge_enabled {
-                        self.update_error_reductions_merge_for_col_range(
-                            &mut state,
-                            c,
-                            boundary_lo,
-                            boundary_hi,
-                        );
-                    }
-                }
+            // Intervals [blo, bhi] border boundaries [blo - 1, bhi], clamped to valid boundaries.
+            let boundary_lo = blo.saturating_sub(1);
+            let boundary_hi = bhi.min(state.boundaries[c].len() - 1);
+            Self::update_error_reductions_resplit_for_col_range(
+                &mut state,
+                &evaluator,
+                c,
+                boundary_lo,
+                boundary_hi,
+            );
+            if state.split_strategy_state.merge_enabled {
+                self.update_error_reductions_merge_for_col_range(
+                    &mut state,
+                    &evaluator,
+                    c,
+                    boundary_lo,
+                    boundary_hi,
+                );
             }
         }
 
@@ -71,7 +62,7 @@ impl RefinementStrategy {
         bhi: usize,
     ) {
         let boundaries = &state.boundaries[col];
-        let n = state.x.nrows();
+        let n = state.n;
         let bin_edges = &state.precomputed_statistics.bin_edges[col];
         let is_binned = !bin_edges.is_empty();
 

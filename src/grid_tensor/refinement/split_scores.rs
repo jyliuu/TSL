@@ -5,62 +5,136 @@ use std::iter::once;
 use super::gain::{solver_stats, SplitEvaluator};
 use super::prefix::binned_prefix_stats_at;
 use super::RefinementStrategy;
-use crate::grid_tensor::state::{FittingState, PrefixStats};
+use crate::grid_tensor::state::{FittingState, PrecomputedStatistics, PrefixStats};
+
+/// A column's prefix statistics: exact (one entry per sorted position) or bin-cumulative.
+struct ColumnPrefix<'s> {
+    exact: &'s [PrefixStats],
+    binned: &'s [PrefixStats],
+    bin_edges: &'s [usize],
+}
+
+impl ColumnPrefix<'_> {
+    /// Prefix statistics before sorted position `start` and through `end - 1`.
+    fn interval_bounds(&self, start: usize, end: usize) -> (PrefixStats, PrefixStats) {
+        if self.bin_edges.is_empty() {
+            let base = if start == 0 {
+                PrefixStats::ZERO
+            } else {
+                self.exact[start - 1]
+            };
+            (base, self.exact[end - 1])
+        } else {
+            let base = if start == 0 {
+                PrefixStats::ZERO
+            } else {
+                binned_prefix_stats_at(self.binned, self.bin_edges, start - 1)
+            };
+            (
+                base,
+                binned_prefix_stats_at(self.binned, self.bin_edges, end - 1),
+            )
+        }
+    }
+}
+
+/// The split-score caches of one column, indexed by sorted position.
+pub(super) struct SplitCaches<'s> {
+    update_left: &'s mut [(f64, f64)],
+    update_right: &'s mut [(f64, f64)],
+    gains: &'s mut [f64],
+    gain_pairs: &'s mut [(f64, f64)],
+}
+
+impl<'s> SplitCaches<'s> {
+    pub(super) fn of(statistics: &'s mut PrecomputedStatistics, col: usize) -> Self {
+        split_column(statistics, col).1
+    }
+
+    /// Mark `pos` as an ineligible split position.
+    pub(super) fn mask(&mut self, pos: usize) {
+        self.update_left[pos] = (f64::NAN, f64::NAN);
+        self.update_right[pos] = (f64::NAN, f64::NAN);
+        self.gains[pos] = f64::NAN;
+        self.gain_pairs[pos] = (f64::NAN, f64::NAN);
+    }
+
+    fn store(&mut self, pos: usize, (left, right, gains): ((f64, f64), (f64, f64), (f64, f64))) {
+        self.update_left[pos] = left;
+        self.update_right[pos] = right;
+        self.gain_pairs[pos] = gains;
+        self.gains[pos] = gains.0 + gains.1;
+    }
+}
+
+/// Borrow a column's prefix statistics alongside its split-score caches.
+fn split_column(
+    statistics: &mut PrecomputedStatistics,
+    col: usize,
+) -> (ColumnPrefix<'_>, SplitCaches<'_>) {
+    let PrecomputedStatistics {
+        prefix_sums,
+        binned_prefix_sums,
+        bin_edges,
+        update_pairs_split_left,
+        update_pairs_split_right,
+        error_reductions_split,
+        error_reductions_split_pairs,
+        ..
+    } = statistics;
+    (
+        ColumnPrefix {
+            exact: &prefix_sums[col],
+            binned: &binned_prefix_sums[col],
+            bin_edges: &bin_edges[col],
+        },
+        SplitCaches {
+            update_left: &mut update_pairs_split_left[col],
+            update_right: &mut update_pairs_split_right[col],
+            gains: &mut error_reductions_split[col],
+            gain_pairs: &mut error_reductions_split_pairs[col],
+        },
+    )
+}
 
 impl RefinementStrategy {
     pub(super) fn update_error_reductions_split_for_all_cols<'a>(
         &self,
         mut state: FittingState<'a>,
     ) -> FittingState<'a> {
-        let n = state.x.nrows();
-        for col in 0..state.boundaries.len() {
-            self.update_error_reductions_split_for_col_range(&mut state, col, 0, n);
+        let evaluator = SplitEvaluator::new(self, state.is_stage1_positive_only());
+        let n = state.n;
+        for col in 0..state.p {
+            Self::update_error_reductions_split_for_col_range(&mut state, &evaluator, col, 0, n);
         }
         state
     }
 
+    /// Rescore every interval that intersects sorted positions `lo..=hi` of `col`.
     pub(super) fn update_error_reductions_split_for_col_range(
-        &self,
         state: &mut FittingState,
+        evaluator: &SplitEvaluator,
         col: usize,
         lo: usize,
         hi: usize,
     ) {
-        let n = state.x.nrows();
-        let is_stage1 = state.is_stage1_positive_only();
+        let n = state.n;
         let mut start = 0usize;
-        for &b in state.boundaries[col].iter().chain(once(&n)) {
-            // Computes the error reductions for any interval that intersects with the updated points range
-
-            let end = b;
-            if end > lo && state.sampled_split_scoring && !is_stage1 {
-                // solve_two_tensor returns finite gains, so summing the two sides cannot
-                // create NaN eligibility masks. Positive-only scoring uses the eager path.
-                // Preserve every historical mask, including endpoints of past intervals.
+        for &end in state.boundaries[col].iter().chain(once(&n)) {
+            if end > lo && state.sampled_split_scoring && !evaluator.is_stage1() {
+                // Sampled scoring rescores positions on demand. solve_two_tensor returns
+                // finite gains, so summing the two sides never creates a NaN mask, and every
+                // mask persists, including at endpoints of intervals a merge has joined.
+                // Positive-only scoring uses the eager path.
                 if end.saturating_sub(start) >= 2 {
-                    for pos in [start, end - 1] {
-                        state.precomputed_statistics.error_reductions_split[col][pos] = f64::NAN;
-                        state.precomputed_statistics.update_pairs_split_left[col][pos] =
-                            (f64::NAN, f64::NAN);
-                        state.precomputed_statistics.update_pairs_split_right[col][pos] =
-                            (f64::NAN, f64::NAN);
-                        state.precomputed_statistics.error_reductions_split_pairs[col][pos] =
-                            (f64::NAN, f64::NAN);
-                    }
+                    let mut caches = SplitCaches::of(&mut state.precomputed_statistics, col);
+                    caches.mask(start);
+                    caches.mask(end - 1);
                 }
                 state.split_scores_stale = true;
             } else if end > lo {
-                self.update_error_reductions_split_single_interval(
-                    &state.precomputed_statistics.prefix_sums[col],
-                    &state.precomputed_statistics.binned_prefix_sums[col],
-                    &mut state.precomputed_statistics.update_pairs_split_left[col],
-                    &mut state.precomputed_statistics.update_pairs_split_right[col],
-                    &mut state.precomputed_statistics.error_reductions_split[col],
-                    &mut state.precomputed_statistics.error_reductions_split_pairs[col],
-                    &state.precomputed_statistics.bin_edges[col],
-                    (start, end),
-                    is_stage1,
-                );
+                let (prefix, mut caches) = split_column(&mut state.precomputed_statistics, col);
+                score_interval(&prefix, &mut caches, evaluator, start, end);
             }
             start = end;
             if start > hi {
@@ -72,10 +146,18 @@ impl RefinementStrategy {
     /// Rebuild split scores before an eager consumer or scoring-mode transition.
     pub(crate) fn refresh_all_split_scores(&self, state: &mut FittingState) {
         state.require_current_statistics();
+        let evaluator = SplitEvaluator::new(self, state.is_stage1_positive_only());
+        Self::refresh_all_split_scores_with(state, &evaluator);
+    }
+
+    pub(super) fn refresh_all_split_scores_with(
+        state: &mut FittingState,
+        evaluator: &SplitEvaluator,
+    ) {
         let sampled = state.sampled_split_scoring;
         state.sampled_split_scoring = false;
         for col in 0..state.p {
-            self.update_error_reductions_split_for_col_range(state, col, 0, state.n);
+            Self::update_error_reductions_split_for_col_range(state, evaluator, col, 0, state.n);
         }
         state.sampled_split_scoring = sampled;
         state.split_scores_stale = false;
@@ -84,8 +166,7 @@ impl RefinementStrategy {
     /// Evaluate one sampled coordinate against its current structural interval.
     pub(crate) fn refresh_sampled_split(&self, state: &mut FittingState, col: usize, pos: usize) {
         state.require_current_statistics();
-        let statistics = &state.precomputed_statistics;
-        let Some(gain) = statistics.error_reductions_split[col].get(pos) else {
+        let Some(gain) = state.precomputed_statistics.error_reductions_split[col].get(pos) else {
             return;
         };
         if gain.is_nan() {
@@ -96,206 +177,67 @@ impl RefinementStrategy {
         if pos <= start || pos >= end.saturating_sub(1) {
             return;
         }
-        let bin_edges = &statistics.bin_edges[col];
-        let (base, left, total) = if bin_edges.is_empty() {
-            let ps = &statistics.prefix_sums[col];
-            (
-                if start == 0 {
-                    PrefixStats::ZERO
-                } else {
-                    ps[start - 1]
-                },
-                ps[pos - 1],
-                ps[end - 1],
-            )
+        let evaluator = SplitEvaluator::new(self, state.is_stage1_positive_only());
+        let (prefix, mut caches) = split_column(&mut state.precomputed_statistics, col);
+        let left = if prefix.bin_edges.is_empty() {
+            prefix.exact[pos - 1]
         } else {
-            let Ok(bin) = bin_edges.binary_search(&pos) else {
+            let Ok(bin) = prefix.bin_edges.binary_search(&pos) else {
                 return;
             };
-            let bs = &statistics.binned_prefix_sums[col];
-            (
-                if start == 0 {
-                    PrefixStats::ZERO
-                } else {
-                    binned_prefix_stats_at(bs, bin_edges, start - 1)
-                },
-                bs[bin],
-                binned_prefix_stats_at(bs, bin_edges, end - 1),
-            )
+            prefix.binned[bin]
         };
-        let (left, right, gains) = SplitEvaluator::new(self, state.is_stage1_positive_only())
-            .evaluate(solver_stats(left, base), solver_stats(total, base));
-        let statistics = &mut state.precomputed_statistics;
-        statistics.update_pairs_split_left[col][pos] = left;
-        statistics.update_pairs_split_right[col][pos] = right;
-        statistics.error_reductions_split_pairs[col][pos] = gains;
-        statistics.error_reductions_split[col][pos] = gains.0 + gains.1;
+        let (base, total) = prefix.interval_bounds(start, end);
+        caches.store(
+            pos,
+            evaluator.evaluate(solver_stats(left, base), solver_stats(total, base)),
+        );
     }
+}
 
-    #[allow(clippy::too_many_arguments)]
-    fn update_error_reductions_split_single_interval(
-        &self,
-        ps: &[PrefixStats],
-        bs: &[PrefixStats],
-        update_left: &mut [(f64, f64)],
-        update_right: &mut [(f64, f64)],
-        error_reductions: &mut [f64],
-        error_reductions_pairs: &mut [(f64, f64)],
-        bin_edges: &[usize],
-        spanned_interval: (usize, usize),
-        is_stage1: bool,
-    ) {
-        let (start, end) = spanned_interval;
-        let len = end.saturating_sub(start);
-        if len < 2 {
-            return;
-        }
+/// Score every candidate position strictly inside the interval `[start, end)` and mask
+/// both endpoints. Already-masked positions stay masked.
+fn score_interval(
+    prefix: &ColumnPrefix,
+    caches: &mut SplitCaches,
+    evaluator: &SplitEvaluator,
+    start: usize,
+    end: usize,
+) {
+    if end.saturating_sub(start) < 2 {
+        return;
+    }
+    caches.mask(start);
 
-        // Disallow splitting at the first position.
-        update_left[start] = (f64::NAN, f64::NAN);
-        update_right[start] = (f64::NAN, f64::NAN);
-        error_reductions[start] = f64::NAN;
-        error_reductions_pairs[start] = (f64::NAN, f64::NAN);
-
-        let evaluator = SplitEvaluator::new(self, is_stage1);
-
-        // Evaluate a single candidate position given left-side sufficient stats.
-        // Closed over the output slices + total stats. Shared between the
-        // exact and binned iteration paths.
-        let eval_pos = |pos: usize,
-                        s11_l: f64,
-                        s22_l: f64,
-                        s12_l: f64,
-                        t1_l: f64,
-                        t2_l: f64,
-                        total_s11: f64,
-                        total_s22: f64,
-                        total_s12: f64,
-                        total_t1: f64,
-                        total_t2: f64,
-                        update_left: &mut [(f64, f64)],
-                        update_right: &mut [(f64, f64)],
-                        error_reductions: &mut [f64],
-                        error_reductions_pairs: &mut [(f64, f64)]| {
-            if error_reductions[pos].is_nan() {
-                update_left[pos] = (f64::NAN, f64::NAN);
-                update_right[pos] = (f64::NAN, f64::NAN);
-                error_reductions_pairs[pos] = (f64::NAN, f64::NAN);
-                return;
-            }
-
-            let (left, right, gains) = evaluator.evaluate(
-                PrefixStats {
-                    s11: s11_l,
-                    s22: s22_l,
-                    s12: s12_l,
-                    t1: t1_l,
-                    t2: t2_l,
-                },
-                PrefixStats {
-                    s11: total_s11,
-                    s22: total_s22,
-                    s12: total_s12,
-                    t1: total_t1,
-                    t2: total_t2,
-                },
+    let (base, end_value) = prefix.interval_bounds(start, end);
+    let total = solver_stats(end_value, base);
+    let mut score = |pos: usize, prefix_at_left_end: PrefixStats| {
+        if caches.gains[pos].is_nan() {
+            caches.update_left[pos] = (f64::NAN, f64::NAN);
+            caches.update_right[pos] = (f64::NAN, f64::NAN);
+            caches.gain_pairs[pos] = (f64::NAN, f64::NAN);
+        } else {
+            caches.store(
+                pos,
+                evaluator.evaluate(solver_stats(prefix_at_left_end, base), total),
             );
-            update_left[pos] = left;
-            update_right[pos] = right;
-            error_reductions[pos] = gains.0 + gains.1;
-            error_reductions_pairs[pos] = gains;
-        };
-
-        if bin_edges.is_empty() {
-            // Exact path: read length-n prefix sums at every candidate position.
-            let base = if start == 0 {
-                PrefixStats::ZERO
-            } else {
-                ps[start - 1]
-            };
-
-            let total_s11 = ps[end - 1].s11 - base.s11;
-            let total_s22 = ps[end - 1].s22 - base.s22;
-            let total_s12 = -(ps[end - 1].s12 - base.s12);
-            let total_t1 = ps[end - 1].t1 - base.t1;
-            let total_t2 = -(ps[end - 1].t2 - base.t2);
-
-            for pos in (start + 1)..end.saturating_sub(1) {
-                let pos_end = pos - 1;
-                let s11_l = ps[pos_end].s11 - base.s11;
-                let s22_l = ps[pos_end].s22 - base.s22;
-                let s12_l = -(ps[pos_end].s12 - base.s12);
-                let t1_l = ps[pos_end].t1 - base.t1;
-                let t2_l = -(ps[pos_end].t2 - base.t2);
-                eval_pos(
-                    pos,
-                    s11_l,
-                    s22_l,
-                    s12_l,
-                    t1_l,
-                    t2_l,
-                    total_s11,
-                    total_s22,
-                    total_s12,
-                    total_t1,
-                    total_t2,
-                    update_left,
-                    update_right,
-                    error_reductions,
-                    error_reductions_pairs,
-                );
-            }
-        } else {
-            // Binned path: read length-B bin-cumulative prefix sums at bin
-            // boundaries. Splits land at `bin_edges[k]` so `pos_end = pos - 1`
-            // is the last position of bin k → cumulant at bin index k.
-            let base = if start == 0 {
-                PrefixStats::ZERO
-            } else {
-                binned_prefix_stats_at(bs, bin_edges, start - 1)
-            };
-            let end_v = binned_prefix_stats_at(bs, bin_edges, end - 1);
-
-            let total_s11 = end_v.s11 - base.s11;
-            let total_s22 = end_v.s22 - base.s22;
-            let total_s12 = -(end_v.s12 - base.s12);
-            let total_t1 = end_v.t1 - base.t1;
-            let total_t2 = -(end_v.t2 - base.t2);
-
-            let lo_idx = bin_edges.partition_point(|&e| e <= start);
-            let hi_idx = bin_edges.partition_point(|&e| e < end.saturating_sub(1));
-            for k in lo_idx..hi_idx {
-                let pos = bin_edges[k];
-                let s11_l = bs[k].s11 - base.s11;
-                let s22_l = bs[k].s22 - base.s22;
-                let s12_l = -(bs[k].s12 - base.s12);
-                let t1_l = bs[k].t1 - base.t1;
-                let t2_l = -(bs[k].t2 - base.t2);
-                eval_pos(
-                    pos,
-                    s11_l,
-                    s22_l,
-                    s12_l,
-                    t1_l,
-                    t2_l,
-                    total_s11,
-                    total_s22,
-                    total_s12,
-                    total_t1,
-                    total_t2,
-                    update_left,
-                    update_right,
-                    error_reductions,
-                    error_reductions_pairs,
-                );
-            }
         }
-
-        // Disallow splitting at the last position.
-        let last = end - 1;
-        update_left[last] = (f64::NAN, f64::NAN);
-        update_right[last] = (f64::NAN, f64::NAN);
-        error_reductions[last] = f64::NAN;
-        error_reductions_pairs[last] = (f64::NAN, f64::NAN);
+    };
+    if prefix.bin_edges.is_empty() {
+        for pos in (start + 1)..end.saturating_sub(1) {
+            score(pos, prefix.exact[pos - 1]);
+        }
+    } else {
+        // Splits land on bin edges, and the bin before edge `bin_edges[k]` ends at its
+        // cumulant `binned[k]`.
+        let lo_bin = prefix.bin_edges.partition_point(|&e| e <= start);
+        let hi_bin = prefix
+            .bin_edges
+            .partition_point(|&e| e < end.saturating_sub(1));
+        for k in lo_bin..hi_bin {
+            score(prefix.bin_edges[k], prefix.binned[k]);
+        }
     }
+
+    caches.mask(end - 1);
 }

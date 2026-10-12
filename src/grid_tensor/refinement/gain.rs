@@ -1,7 +1,8 @@
 //! Split evaluation, local L2 update and gain formulas, Huber weights and merge factors.
 
+use super::prefix::sub_stats;
 use super::RefinementStrategy;
-use crate::grid_tensor::state::PrefixStats;
+use crate::grid_tensor::state::{IntervalStats, PrefixStats};
 use crate::grid_tensor::two_tensor_solver::{
     backbone_log_penalty, SolverParams, MAX_BACKBONE, MAX_TILT, MIN_BACKBONE,
 };
@@ -42,50 +43,47 @@ impl SplitEvaluator {
     }
 
     #[inline]
+    pub(super) fn is_stage1(&self) -> bool {
+        self.is_stage1
+    }
+
+    /// Clamped stage-1 backbone multiplier `1 + u` for linear term `g` and curvature `h`.
+    #[inline]
+    pub(super) fn backbone_multiplier(&self, g: f64, h: f64) -> f64 {
+        (1.0 + l2_update_unanchored(self.alpha, g, h)).clamp(self.v_min, self.v_max)
+    }
+
+    /// Update `(u_+, u_-)` and penalized gain of refitting one side from its solver statistics.
+    #[inline]
+    pub(super) fn evaluate_side(&self, side: PrefixStats) -> ((f64, f64), f64) {
+        if self.is_stage1 {
+            let u = self.backbone_multiplier(side.t1, side.s11) - 1.0;
+            (
+                (u, 0.0),
+                backbone_regularized_gain(u, side.t1, side.s11, self.alpha),
+            )
+        } else {
+            let (u_plus, u_minus, gain) =
+                self.solve(side.s11, side.s22, side.s12, side.t1, side.t2);
+            ((u_plus, u_minus), gain)
+        }
+    }
+
+    /// Updates of both sides and their gains for splitting `total` after `left`.
+    #[inline]
     pub(super) fn evaluate(
         &self,
         left: PrefixStats,
         total: PrefixStats,
     ) -> ((f64, f64), (f64, f64), (f64, f64)) {
-        let Self {
-            alpha,
-            v_min,
-            v_max,
-            is_stage1,
-            ..
-        } = *self;
-        if is_stage1 {
-            let h_l = left.s11;
-            let g_l = left.t1;
-            let h_r = total.s11 - h_l;
-            let g_r = total.t1 - g_l;
-            let u_l = l2_update_unanchored(alpha, g_l, h_l);
-            let v_b_l = (1.0 + u_l).clamp(v_min, v_max);
-            let u_l_clamped = v_b_l - 1.0;
-            let gain_l = backbone_regularized_gain(u_l_clamped, g_l, h_l, alpha);
-            let u_r = l2_update_unanchored(alpha, g_r, h_r);
-            let v_b_r = (1.0 + u_r).clamp(v_min, v_max);
-            let u_r_clamped = v_b_r - 1.0;
-            let gain_r = backbone_regularized_gain(u_r_clamped, g_r, h_r, alpha);
-            ((u_l_clamped, 0.0), (u_r_clamped, 0.0), (gain_l, gain_r))
-        } else {
-            let s11_r = total.s11 - left.s11;
-            let s22_r = total.s22 - left.s22;
-            let s12_r = total.s12 - left.s12;
-            let t1_r = total.t1 - left.t1;
-            let t2_r = total.t2 - left.t2;
-            let (u_plus_l, u_minus_l, gain_l) =
-                self.solve(left.s11, left.s22, left.s12, left.t1, left.t2);
-            let (u_plus_r, u_minus_r, gain_r) = self.solve(s11_r, s22_r, s12_r, t1_r, t2_r);
-            (
-                (u_plus_l, u_minus_l),
-                (u_plus_r, u_minus_r),
-                (gain_l, gain_r),
-            )
-        }
+        let (left_update, left_gain) = self.evaluate_side(left);
+        let (right_update, right_gain) = self.evaluate_side(sub_stats(total, left));
+        (left_update, right_update, (left_gain, right_gain))
     }
 }
 
+/// Solver statistics of the range from `base` to `value`, whose `s12` and `t2` enter the
+/// solver negated.
 pub(super) fn solver_stats(value: PrefixStats, base: PrefixStats) -> PrefixStats {
     PrefixStats {
         s11: value.s11 - base.s11,
@@ -93,6 +91,17 @@ pub(super) fn solver_stats(value: PrefixStats, base: PrefixStats) -> PrefixStats
         s12: -(value.s12 - base.s12),
         t1: value.t1 - base.t1,
         t2: -(value.t2 - base.t2),
+    }
+}
+
+/// Solver statistics of one interval, whose `s12` and `t2` enter the solver negated.
+pub(super) fn interval_solver_stats(stats: &IntervalStats) -> PrefixStats {
+    PrefixStats {
+        s11: stats.sum_s11,
+        s22: stats.sum_s22,
+        s12: -stats.sum_s12,
+        t1: stats.sum_t1,
+        t2: -stats.sum_t2,
     }
 }
 
