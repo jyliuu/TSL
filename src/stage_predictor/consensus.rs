@@ -1435,6 +1435,6 @@ mod tests {
 }
 
 #[cfg(test)]
-mod cycle9_reference_tests;
+mod reference_reuse_tests;
 #[cfg(test)]
 mod full_row_totals_tests;

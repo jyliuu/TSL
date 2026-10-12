@@ -2409,28 +2409,28 @@ mod refresh_tests {
 }
 
 #[cfg(test)]
-mod anchor_review_tests;
+mod anchor_tests;
 
 #[cfg(test)]
-mod deferred_review_tests;
+mod deferred_linear_tests;
 
 #[cfg(test)]
-mod cycle4_review_tests;
+mod fused_bins_tests;
 
 #[cfg(test)]
-mod cycle5_refresh_tests;
+mod streamed_refresh_tests;
 
 #[cfg(test)]
-mod cycle7_refresh_tests;
+mod full_row_refresh_tests;
 
 #[cfg(test)]
-mod cycle8_scatter_tests;
+mod paired_scatter_tests;
 
 #[cfg(test)]
-mod cycle11_linear_bin_slice_tests;
+mod linear_bin_slice_tests;
 
 #[cfg(test)]
-mod cycle13_curvature_delta_tests;
+mod curvature_delta_tests;
 #[cfg(test)]
 mod linear_tile_tests;
 #[cfg(test)]

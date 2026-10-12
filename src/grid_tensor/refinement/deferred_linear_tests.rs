@@ -215,7 +215,7 @@ fn actions(state: &FittingState) -> Vec<FittingAction> {
 }
 
 #[test]
-fn deferred_review_curvature_keeps_the_eager_arithmetic() {
+fn deferred_linear_curvature_keeps_the_eager_arithmetic() {
     for bins in [None, Some(8), Some(64)] {
         for constant in [false, true] {
             let (x, y) = data(constant);
@@ -274,7 +274,7 @@ fn deferred_review_curvature_keeps_the_eager_arithmetic() {
 }
 
 #[test]
-fn deferred_review_actions_refresh_finish_and_log_exactly() {
+fn deferred_linear_actions_refresh_finish_and_log_exactly() {
     for bins in [None, Some(8), Some(64)] {
         for context in 0..4 {
             let (x, y) = data(true);
@@ -373,7 +373,7 @@ fn deferred_review_actions_refresh_finish_and_log_exactly() {
 
 #[test]
 #[should_panic(expected = "linear statistics require a full refresh")]
-fn deferred_review_stale_statistics_reject_a_second_incremental_update() {
+fn deferred_linear_stale_statistics_reject_a_second_incremental_update() {
     let (x, y) = data(false);
     let params = parameters(Some(8), false);
     let strategy = params.refinement_strategy_params.get_refinement_strategy();
@@ -387,7 +387,7 @@ fn deferred_review_stale_statistics_reject_a_second_incremental_update() {
 
 #[test]
 #[should_panic(expected = "linear statistics require a full refresh")]
-fn deferred_review_stale_statistics_reject_an_eager_proposal() {
+fn deferred_linear_stale_statistics_reject_an_eager_proposal() {
     let (x, y) = data(false);
     let params = parameters(Some(8), false);
     let strategy = params.refinement_strategy_params.get_refinement_strategy();

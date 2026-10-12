@@ -128,7 +128,7 @@ fn update_prediction(state: &mut FittingState, row: usize, plus: f64, minus: f64
 }
 
 #[test]
-fn cycle4_review_binned_kernel_matches_rank_range_oracle() {
+fn fused_bins_binned_kernel_matches_rank_range_oracle() {
     let (x, y) = fixture(false);
     for bins in [8, 64] {
         let params = params(Some(bins), false);
@@ -194,7 +194,7 @@ fn cycle4_review_binned_kernel_matches_rank_range_oracle() {
 }
 
 #[test]
-fn cycle4_review_zero_deltas_keep_touched_range_and_signed_zero() {
+fn fused_bins_zero_deltas_keep_touched_range_and_signed_zero() {
     let (x, y) = fixture(false);
     let params = params(Some(8), false);
     let refinement = params.refinement_strategy_params.get_refinement_strategy();
@@ -310,7 +310,7 @@ fn actions(state: &FittingState) -> Vec<FittingAction> {
 }
 
 #[test]
-fn cycle4_review_structural_actions_fallbacks_logging_and_reference_transitions() {
+fn fused_bins_structural_actions_fallbacks_logging_and_reference_transitions() {
     for bins in [None, Some(8), Some(64)] {
         for constant in [false, true] {
             for context in 0..4 {

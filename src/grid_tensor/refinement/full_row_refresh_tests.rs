@@ -4,7 +4,7 @@ use ndarray::{s, Array1, Array2};
 use rand::{rngs::StdRng, SeedableRng};
 
 use super::{
-    cycle5_refresh_tests::{assert_statistics_bits, two_pass_refresh},
+    streamed_refresh_tests::{assert_statistics_bits, two_pass_refresh},
     RefinementStrategy,
 };
 use crate::grid_tensor::{
@@ -105,7 +105,7 @@ fn assert_refresh(state: FittingState<'_>, strategy: &RefinementStrategy) {
 }
 
 #[test]
-fn cycle7_refresh_eligible_rows_match_oracle_with_stale_and_signed_inputs() {
+fn full_row_refresh_eligible_rows_match_oracle_with_stale_and_signed_inputs() {
     for (bins, mixed) in [(None, false), (Some(8), false), (Some(8), true)] {
         for positive in [false, true] {
             let (x, y) = data(positive, mixed);
@@ -200,7 +200,7 @@ fn with_stride(values: &Array1<f64>, reverse: bool) -> Array1<f64> {
 }
 
 #[test]
-fn cycle7_refresh_each_strided_input_matches_oracle() {
+fn full_row_refresh_each_strided_input_matches_oracle() {
     let (x, y) = data(false, false);
     let (initial, strategy) = fitted(&x, &y, Some(8), false);
     let initial = prepare_reference(initial, &strategy, 0.3);
@@ -221,7 +221,7 @@ fn cycle7_refresh_each_strided_input_matches_oracle() {
 }
 
 #[test]
-fn cycle7_refresh_buffer_lengths_preserve_tails_and_bounds_failures() {
+fn full_row_refresh_buffer_lengths_preserve_tails_and_bounds_failures() {
     let (x, y) = data(false, false);
     let (initial, strategy) = fitted(&x, &y, Some(8), false);
     let initial = prepare_reference(initial, &strategy, 0.3);
@@ -278,7 +278,7 @@ fn cycle7_refresh_buffer_lengths_preserve_tails_and_bounds_failures() {
 }
 
 #[test]
-fn cycle7_refresh_weight_and_support_fallbacks_match_oracle() {
+fn full_row_refresh_weight_and_support_fallbacks_match_oracle() {
     let (x, y) = data(false, false);
     for context in 0..6 {
         let (mut state, strategy) = fitted(&x, &y, Some(8), context == 1);

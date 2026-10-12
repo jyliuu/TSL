@@ -3,7 +3,7 @@
 use ndarray::{Array1, Array2};
 
 use super::{
-    cycle5_refresh_tests::{assert_statistics_bits, two_pass_refresh},
+    streamed_refresh_tests::{assert_statistics_bits, two_pass_refresh},
     RefinementStrategy,
 };
 use crate::grid_tensor::{

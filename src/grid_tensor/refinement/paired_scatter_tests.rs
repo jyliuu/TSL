@@ -2,7 +2,7 @@ use std::iter::once;
 
 use ndarray::{Array1, Array2};
 
-use super::{cycle5_refresh_tests::assert_statistics_bits, RefinementStrategy};
+use super::{streamed_refresh_tests::assert_statistics_bits, RefinementStrategy};
 use crate::grid_tensor::{
     fit::initialize_state_with_input,
     params::GridTensorParamsBuilder,
@@ -202,7 +202,7 @@ fn change_rows(
 }
 
 #[test]
-fn cycle8_scatter_feature_pairs_match_single_feature_oracle() {
+fn paired_scatter_feature_pairs_match_single_feature_oracle() {
     for p in 1..=5 {
         let (x, y) = fixture(p, false);
         let (initial, refinement) = initial(&x, &y, 0.3);
@@ -238,7 +238,7 @@ fn cycle8_scatter_feature_pairs_match_single_feature_oracle() {
 }
 
 #[test]
-fn cycle8_scatter_zero_deltas_preserve_touched_ranges_and_signed_bits() {
+fn paired_scatter_zero_deltas_preserve_touched_ranges_and_signed_bits() {
     let (x, y) = fixture(5, false);
     for rho in [0.0, -0.0, 0.3] {
         let (mut state, refinement) = initial(&x, &y, rho);
@@ -268,7 +268,7 @@ fn cycle8_scatter_zero_deltas_preserve_touched_ranges_and_signed_bits() {
 }
 
 #[test]
-fn cycle8_scatter_empty_ranges_and_guards_match_oracle() {
+fn paired_scatter_empty_ranges_and_guards_match_oracle() {
     for p in 1..=5 {
         let (x, y) = fixture(p, false);
         let (state, refinement) = initial(&x, &y, 0.3);

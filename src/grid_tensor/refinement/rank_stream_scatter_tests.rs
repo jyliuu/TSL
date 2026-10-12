@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use ndarray::{Array1, Array2};
 
-use super::{cycle5_refresh_tests::assert_statistics_bits, RefinementStrategy};
+use super::{streamed_refresh_tests::assert_statistics_bits, RefinementStrategy};
 use crate::grid_tensor::{
     fit::initialize_state_with_input,
     histogram_binning::rank_ordered_bin_streams_within,

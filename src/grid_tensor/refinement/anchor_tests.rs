@@ -313,7 +313,7 @@ fn frozen_objective(
 }
 
 #[test]
-fn anchor_review_statistics_retain_every_data_row() {
+fn anchor_statistics_retain_every_data_row() {
     let (x, y) = data(false);
     for huber in [false, true] {
         let params = parameters(Some(16), huber, false);
@@ -335,7 +335,7 @@ fn anchor_review_statistics_retain_every_data_row() {
 }
 
 #[test]
-fn anchor_review_reference_deltas_track_actions_and_full_rebuilds() {
+fn anchor_reference_deltas_track_actions_and_full_rebuilds() {
     let (x, y) = data(false);
     for huber in [false, true] {
         let params = parameters(Some(16), huber, false);
@@ -383,7 +383,7 @@ fn anchor_review_reference_deltas_track_actions_and_full_rebuilds() {
 }
 
 #[test]
-fn anchor_review_support_and_strength_changes_refresh_curvature() {
+fn anchor_support_and_strength_changes_refresh_curvature() {
     let (x, y) = data(false);
     for huber in [false, true] {
         let params = parameters(Some(16), huber, false);
@@ -411,7 +411,7 @@ fn anchor_review_support_and_strength_changes_refresh_curvature() {
 }
 
 #[test]
-fn anchor_review_exact_and_constant_columns_have_correct_fallbacks() {
+fn anchor_exact_and_constant_columns_have_correct_fallbacks() {
     for constant_column in [false, true] {
         let (x, y) = data(constant_column);
         for bins in [None, Some(16)] {
@@ -431,7 +431,7 @@ fn anchor_review_exact_and_constant_columns_have_correct_fallbacks() {
 }
 
 #[test]
-fn anchor_review_merge_gains_match_the_weighted_all_row_objective() {
+fn anchor_merge_gains_match_the_weighted_all_row_objective() {
     let (x, y) = data(false);
     for huber in [false, true] {
         for bins in [None, Some(16)] {

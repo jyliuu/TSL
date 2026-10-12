@@ -1,14 +1,14 @@
 use ndarray::{s, Array1, Array2};
 
-use super::{cycle5_refresh_tests::assert_statistics_bits, RefinementStrategy};
+use super::{streamed_refresh_tests::assert_statistics_bits, RefinementStrategy};
 use crate::grid_tensor::{
     fit::initialize_state_with_input,
     params::GridTensorParamsBuilder,
     state::{BranchConsensus, FittingState},
 };
 
-// The accepted11 collector is the arithmetic and partial-mutation oracle.
-fn accepted11_deltas(
+// A row-at-a-time collector is the arithmetic and partial-mutation oracle.
+fn row_at_a_time_deltas(
     refinement: &RefinementStrategy,
     state: &mut FittingState<'_>,
     col: usize,
@@ -102,7 +102,7 @@ fn compare(
 ) -> Option<Vec<[f64; 3]>> {
     let mut expected = actual.clone();
     let expected_deltas = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        accepted11_deltas(refinement, &mut expected, 0, start, end)
+        row_at_a_time_deltas(refinement, &mut expected, 0, start, end)
     }));
     let actual_deltas = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         refinement.collect_binned_curvature_deltas(&mut actual, 0, start, end)
@@ -132,7 +132,7 @@ fn compare(
 }
 
 #[test]
-fn cycle13_curvature_deltas_preserve_arithmetic_and_row_order() {
+fn curvature_deltas_preserve_arithmetic_and_row_order() {
     let (x, y) = fixture();
     for rho in [0.0, -0.0, 0.3] {
         let (initial, refinement) = initial(&x, &y, rho);
@@ -210,7 +210,7 @@ fn with_stride(values: &Array1<f64>, reverse: bool) -> Array1<f64> {
 }
 
 #[test]
-fn cycle13_curvature_deltas_preserve_each_shape_and_stride_fallback() {
+fn curvature_deltas_preserve_each_shape_and_stride_fallback() {
     let (x, y) = fixture();
     let (initial, refinement) = initial(&x, &y, 0.3);
     for index in 0..6 {
@@ -250,7 +250,7 @@ fn cycle13_curvature_deltas_preserve_each_shape_and_stride_fallback() {
 }
 
 #[test]
-fn cycle13_curvature_deltas_preserve_empty_and_invalid_row_failures() {
+fn curvature_deltas_preserve_empty_and_invalid_row_failures() {
     let (x, y) = fixture();
     let (initial, refinement) = initial(&x, &y, 0.3);
     for scenario in 0..6 {

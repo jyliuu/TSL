@@ -4,7 +4,7 @@ use ndarray::{Array1, Array2};
 use rand::{rngs::StdRng, SeedableRng};
 
 use super::{
-    cycle5_refresh_tests::{assert_statistics_bits, two_pass_refresh},
+    streamed_refresh_tests::{assert_statistics_bits, two_pass_refresh},
     RefinementStrategy,
 };
 use crate::grid_tensor::{
@@ -82,7 +82,7 @@ fn prepared<'a>(
 }
 
 #[test]
-fn cycle11_linear_bin_slices_preserve_numeric_and_storage_order() {
+fn linear_bin_slices_preserve_numeric_and_storage_order() {
     for (bins, mixed) in [(Some(16), false), (Some(16), true), (None, false)] {
         let (x, y) = fixture(mixed);
         let (initial, refinement) = prepared(&x, &y, bins);
@@ -165,7 +165,7 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
 }
 
 #[test]
-fn cycle11_linear_bin_slices_preserve_map_tails_and_panic_order() {
+fn linear_bin_slices_preserve_map_tails_and_panic_order() {
     let (x, y) = fixture(false);
     let (initial, refinement) = prepared(&x, &y, Some(16));
     for scenario in 0..17 {

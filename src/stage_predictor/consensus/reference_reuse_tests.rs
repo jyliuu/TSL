@@ -39,10 +39,7 @@ fn assert_statistics_bits(actual: &FittingState, expected: &FittingState) {
         &expected.precomputed_statistics,
     );
     crate::grid_tensor::state::assert_curvature_bits(&a.curvature, &e.curvature);
-    for (a, e) in [
-        (&a.c_t1, &e.c_t1),
-        (&a.c_t2, &e.c_t2),
-    ] {
+    for (a, e) in [(&a.c_t1, &e.c_t1), (&a.c_t2, &e.c_t2)] {
         slice_bits(a, e);
     }
     for (a, e) in [
@@ -217,7 +214,7 @@ fn totals(state: &FittingState<'_>) -> [Array1<f64>; 2] {
 }
 
 #[test]
-fn cycle9_reference_reuses_targets_with_exact_subtraction_and_division() {
+fn reference_reuse_reuses_targets_with_exact_subtraction_and_division() {
     let (x, y) = fixture(false);
     let initial = initialize_state_with_input(x.view(), y.view(), &params(false, Some(8)), None);
     for others in [3.0_f64, 49.0] {
@@ -355,7 +352,7 @@ fn assert_fallback(mut state: FittingState<'_>, totals: &[Array1<f64>; 2], succe
 }
 
 #[test]
-fn cycle9_reference_guards_preserve_layout_shape_and_broadcast_fallbacks() {
+fn reference_reuse_guards_preserve_layout_shape_and_broadcast_fallbacks() {
     let (x, y) = fixture(false);
     let initial = with_reference(
         initialize_state_with_input(x.view(), y.view(), &params(false, Some(8)), None),
@@ -385,7 +382,7 @@ fn cycle9_reference_guards_preserve_layout_shape_and_broadcast_fallbacks() {
 }
 
 #[test]
-fn cycle9_reference_refresh_preserves_all_caches_and_weight_metadata() {
+fn reference_reuse_refresh_preserves_all_caches_and_weight_metadata() {
     for huber in [false, true] {
         for (bins, mixed) in [(None, false), (Some(8), false), (Some(8), true)] {
             let (x, y) = fixture(mixed);
@@ -452,7 +449,7 @@ fn mixed_members<'a>(initial: &FittingState<'a>, params: &GridTensorParams) -> V
 }
 
 #[test]
-fn cycle9_reference_frozen_rounds_include_inactive_members_in_order() {
+fn reference_reuse_frozen_rounds_include_inactive_members_in_order() {
     let (x, y) = fixture(false);
     for huber in [false, true] {
         for bins in [None, Some(8)] {

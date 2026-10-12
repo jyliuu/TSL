@@ -156,10 +156,7 @@ fn assert_states_identical(actual: &FittingState, expected: &FittingState) {
         &expected.precomputed_statistics,
     );
     crate::grid_tensor::state::assert_curvature_bits(&a.curvature, &e.curvature);
-    for (a, e) in [
-        (&a.c_t1, &e.c_t1),
-        (&a.c_t2, &e.c_t2),
-    ] {
+    for (a, e) in [(&a.c_t1, &e.c_t1), (&a.c_t2, &e.c_t2)] {
         slice_bits(a, e);
     }
     prefix_bits(&a.prefix_sums, &e.prefix_sums);
@@ -280,7 +277,7 @@ fn reference_random_choice(
 }
 
 #[test]
-fn lazy_review_random_sampling_matches_the_independent_reference() {
+fn on_demand_scores_random_sampling_matches_the_independent_reference() {
     let (x, y) = fixture(false, false);
     for pattern in 0..5 {
         for colsample in [0.0, 0.5, 1.0] {
@@ -345,7 +342,7 @@ fn lazy_review_random_sampling_matches_the_independent_reference() {
 }
 
 #[test]
-fn lazy_review_preserves_random_trajectories_masks_and_rng() {
+fn on_demand_scores_preserves_random_trajectories_masks_and_rng() {
     let mut case = 0;
     let mut sampled_steps = 0;
     for bins in [None, Some(1), Some(8), Some(64)] {
@@ -468,7 +465,7 @@ fn lazy_review_preserves_random_trajectories_masks_and_rng() {
 }
 
 #[test]
-fn lazy_review_single_candidate_values_match_eager_bits() {
+fn on_demand_scores_single_candidate_values_match_eager_bits() {
     for bins in [None, Some(8), Some(64)] {
         for huber in [false, true] {
             let (x, y) = fixture(false, false);
@@ -515,7 +512,7 @@ fn lazy_review_single_candidate_values_match_eager_bits() {
 }
 
 #[test]
-fn lazy_review_best_and_top_k_preserve_local_cached_scores() {
+fn on_demand_scores_best_and_top_k_preserve_local_cached_scores() {
     let (x, y) = fixture(false, false);
     for top_k in [false, true] {
         for bins in [None, Some(8)] {
@@ -607,7 +604,7 @@ fn lazy_review_best_and_top_k_preserve_local_cached_scores() {
 }
 
 #[test]
-fn lazy_review_positive_only_transition_refreshes_unsampled_columns() {
+fn on_demand_scores_positive_only_transition_refreshes_unsampled_columns() {
     let (x, y) = fixture(false, false);
     let params = parameters(Some(8), false, 1, 1.0, 1, false);
     let strategy = params.refinement_strategy_params.get_refinement_strategy();
@@ -688,7 +685,7 @@ fn lazy_review_positive_only_transition_refreshes_unsampled_columns() {
 }
 
 #[test]
-fn lazy_review_two_branch_scoring_preserves_masks_with_extreme_inputs() {
+fn on_demand_scores_two_branch_scoring_preserves_masks_with_extreme_inputs() {
     let (x, y) = fixture(false, false);
     let params = parameters(None, false, 10, 1.0, 1, false);
     let initial = initialize_state_with_input(x.view(), y.view(), &params, None);

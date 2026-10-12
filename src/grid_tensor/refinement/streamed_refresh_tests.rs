@@ -174,10 +174,7 @@ pub(super) fn assert_statistics_bits(actual: &FittingState, expected: &FittingSt
         &expected.precomputed_statistics,
     );
     crate::grid_tensor::state::assert_curvature_bits(&a.curvature, &e.curvature);
-    for (a, e) in [
-        (&a.c_t1, &e.c_t1),
-        (&a.c_t2, &e.c_t2),
-    ] {
+    for (a, e) in [(&a.c_t1, &e.c_t1), (&a.c_t2, &e.c_t2)] {
         slice_bits(a, e);
     }
     for (a, e) in [
@@ -254,7 +251,7 @@ pub(super) fn assert_statistics_bits(actual: &FittingState, expected: &FittingSt
 }
 
 #[test]
-fn cycle5_refresh_matches_two_pass_for_weights_support_and_storage() {
+fn streamed_refresh_matches_two_pass_for_weights_support_and_storage() {
     for (bins, mixed) in [(None, false), (Some(8), false), (Some(8), true)] {
         for huber in [false, true] {
             let (x, y) = fixture(mixed);
@@ -344,7 +341,7 @@ fn cycle5_refresh_matches_two_pass_for_weights_support_and_storage() {
 }
 
 #[test]
-fn cycle5_refresh_preserves_curvature_and_signed_zero_bits() {
+fn streamed_refresh_preserves_curvature_and_signed_zero_bits() {
     for bins in [None, Some(8)] {
         let (x, y) = fixture(false);
         let params = GridTensorParamsBuilder::new().max_bins(bins).build();

@@ -1640,4 +1640,4 @@ mod two_tensor_invariant_tests {
 }
 
 #[cfg(test)]
-mod lazy_review_tests;
+mod on_demand_scores_tests;
