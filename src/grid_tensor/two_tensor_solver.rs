@@ -32,6 +32,11 @@ pub const DEFAULT_V_MAX: f64 = 20.0;
 
 /// Relative eigenvalue threshold for numerically null quadratic directions
 const COND_THRESHOLD: f64 = 1e12;
+/// Bounds on applied backbone values and tilts, shared by split scoring and the reducer
+/// so a scored update and the applied update clamp to the same box.
+pub(crate) const MIN_BACKBONE: f64 = 1e-10;
+pub(crate) const MAX_BACKBONE: f64 = 1e10;
+pub(crate) const MAX_TILT: f64 = 10.0;
 
 /// Solve the two-tensor 2×2 system
 ///
@@ -290,6 +295,7 @@ fn solve_2x2(a11: f64, a12: f64, a22: f64, t1: f64, t2: f64) -> Option<(f64, f64
 /// The solver subtracts the exact log-coordinate penalty from this quantity
 /// when it constructs the structural-action score.
 #[allow(clippy::too_many_arguments)]
+#[inline]
 pub fn data_loss_gain(
     u_plus: f64,
     u_minus: f64,
@@ -308,6 +314,7 @@ pub fn data_loss_gain(
 /// Equal multipliers have zero tilt penalty, while reciprocal multipliers
 /// have zero backbone penalty. The coordinates stay independent at every
 /// multiplier scale rather than only near the no-update point.
+#[inline]
 pub fn log_coordinate_penalty(v_plus: f64, v_minus: f64, alpha: f64, tau: f64, rho: f64) -> f64 {
     if v_plus <= 0.0 || v_minus <= 0.0 {
         return f64::INFINITY;

@@ -2,6 +2,7 @@
 
 use super::caches::update_prediction_caches;
 use crate::grid_tensor::state::FittingState;
+use crate::grid_tensor::two_tensor_solver::{MAX_BACKBONE, MAX_TILT, MIN_BACKBONE};
 
 /// Update backbone and tilt values for a resplit using two-tensor (v_b, Δd) conversion
 pub(super) fn reduce_grid_resplit_two_tensor(
@@ -20,9 +21,6 @@ pub(super) fn reduce_grid_resplit_two_tensor(
     let d_p_right = state.tilt_values[col][interval_idx + 1];
 
     // Update left interval: b_L = b_p * v_b_L, d_L = d_p + Δd_L
-    const MIN_BACKBONE: f64 = 1e-10;
-    const MAX_BACKBONE: f64 = 1e10;
-    const MAX_TILT: f64 = 10.0;
     state.backbone_values[col][interval_idx] = (b_p_left * v_b_l).clamp(MIN_BACKBONE, MAX_BACKBONE);
     state.tilt_values[col][interval_idx] = (d_p_left + delta_d_l).clamp(-MAX_TILT, MAX_TILT);
 

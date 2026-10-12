@@ -78,6 +78,12 @@ where
         .collect())
 }
 
+/// Branch factors `(b·e^{d}, b·e^{−d})` of one interval with backbone `b` and tilt `d`.
+#[inline]
+pub fn axis_factors(b: f64, d: f64) -> (f64, f64) {
+    (b * d.exp(), b * (-d).exp())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GridTensor {
     pub splits: Vec<Vec<f64>>,
@@ -120,31 +126,34 @@ impl GridTensor {
     /// Unscaled `(f_plus, f_minus)` over the per-feature values of one sample.
     #[inline]
     fn fold_two_tensor<I: Iterator<Item = f64>>(&self, values: I) -> (f64, f64) {
-        // Two-tensor fields are now mandatory, always use two-tensor path
         let mut f_plus = self.lambda_plus;
         let mut f_minus = self.lambda_minus;
-        for (i, val) in values.enumerate() {
-            let col_idx = self.splits[i].partition_point(|&split| split <= val);
-            let b = self.backbone_values[i][col_idx];
-            let d = self.tilt_values[i][col_idx];
-            f_plus *= b * d.exp();
-            f_minus *= b * (-d).exp();
+        for (axis, val) in values.enumerate() {
+            let bin = self.bin_index(axis, val);
+            let (a_plus, a_minus) =
+                axis_factors(self.backbone_values[axis][bin], self.tilt_values[axis][bin]);
+            f_plus *= a_plus;
+            f_minus *= a_minus;
         }
         (f_plus, f_minus)
     }
 
-    pub(crate) fn two_tensor_factors(&self) -> Vec<Vec<(f64, f64)>> {
+    /// Interval of `axis` that contains `value`; a value equal to a split falls right of it.
+    #[inline]
+    pub fn bin_index(&self, axis: usize, value: f64) -> usize {
+        self.splits[axis].partition_point(|&split| split <= value)
+    }
+
+    /// Per-axis, per-interval branch factors `(b·e^{d}, b·e^{−d})`.
+    pub fn two_tensor_factors(&self) -> Vec<Vec<(f64, f64)>> {
         self.backbone_values
             .iter()
             .zip(&self.tilt_values)
             .map(|(backbone, tilt)| {
                 backbone
                     .iter()
-                    .enumerate()
-                    .map(|(bin, &b)| {
-                        let d = tilt[bin];
-                        (b * d.exp(), b * (-d).exp())
-                    })
+                    .zip(tilt)
+                    .map(|(&b, &d)| axis_factors(b, d))
                     .collect()
             })
             .collect()
@@ -159,7 +168,7 @@ impl GridTensor {
         let mut f_plus = self.lambda_plus;
         let mut f_minus = self.lambda_minus;
         for (axis, val) in values.enumerate() {
-            let bin = self.splits[axis].partition_point(|&split| split <= val);
+            let bin = self.bin_index(axis, val);
             let (a_plus, a_minus) = factors[axis][bin];
             f_plus *= a_plus;
             f_minus *= a_minus;

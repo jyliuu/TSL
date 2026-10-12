@@ -54,6 +54,7 @@ pub struct BranchConsensus {
 }
 
 impl BranchConsensus {
+    #[inline]
     pub fn target(&self, row: usize) -> Option<(f64, f64, f64)> {
         let index = match &self.anchors {
             Some(anchors) => {

@@ -2,6 +2,7 @@
 
 use super::caches::update_prediction_caches;
 use crate::grid_tensor::state::FittingState;
+use crate::grid_tensor::two_tensor_solver::{MAX_BACKBONE, MAX_TILT, MIN_BACKBONE};
 
 /// Merge=OptimalMerge: apply optimal merged parameters and remove boundary
 ///
@@ -19,9 +20,6 @@ pub(super) fn reduce_grid_merge_optimal<'a>(
     state.boundaries[col].remove(interval_idx);
 
     // Apply merged params: set to absolute optimal values (not relative to left child)
-    const MIN_BACKBONE: f64 = 1e-10;
-    const MAX_BACKBONE: f64 = 1e10;
-    const MAX_TILT: f64 = 10.0;
     state.backbone_values[col][interval_idx] = b_merged_optimal.clamp(MIN_BACKBONE, MAX_BACKBONE);
     state.tilt_values[col][interval_idx] = d_merged_optimal.clamp(-MAX_TILT, MAX_TILT);
 

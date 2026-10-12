@@ -249,6 +249,12 @@ impl<'a> FittingState<'a> {
         );
     }
 
+    /// The fineness budget is spent and merges are disabled, so no structural action remains.
+    #[inline]
+    pub fn structure_is_final(&self, n_iter: usize) -> bool {
+        !self.split_strategy_state.merge_enabled && self.loop_state.fineness >= n_iter
+    }
+
     /// Check if we're in Stage 1 positive-only mode
     /// Stage 1 is active when λ_- = 0 and all d_j = 0
     pub fn is_stage1_positive_only(&self) -> bool {

@@ -1,6 +1,7 @@
 //! Split reducer: inserts a boundary, rescales the affected rows, and forbids nearby splits.
 
 use super::caches::update_prediction_caches;
+use crate::grid_tensor::two_tensor_solver::{MAX_BACKBONE, MAX_TILT, MIN_BACKBONE};
 use crate::grid_tensor::{
     splitting::{SplitCandidate, SplitStrategy},
     state::FittingState,
@@ -27,9 +28,6 @@ pub(super) fn reduce_grid_split_two_tensor(
 
     // Child params: b_child = b_p * v_b, d_child = d_p + Δd
     // Use same clamping values as resplit for consistency
-    const MIN_BACKBONE: f64 = 1e-10;
-    const MAX_BACKBONE: f64 = 1e10;
-    const MAX_TILT: f64 = 10.0;
 
     state.backbone_values[col][insert_at] = (b_p * v_b_l).clamp(MIN_BACKBONE, MAX_BACKBONE);
     let new_tilt_l = (d_p + delta_d_l).clamp(-MAX_TILT, MAX_TILT);

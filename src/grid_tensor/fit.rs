@@ -145,7 +145,7 @@ pub(crate) fn fit_step_with_candidate_refresh<'a, R: Rng + ?Sized>(
 ) -> (FittingState<'a>, bool) {
     state.iteration = iter;
 
-    if !state.split_strategy_state.merge_enabled && state.loop_state.fineness >= n_iter {
+    if state.structure_is_final(n_iter) {
         return (state, false);
     }
 

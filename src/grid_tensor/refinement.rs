@@ -88,6 +88,7 @@ impl RefinementStrategy {
         }
     }
 
+    #[inline]
     pub fn weight(&self, res: f64) -> f64 {
         match self {
             RefinementStrategy::L2Refinement { .. } => 1.0,

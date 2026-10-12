@@ -40,8 +40,7 @@ impl Aggregation {
         // Apply scalings from OLS solution: scaling_plus * f_+ + scaling_minus * (-f_-)
         // Note: scaling_minus is the coefficient for the -f_- column in the design matrix
         // So we multiply by -f_minus (the column value) and scaling_minus (the coefficient)
-        let scaling_plus = tgf.scaling_plus.unwrap_or(1.0);
-        let scaling_minus = tgf.scaling_minus.unwrap_or(0.0);
+        let (scaling_plus, scaling_minus) = tgf.scalings();
         &f_plus * scaling_plus + &(-f_minus) * scaling_minus
     }
 
@@ -126,6 +125,15 @@ pub fn extract_two_tensor_predictions_unscaled(
 }
 
 impl StagePredictor {
+    /// Coefficients of the `f₊` and `−f₋` columns; an uncalibrated stage uses `(1, 0)`.
+    #[inline]
+    pub fn scalings(&self) -> (f64, f64) {
+        (
+            self.scaling_plus.unwrap_or(1.0),
+            self.scaling_minus.unwrap_or(0.0),
+        )
+    }
+
     pub fn get_grid_tensors(&self) -> &Vec<GridTensor> {
         &self.grid_tensors
     }

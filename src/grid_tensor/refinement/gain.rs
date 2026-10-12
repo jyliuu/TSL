@@ -2,7 +2,9 @@
 
 use super::RefinementStrategy;
 use crate::grid_tensor::state::PrefixStats;
-use crate::grid_tensor::two_tensor_solver::{log_coordinate_penalty, solve_two_tensor};
+use crate::grid_tensor::two_tensor_solver::{
+    log_coordinate_penalty, solve_two_tensor, MAX_BACKBONE, MAX_TILT, MIN_BACKBONE,
+};
 
 pub(super) struct SplitEvaluator {
     alpha: f64,
@@ -26,6 +28,7 @@ impl SplitEvaluator {
         }
     }
 
+    #[inline]
     pub(super) fn evaluate(
         &self,
         left: PrefixStats,
@@ -116,10 +119,6 @@ pub fn huber_weighting(res: f64, c: f64) -> f64 {
         c / res.abs()
     }
 }
-
-const MIN_BACKBONE: f64 = 1e-10;
-const MAX_BACKBONE: f64 = 1e10;
-const MAX_TILT: f64 = 10.0;
 
 pub(super) fn canonical_merge_factors(a_plus: f64, a_minus: f64, is_stage1: bool) -> (f64, f64) {
     if is_stage1 {
