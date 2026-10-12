@@ -1,9 +1,6 @@
 //! Merge and resplit candidate scans over the existing grid boundaries.
 
-use crate::grid_tensor::{
-    action::FittingAction,
-    state::{FittingState, MAX_CONSECUTIVE_RESPLIT},
-};
+use crate::grid_tensor::state::{FittingState, MAX_CONSECUTIVE_RESPLIT};
 
 use super::{MergeCandidate, ResplitCandidate, SplitStrategy};
 
@@ -54,9 +51,6 @@ impl SplitStrategy {
     }
 
     pub(super) fn propose_best_resplit(&self, state: &FittingState) -> Option<ResplitCandidate> {
-        if !state.split_strategy_state.resplit_enabled {
-            return None;
-        }
         // Prevent too many consecutive resplits to avoid infinite loops
         if state.loop_state.consecutive_resplits >= MAX_CONSECUTIVE_RESPLIT {
             return None;
@@ -72,26 +66,9 @@ impl SplitStrategy {
             for (index, (&err_reduction, &data_index)) in
                 err_reductions.iter().zip(boundaries.iter()).enumerate()
             {
-                // Skip NaN values to prevent panic in partial_cmp
+                // NaN marks a boundary without a resplit score.
                 if err_reduction.is_nan() {
                     continue;
-                }
-                if let Some(last_transformation) =
-                    state.split_strategy_state.last_transformation.as_ref()
-                {
-                    match last_transformation {
-                        FittingAction::ApplySplit { split } => {
-                            if col_idx == split.col && data_index == split.index {
-                                continue;
-                            }
-                        }
-                        FittingAction::ApplyResplit { resplit } => {
-                            if col_idx == resplit.col && data_index == resplit.index {
-                                continue;
-                            }
-                        }
-                        _ => {}
-                    }
                 }
                 if best_resplit_candidate
                     .as_ref()

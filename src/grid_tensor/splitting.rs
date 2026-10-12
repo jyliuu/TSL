@@ -15,16 +15,17 @@ mod sampling;
 mod tests;
 
 pub use candidates::{
-    Interval, MergeCandidate, ResplitCandidate, SplitCandidate, SplitStrategyState, SplitType,
+    Interval, MergeCandidate, ResplitCandidate, SplitCandidate, SplitStrategyState,
 };
 use sampling::{
-    best_scored_random_position, initialize_intervals, sample_best_split, sample_random_split,
+    best_scored_position, initialize_intervals, sample_best_split, sample_random_split,
     sample_random_split_positions, sample_top_k_split,
 };
 
 const ACTION_SCORE_RELATIVE_TOLERANCE: f64 = 1e-12;
 
-/// Enum dispatch for all split strategy types (matching actual implementation)
+/// How split positions are proposed (sampled at random, the best one, or one of the top k),
+/// and the thresholds every structural action must clear.
 #[derive(Debug, Clone)]
 pub enum SplitStrategy {
     Random {
@@ -115,49 +116,41 @@ impl SplitStrategy {
         allow_split: bool,
     ) -> Option<FittingAction> {
         state.require_current_statistics();
-        let Self::Random {
-            colsample_bytree,
-            split_try,
-            ..
-        } = self
-        else {
+        let sampled = match self {
+            Self::Random {
+                colsample_bytree,
+                split_try,
+                ..
+            } if state.sampled_split_scoring
+                && state.split_scores_stale
+                && !state.is_stage1_positive_only() =>
+            {
+                Some((*colsample_bytree, *split_try))
+            }
+            _ => None,
+        };
+        let Some((colsample_bytree, split_try)) = sampled else {
             if state.split_scores_stale {
                 refinement.refresh_all_split_scores(state);
             }
             return self.propose_next_action_with_split_budget(state, rng, allow_split);
         };
-        if !state.sampled_split_scoring
-            || !state.split_scores_stale
-            || state.is_stage1_positive_only()
-        {
-            if state.split_scores_stale {
-                refinement.refresh_all_split_scores(state);
-            }
-            return self.propose_next_action_with_split_budget(state, rng, allow_split);
-        }
         let best_split = if allow_split {
             let positions = sample_random_split_positions(
                 &state.split_strategy_state.allowed_intervals,
                 &state.split_strategy_state.total_positions,
-                *colsample_bytree,
-                *split_try,
+                colsample_bytree,
+                split_try,
                 rng,
                 state.p,
             );
-            best_scored_random_position(positions, |col, index| {
+            best_scored_position(positions, |col, index| {
                 refinement.refresh_sampled_split(state, col, index);
                 state.precomputed_statistics.error_reductions_split[col]
                     .get(index)
                     .copied()
             })
-            .map(|(col, index, interval_idx, gain)| SplitCandidate {
-                col,
-                index,
-                allowed_interval_idx: interval_idx,
-                error_reduction: gain,
-                update_left: state.precomputed_statistics.update_pairs_split_left[col][index],
-                update_right: state.precomputed_statistics.update_pairs_split_right[col][index],
-            })
+            .map(|scored| split_candidate(state, scored))
         } else {
             None
         };
@@ -188,13 +181,12 @@ impl SplitStrategy {
 
         let merge_action = best_merge_candidate.map(|candidate| {
             (
-                candidate.error_reduction + state.split_strategy_state.boundary_penalty,
+                merge_score(state, &candidate),
                 FittingAction::ApplyMerge { merge: candidate },
             )
         });
 
-        let tolerance = ACTION_SCORE_RELATIVE_TOLERANCE * state.current_error.abs().max(1.0);
-        let minimum_gain = self.min_split_loss().max(tolerance);
+        let minimum_gain = self.minimum_action_gain(state);
 
         [split_action, resplit_action, merge_action]
             .into_iter()
@@ -208,14 +200,20 @@ impl SplitStrategy {
     pub fn propose_next_merge(&self, state: &FittingState) -> Option<FittingAction> {
         state.require_current_statistics();
         let merge = self.propose_best_merge(state)?;
-        let score = merge.error_reduction + state.split_strategy_state.boundary_penalty;
-        let tolerance = self
-            .min_split_loss()
-            .max(ACTION_SCORE_RELATIVE_TOLERANCE * state.current_error.abs().max(1.0));
-        (score.is_finite() && score > tolerance).then_some(FittingAction::ApplyMerge { merge })
+        let score = merge_score(state, &merge);
+        let minimum_gain = self.minimum_action_gain(state);
+        (score.is_finite() && score > minimum_gain).then_some(FittingAction::ApplyMerge { merge })
     }
 
-    /// Forbids splits around the given position by updating only the specific interval that contained the split
+    /// Score an action must exceed: `min_split_loss`, and at least a tolerance relative to
+    /// the current error.
+    fn minimum_action_gain(&self, state: &FittingState) -> f64 {
+        let tolerance = ACTION_SCORE_RELATIVE_TOLERANCE * state.current_error.abs().max(1.0);
+        self.min_split_loss().max(tolerance)
+    }
+
+    /// Forbids splits within `min_interval_samples` of the split position by cutting that
+    /// neighbourhood out of the allowed interval that contained the split.
     pub fn forbid_around_split<'a>(
         &self,
         mut state: FittingState<'a>,
@@ -225,45 +223,24 @@ impl SplitStrategy {
         let position = split_candidate.index;
         let interval_idx = split_candidate.allowed_interval_idx;
         let col = split_candidate.col;
-        let allowed_intervals = &mut state.split_strategy_state.allowed_intervals;
-        let total_positions = &mut state.split_strategy_state.total_positions;
         let forbidden_start = position.saturating_sub(margin - 1);
         let forbidden_end = position + margin;
         let forbidden_interval = Interval::new(forbidden_start, forbidden_end - forbidden_start);
 
-        // Only update the specific interval that contained the split
-        let original_interval = &allowed_intervals[col][interval_idx];
-        let new_intervals = original_interval.subtract(&forbidden_interval);
-
-        // Remove empty intervals
-        let filtered_intervals: Vec<Interval> = new_intervals
+        let strategy_state = &mut state.split_strategy_state;
+        let original_interval = strategy_state.allowed_intervals[col][interval_idx];
+        let remaining: Vec<Interval> = original_interval
+            .subtract(&forbidden_interval)
             .into_iter()
             .filter(|interval| interval.length > 0)
             .collect();
+        let remaining_positions: usize = remaining.iter().map(|interval| interval.length).sum();
 
-        // Calculate the change in total positions
-        let original_length = original_interval.length;
-        let new_total: usize = filtered_intervals
-            .iter()
-            .map(|interval| interval.length)
-            .sum();
-        let change = new_total as i32 - original_length as i32;
-
-        // Replace the original interval with the new ones
-        if filtered_intervals.is_empty() {
-            // If no intervals remain, remove this interval entirely
-            allowed_intervals[col].remove(interval_idx);
-        } else {
-            // Replace the original interval with the new ones
-            allowed_intervals[col].remove(interval_idx);
-            allowed_intervals[col].extend(filtered_intervals);
-
-            // Re-sort to maintain the sorted order
-            allowed_intervals[col].sort_by_key(|interval| interval.start);
-        }
-
-        // Update the cached total positions
-        total_positions[col] = (total_positions[col] as i32 + change) as usize;
+        // The remaining pieces lie inside the original interval in ascending order, so the
+        // column's disjoint allowed intervals stay sorted by start.
+        strategy_state.allowed_intervals[col].splice(interval_idx..=interval_idx, remaining);
+        strategy_state.total_positions[col] =
+            strategy_state.total_positions[col] + remaining_positions - original_interval.length;
 
         state
     }
@@ -321,53 +298,51 @@ impl SplitStrategy {
                 colsample_bytree,
                 split_try,
                 ..
-            } => {
-                // Random strategy implementation - uses state.strategy_state for allowed intervals
-                sample_random_split(
-                    &state.split_strategy_state.allowed_intervals,
-                    &state.split_strategy_state.total_positions,
-                    *colsample_bytree,
-                    *split_try,
-                    rng,
-                    &state.precomputed_statistics.error_reductions_split,
-                )
-            }
-            SplitStrategy::Best { .. } => {
-                // Best strategy implementation - uses state.working_buffers for error reductions
-                sample_best_split(
-                    &state.split_strategy_state.allowed_intervals,
-                    &state.precomputed_statistics.error_reductions_split,
-                )
-            }
+            } => sample_random_split(
+                &state.split_strategy_state.allowed_intervals,
+                &state.split_strategy_state.total_positions,
+                *colsample_bytree,
+                *split_try,
+                rng,
+                &state.precomputed_statistics.error_reductions_split,
+            ),
+            SplitStrategy::Best { .. } => sample_best_split(
+                &state.split_strategy_state.allowed_intervals,
+                &state.precomputed_statistics.error_reductions_split,
+            ),
             SplitStrategy::TopK {
                 top_k,
                 must_fill_all_k,
                 ..
-            } => {
-                // Top-k strategy implementation
-                sample_top_k_split(
-                    &state.split_strategy_state.allowed_intervals,
-                    *top_k,
-                    *must_fill_all_k,
-                    rng,
-                    &state.precomputed_statistics.error_reductions_split,
-                )
-            }
+            } => sample_top_k_split(
+                &state.split_strategy_state.allowed_intervals,
+                *top_k,
+                *must_fill_all_k,
+                rng,
+                &state.precomputed_statistics.error_reductions_split,
+            ),
         };
-
-        if let Some((col, index, interval_idx, err_reduction)) = best_split_info {
-            let update_left = state.precomputed_statistics.update_pairs_split_left[col][index];
-            let update_right = state.precomputed_statistics.update_pairs_split_right[col][index];
-            Some(SplitCandidate {
-                col,
-                index,
-                error_reduction: err_reduction,
-                allowed_interval_idx: interval_idx,
-                update_left,
-                update_right,
-            })
-        } else {
-            None
-        }
+        best_split_info.map(|scored| split_candidate(state, scored))
     }
+}
+
+/// Split candidate at a scored position `(col, index, allowed_interval_idx, error_reduction)`,
+/// with the cached updates of its two sides.
+fn split_candidate(
+    state: &FittingState,
+    (col, index, allowed_interval_idx, error_reduction): (usize, usize, usize, f64),
+) -> SplitCandidate {
+    SplitCandidate {
+        col,
+        index,
+        error_reduction,
+        allowed_interval_idx,
+        update_left: state.precomputed_statistics.update_pairs_split_left[col][index],
+        update_right: state.precomputed_statistics.update_pairs_split_right[col][index],
+    }
+}
+
+/// A merge recovers the cost of the boundary it removes.
+fn merge_score(state: &FittingState, merge: &MergeCandidate) -> f64 {
+    merge.error_reduction + state.split_strategy_state.boundary_penalty
 }

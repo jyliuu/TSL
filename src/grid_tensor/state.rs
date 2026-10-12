@@ -125,7 +125,7 @@ pub(crate) fn staggered_zeros(n: usize, slot: usize) -> Array1<f64> {
 
 impl<'a> FittingState<'a> {
     pub fn new(x: ArrayView2<'a, f64>, y: ArrayView1<'a, f64>) -> Self {
-        let split_strategy_state = SplitStrategyState::new();
+        let split_strategy_state = SplitStrategyState::default();
         let loop_state = LoopState::default();
         let precomputed_statistics = PrecomputedStatistics::new(x.nrows(), x.ncols());
         let n = x.nrows();

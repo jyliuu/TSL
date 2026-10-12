@@ -573,18 +573,8 @@ fn test_best_split_prevents_consecutive_resplits() {
     state.precomputed_statistics.update_pairs_resplit_right[0] = vec![(0.0, 0.0)];
     state.precomputed_statistics.initialized = true;
 
-    // Set last transformation to a resplit at the same position
-    let last_resplit = crate::grid_tensor::splitting::ResplitCandidate {
-        col: 0,
-        index: 3, // Same position as one of our resplit candidates
-        error_reduction: 2.0,
-        interval_idx: 0,
-        update_left: (0.0, 0.0),
-        update_right: (0.0, 0.0),
-    };
-    state.split_strategy_state.last_transformation = Some(FittingAction::ApplyResplit {
-        resplit: last_resplit,
-    });
+    // The loop has just taken the maximum number of consecutive resplits
+    state.loop_state.consecutive_resplits = crate::grid_tensor::state::MAX_CONSECUTIVE_RESPLIT;
 
     // Create strategy
     let strategy = SplitStrategy::Best {

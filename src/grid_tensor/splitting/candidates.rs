@@ -1,14 +1,5 @@
 //! Interval and structural-action candidate types, and the per-fit split strategy state.
 
-use crate::grid_tensor::action::FittingAction;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum SplitType {
-    Split,
-    Merge,
-    Resplit,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Interval {
     pub start: usize,
@@ -86,35 +77,14 @@ pub struct ResplitCandidate {
 }
 
 /// Split strategy state
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SplitStrategyState {
     /// Valid split intervals per feature [col][n_intervals]
     pub allowed_intervals: Vec<Vec<Interval>>,
     /// Total positions per feature [col]
     pub total_positions: Vec<usize>,
-    pub last_transformation: Option<FittingAction>,
-    pub resplit_enabled: bool,
     /// Whether merge statistics participate in unified action selection.
     pub merge_enabled: bool,
     /// Fixed loss-scale cost of adding one boundary to the grid.
     pub boundary_penalty: f64,
-}
-
-impl Default for SplitStrategyState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl SplitStrategyState {
-    pub fn new() -> Self {
-        Self {
-            allowed_intervals: vec![],
-            total_positions: vec![],
-            last_transformation: None,
-            resplit_enabled: true,
-            merge_enabled: false,
-            boundary_penalty: 0.0,
-        }
-    }
 }

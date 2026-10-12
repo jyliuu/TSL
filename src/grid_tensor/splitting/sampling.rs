@@ -10,23 +10,18 @@ pub(super) fn sample_best_split(
     allowed_intervals: &[Vec<Interval>],
     error_reductions: &[Vec<f64>],
 ) -> Option<(usize, usize, usize, f64)> {
-    let mut best_split_candidate: Option<(usize, usize, usize, f64)> = None;
-
-    for (col, intervals) in allowed_intervals.iter().enumerate() {
-        for (interval_idx, interval) in intervals.iter().enumerate() {
-            for index in interval.start..interval.end() {
-                let err_reduction = error_reductions[col][index];
-                if !err_reduction.is_nan()
-                    && best_split_candidate
-                        .as_ref()
-                        .is_none_or(|current_best| err_reduction > current_best.3)
-                {
-                    best_split_candidate = Some((col, index, interval_idx, err_reduction));
-                }
-            }
-        }
-    }
-    best_split_candidate
+    let positions = allowed_intervals
+        .iter()
+        .enumerate()
+        .flat_map(|(col, intervals)| {
+            intervals
+                .iter()
+                .enumerate()
+                .flat_map(move |(interval_idx, interval)| {
+                    (interval.start..interval.end()).map(move |index| (col, index, interval_idx))
+                })
+        });
+    best_scored_position(positions, |col, index| Some(error_reductions[col][index]))
 }
 
 pub(super) fn sample_random_split_positions<R: Rng + ?Sized>(
@@ -89,23 +84,27 @@ pub(super) fn sample_random_split<R: Rng + ?Sized>(
         rng,
         error_reductions.len(),
     );
-    best_scored_random_position(positions, |col, index| {
+    best_scored_position(positions, |col, index| {
         error_reductions[col].get(index).copied()
     })
 }
 
-pub(super) fn best_scored_random_position(
-    positions: Vec<(usize, usize, usize)>,
+/// The first position with the strictly highest non-NaN score, as
+/// `(col, index, interval_idx, score)`; positions without a score are skipped.
+pub(super) fn best_scored_position(
+    positions: impl IntoIterator<Item = (usize, usize, usize)>,
     mut score: impl FnMut(usize, usize) -> Option<f64>,
 ) -> Option<(usize, usize, usize, f64)> {
     let mut best: Option<(usize, usize, usize, f64)> = None;
-    for (col, index, interval_idx) in positions {
-        if let Some(gain) = score(col, index) {
-            if !gain.is_nan() && best.as_ref().is_none_or(|candidate| gain > candidate.3) {
-                best = Some((col, index, interval_idx, gain));
+    positions
+        .into_iter()
+        .for_each(|(col, index, interval_idx)| {
+            if let Some(gain) = score(col, index) {
+                if !gain.is_nan() && best.as_ref().is_none_or(|candidate| gain > candidate.3) {
+                    best = Some((col, index, interval_idx, gain));
+                }
             }
-        }
-    }
+        });
     best
 }
 
