@@ -57,7 +57,7 @@ pub(super) fn precompute_log_components(grid: &GridTensor) -> PrecomputedGrid {
     }
 }
 
-pub(super) fn compute_component_shape_distance_precomputed(
+fn compute_component_shape_distance_precomputed(
     grid_a: &PrecomputedGrid,
     grid_b: &PrecomputedGrid,
     bin_weights: &[Vec<f64>],

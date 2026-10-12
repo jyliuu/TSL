@@ -16,8 +16,6 @@ use ndarray::ArrayView2;
 
 mod canonicalize;
 mod shape_selection;
-#[cfg(test)]
-mod tests;
 
 use canonicalize::{canonicalize_bag_per_axis, compute_a_factors_from_bd, convert_a_factors_to_bd};
 use shape_selection::{
@@ -160,4 +158,65 @@ pub fn aggregate_bagged_two_tensor(
     );
     combined.coalesce_equal_bins();
     combined
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::{Array1, Array2};
+
+    /// One-axis grid with the given splits, per-bin factors and branch scales.
+    fn grid(splits: &[f64], backbone: &[f64], tilt: &[f64], lambda: (f64, f64)) -> GridTensor {
+        let edges: Vec<f64> = std::iter::once(f64::NEG_INFINITY)
+            .chain(splits.iter().copied())
+            .chain([f64::INFINITY])
+            .collect();
+        GridTensor::new_two_tensor(
+            vec![splits.to_vec()],
+            vec![vec![10; backbone.len()]],
+            vec![edges.windows(2).map(|pair| (pair[0], pair[1])).collect()],
+            vec![backbone.to_vec()],
+            vec![tilt.to_vec()],
+            lambda.0,
+            lambda.1,
+        )
+    }
+
+    fn points() -> Array2<f64> {
+        Array2::from_shape_fn((20, 1), |(row, _)| (row as f64 + 0.5) / 20.0)
+    }
+
+    fn aggregate(bags: &[GridTensor], trim_percentage: f64) -> Array1<f64> {
+        let points = points();
+        aggregate_bagged_two_tensor(bags, points.view(), trim_percentage).predict(points.view())
+    }
+
+    #[test]
+    fn aggregating_one_bag_keeps_its_predictions() {
+        let bag = grid(
+            &[0.25, 0.5, 0.75],
+            &[1.0, 1.0, 2.0, 0.5],
+            &[0.3, 0.3, -0.2, 0.1],
+            (1.5, 0.5),
+        );
+        let expected = bag.predict(points().view());
+        assert_eq!(aggregate(&[bag], 0.9), expected);
+    }
+
+    #[test]
+    fn trimming_drops_the_bag_far_from_the_medoid() {
+        let near = grid(&[0.5], &[1.0, 1.2], &[0.1, -0.1], (1.0, 0.5));
+        let far = grid(&[0.5], &[1.0, 6.0], &[0.8, -0.8], (2.0, 1.5));
+        let near_only = aggregate(&[near.clone(), near.clone()], 1.0);
+        // The far bag comes first, so keeping a prefix of the input would keep it.
+        let bags = [far, near.clone(), near];
+        assert_eq!(aggregate(&bags, 0.6), near_only);
+        assert_ne!(aggregate(&bags, 1.0), near_only);
+    }
+
+    #[test]
+    fn geometric_mean_averages_logarithms() {
+        assert!((geometric_mean([1.0, 2.0, 4.0].into_iter()) - 2.0).abs() < 1e-10);
+        assert!((geometric_mean([0.5, 1.0, 2.0].into_iter()) - 1.0).abs() < 1e-10);
+    }
 }
