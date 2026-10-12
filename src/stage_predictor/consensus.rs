@@ -22,10 +22,13 @@ use crate::{
         },
         prepared_input::PreparedInput,
         reducer::CandidateRefresh,
+        splitting::SplitStrategy,
         state::{BranchConsensus, ConsensusAnchors, FittingState},
         GridTensor, GridTensorParams,
     },
-    logging, FitResult,
+    logging,
+    stage_predictor::params::StagePredictorParams,
+    FitResult,
 };
 
 struct Member<'a> {
@@ -39,16 +42,20 @@ struct Member<'a> {
 pub(super) fn fit_consensus_bag<'a>(
     x: ArrayView2<'a, f64>,
     y: ArrayView1<'a, f64>,
-    tg_params: &GridTensorParams,
-    consensus: f64,
-    consensus_interval: usize,
-    consensus_anchors: Option<usize>,
+    params: &StagePredictorParams,
     seeds: &[u64],
     initial_state: Option<&FittingState<'a>>,
     prepared: Option<&PreparedInput<'_>>,
     epoch: Option<usize>,
     fit_results: bool,
 ) -> Vec<(Option<FitResult>, GridTensor)> {
+    let StagePredictorParams {
+        ref tg_params,
+        consensus,
+        consensus_interval,
+        consensus_anchors,
+        ..
+    } = *params;
     assert!(
         consensus.is_finite() && consensus >= 0.0,
         "consensus must be finite and nonnegative"
@@ -96,26 +103,14 @@ pub(super) fn fit_consensus_bag<'a>(
         consensus_anchors,
         seeds.first().copied().unwrap_or(0),
     );
-    if anchors.is_some() {
-        fit_members_with_split_scoring(
-            &mut members,
-            tg_params,
-            consensus,
-            consensus_interval,
-            anchors.as_ref(),
-            epoch,
-            CandidateRefresh::Deferred,
-            true,
-        );
-    } else {
-        fit_members(
-            &mut members,
-            tg_params,
-            consensus,
-            consensus_interval,
-            epoch,
-        );
-    }
+    fit_members(
+        &mut members,
+        tg_params,
+        consensus,
+        consensus_interval,
+        anchors.as_ref(),
+        epoch,
+    );
 
     let finish = |member: Member<'a>| {
         let mut state = member.state.expect("member state");
@@ -220,25 +215,6 @@ fn sample_consensus_anchors(
     Some(Arc::new(ConsensusAnchors::new(n, rows)))
 }
 
-fn fit_members<'a>(
-    members: &mut [Member<'a>],
-    tg_params: &GridTensorParams,
-    consensus: f64,
-    consensus_interval: usize,
-    epoch: Option<usize>,
-) {
-    fit_members_with_split_scoring(
-        members,
-        tg_params,
-        consensus,
-        consensus_interval,
-        None,
-        epoch,
-        CandidateRefresh::Deferred,
-        true,
-    );
-}
-
 /// Reuse full-row reference storage with matching contiguous branch inputs.
 fn reuse_full_row_reference(
     current: &mut FittingState<'_>,
@@ -292,15 +268,13 @@ fn reuse_full_row_reference(
     true
 }
 
-fn fit_members_with_split_scoring<'a>(
+fn fit_members<'a>(
     members: &mut [Member<'a>],
     tg_params: &GridTensorParams,
     consensus: f64,
     consensus_interval: usize,
     anchors: Option<&Arc<ConsensusAnchors>>,
     epoch: Option<usize>,
-    candidate_refresh: CandidateRefresh,
-    sampled_split_scoring: bool,
 ) {
     assert!(
         consensus_interval > 0,
@@ -354,11 +328,7 @@ fn fit_members_with_split_scoring<'a>(
             } = member;
             in_context(*tree_id, epoch, || {
                 let mut current = state.take().expect("member state");
-                current.sampled_split_scoring = sampled_split_scoring
-                    && matches!(
-                        split,
-                        crate::grid_tensor::splitting::SplitStrategy::Random { .. }
-                    );
+                current.sampled_split_scoring = matches!(split, SplitStrategy::Random { .. });
                 let mut current = if let Some(anchors) = anchors {
                     let reference = BranchConsensus {
                         weight: consensus * (n as f64 / reference_len as f64),
@@ -394,9 +364,10 @@ fn fit_members_with_split_scoring<'a>(
                     if current.terminated || current.structure_is_final(tg_params.n_iter) {
                         break;
                     }
-                    // Intermediate proposals consume scores for the same frozen reference.
+                    // Intermediate proposals consume scores for the same frozen reference;
+                    // the batch's last action leaves them to the next round's refresh.
                     let refresh = if offset + 1 == batch_size {
-                        candidate_refresh
+                        CandidateRefresh::Deferred
                     } else {
                         CandidateRefresh::Eager
                     };

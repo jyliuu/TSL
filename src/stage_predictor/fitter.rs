@@ -96,8 +96,6 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
         n_trees,
         tg_params,
         consensus,
-        consensus_interval,
-        consensus_anchors,
         ..
     } = hyperparameters;
 
@@ -118,10 +116,7 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
         return super::consensus::fit_consensus_bag(
             x.view(),
             y.view(),
-            tg_params,
-            *consensus,
-            *consensus_interval,
-            *consensus_anchors,
+            hyperparameters,
             &seeds,
             initial_state.as_ref(),
             prepared,

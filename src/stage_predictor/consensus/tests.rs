@@ -1,9 +1,6 @@
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 
-use super::{
-    fit_consensus_bag, fit_members, fit_members_with_split_scoring, max_iterations,
-    sample_consensus_anchors, Member,
-};
+use super::{fit_consensus_bag, fit_members, max_iterations, sample_consensus_anchors, Member};
 use rand::{rngs::StdRng, SeedableRng};
 
 use crate::{
@@ -12,12 +9,12 @@ use crate::{
         params::{
             GridTensorParamsBuilder, RefinementStrategyParamsBuilder, SplitStrategyParamsBuilder,
         },
-        reducer::CandidateRefresh,
         state::{BranchConsensus, FittingState},
         GridTensor, GridTensorParams,
     },
     stage_predictor::{
-        extract_two_tensor_predictions_unscaled, fit_grid_bag, params::StagePredictorParamsBuilder,
+        extract_two_tensor_predictions_unscaled, fit_grid_bag,
+        params::{StagePredictorParams, StagePredictorParamsBuilder},
     },
 };
 
@@ -133,13 +130,17 @@ fn all_training_anchors_match_the_full_row_model_exactly() {
             let params = member_params(huber, Some(16), 0.0);
             let initial = initialize_state_with_input(x.view(), y.view(), &params, None);
             let fit = |anchors| {
+                let stage_params = StagePredictorParams {
+                    tg_params: params.clone(),
+                    consensus: 0.3,
+                    consensus_interval: interval,
+                    consensus_anchors: anchors,
+                    ..StagePredictorParams::default()
+                };
                 fit_consensus_bag(
                     x.view(),
                     y.view(),
-                    &params,
-                    0.3,
-                    interval,
-                    anchors,
+                    &stage_params,
                     &[17, 18, 19, 20],
                     Some(&initial),
                     None,
@@ -256,16 +257,7 @@ fn consensus_members_respect_budgets_and_branch_invariants() {
                     let params = member_params(huber, max_bins, penalty);
                     let initial = initialize_state_with_input(x.view(), y.view(), &params, None);
                     let mut members = members_from_state(&initial);
-                    fit_members_with_split_scoring(
-                        &mut members,
-                        &params,
-                        0.3,
-                        interval,
-                        anchors,
-                        None,
-                        CandidateRefresh::Deferred,
-                        true,
-                    );
+                    fit_members(&mut members, &params, 0.3, interval, anchors, None);
                     for member in &members {
                         assert_member_budget_and_logging(member, &params);
                         reached_attempt_cap |=
@@ -284,7 +276,7 @@ fn consensus_members_respect_budgets_and_branch_invariants() {
 #[test]
 #[should_panic(expected = "consensus_interval must be positive")]
 fn consensus_interval_must_be_positive() {
-    fit_members(&mut [], &lifecycle_params(0), 0.3, 0, None);
+    fit_members(&mut [], &lifecycle_params(0), 0.3, 0, None, None);
 }
 
 #[test]
@@ -423,7 +415,7 @@ fn consensus_retries_a_stalled_member_after_peer_branches_move() {
 
     for interval in [1, 2, usize::MAX] {
         let mut members = constant_members(x.view(), y.view(), &params, &[(3.0, 2.0), (4.0, 1.0)]);
-        fit_members(&mut members, &params, 1.0, interval, None);
+        fit_members(&mut members, &params, 1.0, interval, None, None);
         for member in members {
             let mut state = member.state.unwrap();
             assert!(
@@ -463,7 +455,7 @@ fn consensus_stops_after_a_whole_round_without_progress() {
     let params = lifecycle_params(5);
     for interval in [1, 3, usize::MAX] {
         let mut members = constant_members(x.view(), y.view(), &params, &[(2.0, 2.0), (2.0, 2.0)]);
-        fit_members(&mut members, &params, 1.0, interval, None);
+        fit_members(&mut members, &params, 1.0, interval, None, None);
         for member in members {
             assert_eq!(member.next_iteration, 1);
             let state = member.state.unwrap();
@@ -485,7 +477,7 @@ fn consensus_keeps_exhausted_and_terminated_members_fixed() {
     for member in &mut members {
         member.state.as_mut().unwrap().iteration = 7;
     }
-    fit_members(&mut members, &params, 1.0, 1, None);
+    fit_members(&mut members, &params, 1.0, 1, None, None);
     for (member, (plus, minus)) in members.into_iter().zip([(3.0, 2.0), (4.0, 1.0)]) {
         let state = member.state.unwrap();
         assert_eq!(state.iteration, 7);
