@@ -5,9 +5,6 @@ mod merge;
 mod resplit;
 mod split;
 
-#[cfg(test)]
-pub(crate) use merge::compute_partial_products_for_axis;
-
 #[cfg(feature = "evo-logging")]
 use crate::grid_tensor::logging_helpers::create_simple_split_event;
 use crate::grid_tensor::{

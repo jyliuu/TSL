@@ -1,6 +1,7 @@
-//! Merge: removes a boundary and reassigns its rows from the axis partial products.
+//! Merge: removes a boundary and moves the rows of both intervals onto the merged factors.
 
 use super::{
+    adjacent_factors,
     caches::{refresh_action_statistics, update_prediction_caches},
     StatisticsPlan,
 };
@@ -24,18 +25,22 @@ pub(super) fn apply<'a>(
 ) -> FittingState<'a> {
     let col = merge.col;
     let interval_idx = merge.interval_idx;
-    let (start, _, end) = state.interval_range_left_and_right(col, interval_idx);
-    let (partial_plus, partial_minus) = compute_partial_products_for_axis(col, &state);
+    let (start, index, end) = state.interval_range_left_and_right(col, interval_idx);
+    let [left, right] = adjacent_factors(&state, col, interval_idx);
     let (a_plus, a_minus) = state.precomputed_statistics.update_pairs_merge[col][interval_idx];
     let (backbone, tilt) = convert_multipliers_to_backbone_tilt(a_plus, a_minus);
 
     remove_boundary(&mut state, col, interval_idx, backbone, tilt);
-    let (g_plus, g_minus) = axis_factors(
+    let merged = axis_factors(
         state.backbone_values[col][interval_idx],
         state.tilt_values[col][interval_idx],
     );
-    update_prediction_caches(&mut state, col, start, end, |row, _, _| {
-        (partial_plus[row] * g_plus, partial_minus[row] * g_minus)
+    // Each row divides out its own side's factor before taking the merged one.
+    update_prediction_caches(&mut state, col, start, index, |_, plus, minus| {
+        (plus / left.0 * merged.0, minus / left.1 * merged.1)
+    });
+    update_prediction_caches(&mut state, col, index, end, |_, plus, minus| {
+        (plus / right.0 * merged.0, minus / right.1 * merged.1)
     });
 
     state = refresh_action_statistics(state, col, (start, end), plan, refinement);
@@ -68,34 +73,4 @@ fn remove_boundary(
     statistics.error_reductions_merge[col].remove(interval_idx);
     statistics.update_pairs_merge[col].remove(interval_idx);
     statistics.interval_stats[col].remove(interval_idx + 1);
-}
-
-/// Compute partial products g_{\pm}^{(-j)} for all points by dividing out axis j factor.
-///
-/// Uses the efficient approach: g_{+,i}^{(-j)} = f_{+,i} / a_{+,j}^{k_j(i)}
-/// where a_{+,j}^{k_j(i)} = b_{j,i} * exp(d_{j,i}) and k_j(i) is the number of boundaries
-/// at or below the row's rank on axis j.
-///
-/// # Arguments
-/// * `col` - The axis index j
-/// * `state` - The current fitting state
-///
-/// # Returns
-/// `(g_plus, g_minus)` vectors of length n, where:
-/// - `g_plus[i] = f_{+,i} / (b_{j,i} * exp(d_{j,i}))`
-/// - `g_minus[i] = f_{-,i} / (b_{j,i} * exp(-d_{j,i}))`
-pub(crate) fn compute_partial_products_for_axis(
-    col: usize,
-    state: &FittingState,
-) -> (Vec<f64>, Vec<f64>) {
-    (0..state.n)
-        .map(|i| {
-            let interval_idx = state.interval_index(col, i);
-            let (a_plus_j, a_minus_j) = axis_factors(
-                state.backbone_values[col][interval_idx],
-                state.tilt_values[col][interval_idx],
-            );
-            (state.f_plus[i] / a_plus_j, state.f_minus[i] / a_minus_j)
-        })
-        .unzip()
 }

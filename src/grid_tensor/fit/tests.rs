@@ -768,10 +768,14 @@ fn merge_optimizes_union_and_matches_applied_loss() {
         &split_strategy,
     );
 
-    let (partial_plus, _) =
-        crate::grid_tensor::reducer::compute_partial_products_for_axis(0, &state);
-    for value in partial_plus {
-        assert!((value - 1.0).abs() < 1e-12);
+    // Every row's partial product off axis 0, f₊ / (b·e^d), equals 1.
+    for row in 0..state.n {
+        let interval_idx = state.interval_index(0, row);
+        let (a_plus, _) = crate::grid_tensor::axis_factors(
+            state.backbone_values[0][interval_idx],
+            state.tilt_values[0][interval_idx],
+        );
+        assert!((state.f_plus[row] / a_plus - 1.0).abs() < 1e-12);
     }
     assert!((state.backbone_values[0][0] - 2.0).abs() < 1e-12);
     assert!((state.backbone_values[0][1] - 4.0).abs() < 1e-12);
