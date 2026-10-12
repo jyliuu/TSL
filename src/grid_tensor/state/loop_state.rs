@@ -37,4 +37,21 @@ impl LoopState {
             iteration: 0,
         }
     }
+
+    pub fn record_split(&mut self) {
+        self.split_count += 1;
+        self.fineness += 1;
+        self.consecutive_resplits = 0;
+    }
+
+    pub fn record_resplit(&mut self) {
+        self.resplit_count += 1;
+        self.consecutive_resplits += 1;
+    }
+
+    pub fn record_merge(&mut self) {
+        self.merge_count += 1;
+        self.fineness = self.fineness.saturating_sub(1);
+        self.consecutive_resplits = 0;
+    }
 }

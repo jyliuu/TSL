@@ -1,65 +1,73 @@
-//! Merge reducer: removes a boundary and reassigns rows from the axis partial products.
+//! Merge: removes a boundary and reassigns its rows from the axis partial products.
 
-use super::caches::update_prediction_caches;
-use crate::grid_tensor::state::FittingState;
-use crate::grid_tensor::two_tensor_solver::{MAX_BACKBONE, MAX_TILT, MIN_BACKBONE};
+use super::{
+    caches::{refresh_action_statistics, update_prediction_caches},
+    StatisticsPlan,
+};
+use crate::grid_tensor::{
+    axis_factors,
+    refinement::RefinementStrategy,
+    splitting::MergeCandidate,
+    state::FittingState,
+    two_tensor_solver::{
+        convert_multipliers_to_backbone_tilt, MAX_BACKBONE, MAX_TILT, MIN_BACKBONE,
+    },
+};
 
-/// Merge=OptimalMerge: apply optimal merged parameters and remove boundary
-///
-/// # Arguments
-/// * `b_merged_optimal` - Absolute optimal backbone value for merged interval
-/// * `d_merged_optimal` - Absolute optimal tilt value for merged interval
-pub(super) fn reduce_grid_merge_optimal<'a>(
+/// Merge intervals `merge.interval_idx` and `merge.interval_idx + 1` on `merge.col` into one
+/// interval with the cached optimal axis factors.
+pub(super) fn apply<'a>(
     mut state: FittingState<'a>,
-    col: usize,
-    interval_idx: usize,
-    b_merged_optimal: f64,
-    d_merged_optimal: f64,
+    merge: MergeCandidate,
+    refinement: &RefinementStrategy,
+    plan: StatisticsPlan,
 ) -> FittingState<'a> {
-    // Remove the boundary inserted by the split
-    state.boundaries[col].remove(interval_idx);
+    let col = merge.col;
+    let interval_idx = merge.interval_idx;
+    let (start, _, end) = state.interval_range_left_and_right(col, interval_idx);
+    let (partial_plus, partial_minus) = compute_partial_products_for_axis(col, &state);
+    let (a_plus, a_minus) = state.precomputed_statistics.update_pairs_merge[col][interval_idx];
+    let (backbone, tilt) = convert_multipliers_to_backbone_tilt(a_plus, a_minus);
 
-    // Apply merged params: set to absolute optimal values (not relative to left child)
-    state.backbone_values[col][interval_idx] = b_merged_optimal.clamp(MIN_BACKBONE, MAX_BACKBONE);
-    state.tilt_values[col][interval_idx] = d_merged_optimal.clamp(-MAX_TILT, MAX_TILT);
+    remove_boundary(&mut state, col, interval_idx, backbone, tilt);
+    let (g_plus, g_minus) = axis_factors(
+        state.backbone_values[col][interval_idx],
+        state.tilt_values[col][interval_idx],
+    );
+    update_prediction_caches(&mut state, col, start, end, |row, _, _| {
+        (partial_plus[row] * g_plus, partial_minus[row] * g_minus)
+    });
 
-    // Remove right child interval
-    state.backbone_values[col].remove(interval_idx + 1);
-    state.tilt_values[col].remove(interval_idx + 1);
-
-    // Remove resplit/merge statistics aligned with the removed boundary
-    state.precomputed_statistics.error_reductions_resplit[col].remove(interval_idx);
-    state.precomputed_statistics.update_pairs_resplit_left[col].remove(interval_idx);
-    state.precomputed_statistics.update_pairs_resplit_right[col].remove(interval_idx);
-    state.precomputed_statistics.error_reductions_resplit_pairs[col].remove(interval_idx);
-    state.precomputed_statistics.error_reductions_merge[col].remove(interval_idx);
-    state.precomputed_statistics.update_pairs_merge[col].remove(interval_idx);
-
-    // Remove right interval stats
-    state.precomputed_statistics.interval_stats[col].remove(interval_idx + 1);
-
+    state = refresh_action_statistics(state, col, (start, end), plan, refinement);
+    state.current_error = refinement.weighted_squared_error(&state.residuals);
+    state.loop_state.record_merge();
     state
 }
 
-/// Assign predictions from pre-merge partial products and the stored merged axis factors.
-pub(super) fn reduce_grid_predictions_and_residuals_merge_from_partial_products<'a>(
-    mut state: FittingState<'a>,
+/// Remove boundary `interval_idx` on `col`; the merged interval takes the absolute parameters
+/// `(backbone, tilt)`, clamped to the grid's bounds.
+fn remove_boundary(
+    state: &mut FittingState<'_>,
     col: usize,
-    original_affected_interval: &(usize, usize),
-    partial_plus: &[f64],
-    partial_minus: &[f64],
-    g_plus_new: f64,
-    g_minus_new: f64,
-) -> FittingState<'a> {
-    let &(start, end) = original_affected_interval;
-    update_prediction_caches(&mut state, col, start, end, |row, _, _| {
-        (
-            partial_plus[row] * g_plus_new,
-            partial_minus[row] * g_minus_new,
-        )
-    });
+    interval_idx: usize,
+    backbone: f64,
+    tilt: f64,
+) {
+    state.boundaries[col].remove(interval_idx);
 
-    state
+    state.backbone_values[col][interval_idx] = backbone.clamp(MIN_BACKBONE, MAX_BACKBONE);
+    state.tilt_values[col][interval_idx] = tilt.clamp(-MAX_TILT, MAX_TILT);
+    state.backbone_values[col].remove(interval_idx + 1);
+    state.tilt_values[col].remove(interval_idx + 1);
+
+    let statistics = &mut state.precomputed_statistics;
+    statistics.error_reductions_resplit[col].remove(interval_idx);
+    statistics.update_pairs_resplit_left[col].remove(interval_idx);
+    statistics.update_pairs_resplit_right[col].remove(interval_idx);
+    statistics.error_reductions_resplit_pairs[col].remove(interval_idx);
+    statistics.error_reductions_merge[col].remove(interval_idx);
+    statistics.update_pairs_merge[col].remove(interval_idx);
+    statistics.interval_stats[col].remove(interval_idx + 1);
 }
 
 /// Compute partial products g_{\pm}^{(-j)} for all points by dividing out axis j factor.
@@ -80,25 +88,14 @@ pub(crate) fn compute_partial_products_for_axis(
     col: usize,
     state: &FittingState,
 ) -> (Vec<f64>, Vec<f64>) {
-    let n = state.n;
-    let mut g_plus = Vec::with_capacity(n);
-    let mut g_minus = Vec::with_capacity(n);
-    let boundaries = &state.boundaries[col];
-    let ranks = &state.precomputed_statistics.sort_order[col];
-
-    for i in 0..n {
-        let interval_idx = boundaries.partition_point(|&b| b <= ranks[i]);
-
-        let b_j = state.backbone_values[col][interval_idx];
-        let d_j = state.tilt_values[col][interval_idx];
-
-        // Compute axis factors: a_{+,j}^{k_j(i)} = b_j * exp(d_j), a_{-,j}^{k_j(i)} = b_j * exp(-d_j)
-        let a_plus_j = b_j * d_j.exp();
-        let a_minus_j = b_j * (-d_j).exp();
-
-        g_plus.push(state.f_plus[i] / a_plus_j);
-        g_minus.push(state.f_minus[i] / a_minus_j);
-    }
-
-    (g_plus, g_minus)
+    (0..state.n)
+        .map(|i| {
+            let interval_idx = state.interval_index(col, i);
+            let (a_plus_j, a_minus_j) = axis_factors(
+                state.backbone_values[col][interval_idx],
+                state.tilt_values[col][interval_idx],
+            );
+            (state.f_plus[i] / a_plus_j, state.f_minus[i] / a_minus_j)
+        })
+        .unzip()
 }

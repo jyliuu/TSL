@@ -1,33 +1,64 @@
-//! Resplit reducer: updates the two intervals around a boundary and rescales their rows.
+//! Resplit: refits the two intervals around an existing boundary and rescales their rows.
 
-use super::caches::update_prediction_caches;
-use crate::grid_tensor::state::FittingState;
-use crate::grid_tensor::two_tensor_solver::{MAX_BACKBONE, MAX_TILT, MIN_BACKBONE};
+use super::{
+    adjacent_factors,
+    caches::{refresh_action_statistics, rescale_branches},
+    scaled_parameters, side_multipliers, StatisticsPlan,
+};
+use crate::grid_tensor::{
+    refinement::RefinementStrategy, splitting::ResplitCandidate, state::FittingState,
+};
 
-/// Update backbone and tilt values for a resplit using two-tensor (v_b, Δd) conversion
-pub(super) fn reduce_grid_resplit_two_tensor(
-    mut state: FittingState<'_>,
-    v_b_l: f64,
-    delta_d_l: f64,
-    v_b_r: f64,
-    delta_d_r: f64,
+/// Refit intervals `resplit.interval_idx` and `resplit.interval_idx + 1` on `resplit.col`.
+pub(super) fn apply<'a>(
+    mut state: FittingState<'a>,
+    resplit: ResplitCandidate,
+    refinement: &RefinementStrategy,
+    plan: StatisticsPlan,
+) -> FittingState<'a> {
+    let col = resplit.col;
+    let interval_idx = resplit.interval_idx;
+    let (start, _, end) = state.interval_range_left_and_right(col, interval_idx);
+    let multipliers = side_multipliers(
+        &state,
+        refinement,
+        [resplit.update_left, resplit.update_right],
+    );
+    let old_factors = adjacent_factors(&state, col, interval_idx);
+
+    scale_sides(&mut state, col, interval_idx, multipliers);
+    let new_factors = adjacent_factors(&state, col, interval_idx);
+    rescale_branches(
+        &mut state,
+        col,
+        (start, resplit.index, end),
+        old_factors,
+        new_factors,
+    );
+
+    state = refresh_action_statistics(state, col, (start, end), plan, refinement);
+    state.current_error = refinement.weighted_squared_error(&state.residuals);
+    state.loop_state.record_resplit();
+    state
+}
+
+/// Scale the parameters of intervals `interval_idx` and `interval_idx + 1` on `col` by their
+/// `(v_b, Δd)`.
+fn scale_sides(
+    state: &mut FittingState<'_>,
     col: usize,
     interval_idx: usize,
-) -> FittingState<'_> {
-    // Get parent parameters (for resplit, we update existing intervals)
-    let b_p_left = state.backbone_values[col][interval_idx];
-    let d_p_left = state.tilt_values[col][interval_idx];
-    let b_p_right = state.backbone_values[col][interval_idx + 1];
-    let d_p_right = state.tilt_values[col][interval_idx + 1];
-
-    // Update left interval: b_L = b_p * v_b_L, d_L = d_p + Δd_L
-    state.backbone_values[col][interval_idx] = (b_p_left * v_b_l).clamp(MIN_BACKBONE, MAX_BACKBONE);
-    state.tilt_values[col][interval_idx] = (d_p_left + delta_d_l).clamp(-MAX_TILT, MAX_TILT);
-
-    // Update right interval: b_R = b_p * v_b_R, d_R = d_p + Δd_R
-    state.backbone_values[col][interval_idx + 1] =
-        (b_p_right * v_b_r).clamp(MIN_BACKBONE, MAX_BACKBONE);
-    state.tilt_values[col][interval_idx + 1] = (d_p_right + delta_d_r).clamp(-MAX_TILT, MAX_TILT);
+    multipliers: [(f64, f64); 2],
+) {
+    for (k, multiplier) in (interval_idx..).zip(multipliers) {
+        let (backbone, tilt) = scaled_parameters(
+            state.backbone_values[col][k],
+            state.tilt_values[col][k],
+            multiplier,
+        );
+        state.backbone_values[col][k] = backbone;
+        state.tilt_values[col][k] = tilt;
+    }
 
     // Stage 1 invariants: I21 (debug builds only)
     #[cfg(debug_assertions)]
@@ -46,38 +77,4 @@ pub(super) fn reduce_grid_resplit_two_tensor(
             }
         }
     }
-
-    state
-}
-
-/// Update per-point caches for a resplit using explicit old/new axis factors per side.
-pub(super) fn reduce_grid_predictions_and_residuals_resplit_two_tensor_factors<'a>(
-    mut state: FittingState<'a>,
-    col: usize,
-    index: usize,
-    original_affected_interval: &(usize, usize),
-    g_plus_old_l: f64,
-    g_minus_old_l: f64,
-    g_plus_old_r: f64,
-    g_minus_old_r: f64,
-    g_plus_new_l: f64,
-    g_minus_new_l: f64,
-    g_plus_new_r: f64,
-    g_minus_new_r: f64,
-) -> FittingState<'a> {
-    let &(start, end) = original_affected_interval;
-
-    let ratio_plus_left = g_plus_new_l / g_plus_old_l;
-    let ratio_minus_left = g_minus_new_l / g_minus_old_l;
-    let ratio_plus_right = g_plus_new_r / g_plus_old_r;
-    let ratio_minus_right = g_minus_new_r / g_minus_old_r;
-
-    update_prediction_caches(&mut state, col, start, index, |_, plus, minus| {
-        (plus * ratio_plus_left, minus * ratio_minus_left)
-    });
-    update_prediction_caches(&mut state, col, index, end, |_, plus, minus| {
-        (plus * ratio_plus_right, minus * ratio_minus_right)
-    });
-
-    state
 }

@@ -1,43 +1,72 @@
-//! Split reducer: inserts a boundary, rescales the affected rows, and forbids nearby splits.
+//! Split: inserts a boundary inside one interval, rescales its rows and forbids nearby splits.
 
-use super::caches::update_prediction_caches;
-use crate::grid_tensor::two_tensor_solver::{MAX_BACKBONE, MAX_TILT, MIN_BACKBONE};
+use super::{
+    adjacent_factors,
+    caches::{refresh_action_statistics, rescale_branches},
+    scaled_parameters, side_multipliers, StatisticsPlan,
+};
 use crate::grid_tensor::{
+    axis_factors,
+    refinement::RefinementStrategy,
     splitting::{SplitCandidate, SplitStrategy},
-    state::FittingState,
+    state::{FittingState, IntervalStats},
 };
 
-/// Update tree structure: boundaries and grid_values
-pub(super) fn reduce_grid_split_two_tensor(
-    mut state: FittingState<'_>,
-    v_b_l: f64,
-    delta_d_l: f64,
-    v_b_r: f64,
-    delta_d_r: f64,
-    col: usize,
-    index: usize,
-) -> FittingState<'_> {
-    let insert_at = state.boundaries[col].partition_point(|&b| b <= index);
-
-    // Insert new boundary at the correct position
-    state.boundaries[col].insert(insert_at, index);
-
-    // Parent parameters
-    let b_p = state.backbone_values[col][insert_at];
-    let d_p = state.tilt_values[col][insert_at];
-
-    // Child params: b_child = b_p * v_b, d_child = d_p + Δd
-    // Use same clamping values as resplit for consistency
-
-    state.backbone_values[col][insert_at] = (b_p * v_b_l).clamp(MIN_BACKBONE, MAX_BACKBONE);
-    let new_tilt_l = (d_p + delta_d_l).clamp(-MAX_TILT, MAX_TILT);
-    state.tilt_values[col][insert_at] = new_tilt_l;
-
-    state.backbone_values[col].insert(
-        insert_at + 1,
-        (b_p * v_b_r).clamp(MIN_BACKBONE, MAX_BACKBONE),
+/// Split the interval holding sorted position `split.index` on `split.col` at that position.
+pub(super) fn apply<'a>(
+    mut state: FittingState<'a>,
+    split: SplitCandidate,
+    refinement: &RefinementStrategy,
+    split_strategy: &SplitStrategy,
+    plan: StatisticsPlan,
+) -> FittingState<'a> {
+    let col = split.col;
+    let interval_idx = state.boundaries[col].partition_point(|&b| b <= split.index);
+    let (start, end) = state.interval_range(col, interval_idx);
+    let multipliers = side_multipliers(&state, refinement, [split.update_left, split.update_right]);
+    let parent = axis_factors(
+        state.backbone_values[col][interval_idx],
+        state.tilt_values[col][interval_idx],
     );
-    state.tilt_values[col].insert(insert_at + 1, (d_p + delta_d_r).clamp(-MAX_TILT, MAX_TILT));
+
+    insert_boundary(&mut state, col, interval_idx, split.index, multipliers);
+    let children = adjacent_factors(&state, col, interval_idx);
+    rescale_branches(
+        &mut state,
+        col,
+        (start, split.index, end),
+        [parent, parent],
+        children,
+    );
+
+    state = refresh_action_statistics(state, col, (start, end), plan, refinement);
+    state = split_strategy.forbid_around_split(state, &split);
+    state.current_error = refinement.weighted_squared_error(&state.residuals);
+    state.loop_state.record_split();
+    state
+}
+
+/// Insert boundary `index` as boundary `interval_idx` on `col`.
+///
+/// Each child takes the parent's parameters scaled by its `(v_b, Δd)`, and the new boundary's
+/// resplit and merge statistics start as NaN placeholders.
+fn insert_boundary(
+    state: &mut FittingState<'_>,
+    col: usize,
+    interval_idx: usize,
+    index: usize,
+    [left, right]: [(f64, f64); 2],
+) {
+    state.boundaries[col].insert(interval_idx, index);
+
+    let b_p = state.backbone_values[col][interval_idx];
+    let d_p = state.tilt_values[col][interval_idx];
+    let (b_l, d_l) = scaled_parameters(b_p, d_p, left);
+    let (b_r, d_r) = scaled_parameters(b_p, d_p, right);
+    state.backbone_values[col][interval_idx] = b_l;
+    state.tilt_values[col][interval_idx] = d_l;
+    state.backbone_values[col].insert(interval_idx + 1, b_r);
+    state.tilt_values[col].insert(interval_idx + 1, d_r);
 
     // Stage 1 invariants: I20-I27 (debug builds only)
     #[cfg(debug_assertions)]
@@ -81,66 +110,13 @@ pub(super) fn reduce_grid_split_two_tensor(
         }
     }
 
-    // Insert placeholders for resplit/merge statistics aligned with the new boundary
-    state.precomputed_statistics.error_reductions_resplit[col].insert(insert_at, f64::NAN);
-    state.precomputed_statistics.update_pairs_resplit_left[col]
-        .insert(insert_at, (f64::NAN, f64::NAN));
-    state.precomputed_statistics.update_pairs_resplit_right[col]
-        .insert(insert_at, (f64::NAN, f64::NAN));
-    state.precomputed_statistics.error_reductions_resplit_pairs[col]
-        .insert(insert_at, (f64::NAN, f64::NAN));
-    state.precomputed_statistics.error_reductions_merge[col].insert(insert_at, f64::NAN);
-    state.precomputed_statistics.update_pairs_merge[col].insert(insert_at, (f64::NAN, f64::NAN));
-
-    // Split interval stats: insert placeholder for the new right interval
-    // (actual values will be computed in update_statistics)
-    state.precomputed_statistics.interval_stats[col].insert(
-        insert_at + 1,
-        crate::grid_tensor::state::IntervalStats::default(),
-    );
-
-    state
-}
-
-/// Update per-point caches (f_±, f, y_hat, residuals, r_tilde) for a split using explicit axis factors.
-///
-/// Here:
-/// - `g_plus_old/g_minus_old` are the parent axis factors on this column before the split
-/// - `g_plus_new_* / g_minus_new_*` are the child axis factors for left/right after the split
-pub(super) fn reduce_grid_predictions_and_residuals_two_tensor_factors<'a>(
-    mut state: FittingState<'a>,
-    col: usize,
-    index: usize,
-    original_affected_interval: &(usize, usize),
-    g_plus_old: f64,
-    g_minus_old: f64,
-    g_plus_new_l: f64,
-    g_minus_new_l: f64,
-    g_plus_new_r: f64,
-    g_minus_new_r: f64,
-) -> FittingState<'a> {
-    let &(start, end) = original_affected_interval;
-
-    let ratio_plus_left = g_plus_new_l / g_plus_old;
-    let ratio_minus_left = g_minus_new_l / g_minus_old;
-    let ratio_plus_right = g_plus_new_r / g_plus_old;
-    let ratio_minus_right = g_minus_new_r / g_minus_old;
-
-    update_prediction_caches(&mut state, col, start, index, |_, plus, minus| {
-        (plus * ratio_plus_left, minus * ratio_minus_left)
-    });
-    update_prediction_caches(&mut state, col, index, end, |_, plus, minus| {
-        (plus * ratio_plus_right, minus * ratio_minus_right)
-    });
-
-    state
-}
-
-/// Forbid splits around the given position (ported from SplitStrategy::forbid_around_split)
-pub(super) fn reduce_forbid_around_split<'a>(
-    state: FittingState<'a>,
-    split_candidate: &SplitCandidate,
-    split_strategy: &SplitStrategy,
-) -> FittingState<'a> {
-    split_strategy.forbid_around_split(state, split_candidate)
+    let statistics = &mut state.precomputed_statistics;
+    statistics.error_reductions_resplit[col].insert(interval_idx, f64::NAN);
+    statistics.update_pairs_resplit_left[col].insert(interval_idx, (f64::NAN, f64::NAN));
+    statistics.update_pairs_resplit_right[col].insert(interval_idx, (f64::NAN, f64::NAN));
+    statistics.error_reductions_resplit_pairs[col].insert(interval_idx, (f64::NAN, f64::NAN));
+    statistics.error_reductions_merge[col].insert(interval_idx, f64::NAN);
+    statistics.update_pairs_merge[col].insert(interval_idx, (f64::NAN, f64::NAN));
+    // Placeholder for the right child's interval statistics.
+    statistics.interval_stats[col].insert(interval_idx + 1, IntervalStats::default());
 }

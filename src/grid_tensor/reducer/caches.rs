@@ -1,6 +1,6 @@
 //! Refreshes the row prediction caches and candidate statistics a structural action invalidates.
 
-use super::CandidateRefresh;
+use super::StatisticsPlan;
 use crate::grid_tensor::{
     refinement::RefinementStrategy,
     state::{AffectedRange, FittingState},
@@ -59,40 +59,68 @@ pub(super) fn update_prediction_caches(
     }
 }
 
-/// Wrapper: update statistics and refresh ER caches for affected ranges
-pub(super) fn reduce_grid_statistics_and_refresh_caches<'a>(
-    mut state: FittingState<'a>,
+/// Rescale the branch predictions of the sorted rows `start..end` on `col` by the new-to-old
+/// ratio of their side's axis factors: rows before `index` are the left side.
+pub(super) fn rescale_branches(
+    state: &mut FittingState<'_>,
     col: usize,
-    original_affected_interval: &(usize, usize),
-    affected_ranges: Option<&[AffectedRange]>,
+    (start, index, end): (usize, usize, usize),
+    old_factors: [(f64, f64); 2],
+    new_factors: [(f64, f64); 2],
+) {
+    let [left, right] = [0, 1].map(|side| {
+        (
+            new_factors[side].0 / old_factors[side].0,
+            new_factors[side].1 / old_factors[side].1,
+        )
+    });
+    update_prediction_caches(state, col, start, index, |_, plus, minus| {
+        (plus * left.0, minus * left.1)
+    });
+    update_prediction_caches(state, col, index, end, |_, plus, minus| {
+        (plus * right.0, minus * right.1)
+    });
+}
+
+/// Update the statistics of the sorted rows `start..end` on `col` as `plan` directs.
+pub(super) fn refresh_action_statistics<'a>(
+    state: FittingState<'a>,
+    col: usize,
+    (start, end): (usize, usize),
+    plan: StatisticsPlan,
     refinement: &RefinementStrategy,
-    candidate_refresh: CandidateRefresh,
 ) -> FittingState<'a> {
-    let &(start, end) = original_affected_interval;
-    let Some(affected_ranges) = affected_ranges else {
-        assert_eq!(candidate_refresh, CandidateRefresh::Deferred);
-        return refinement.update_binned_curvature_statistics(state, col, start, end);
-    };
-    // Convert AffectedRange to point ranges for update_statistics
-    // update_statistics expects a Vec indexed by column number, so we need to build
-    // a full vector with empty ranges (1, 0) for unaffected columns
-    let mut affected_points_range = vec![(1usize, 0usize); state.p];
-    for affected_range in affected_ranges {
-        affected_points_range[affected_range.col] = affected_range.point_range;
+    match plan {
+        StatisticsPlan::BinnedCurvature => {
+            refinement.update_binned_curvature_statistics(state, col, start, end)
+        }
+        StatisticsPlan::Curvature => {
+            let (_, points) = affected_ranges(&state, col, (start, end));
+            refinement.update_curvature_statistics(state, col, start, end, &points)
+        }
+        StatisticsPlan::Deferred => {
+            let (_, points) = affected_ranges(&state, col, (start, end));
+            refinement.update_statistics(state, col, start, end, &points)
+        }
+        StatisticsPlan::Eager => {
+            let (ranges, points) = affected_ranges(&state, col, (start, end));
+            let state = refinement.update_statistics(state, col, start, end, &points);
+            refinement.refresh_error_reduction_caches_for_affected(state, &ranges)
+        }
     }
-    state = if candidate_refresh == CandidateRefresh::Deferred
-        && matches!(refinement, RefinementStrategy::L2Refinement { .. })
-        && state
-            .branch_consensus
-            .as_ref()
-            .is_some_and(|reference| reference.anchors.is_none())
-    {
-        refinement.update_curvature_statistics(state, col, start, end, &affected_points_range)
-    } else {
-        refinement.update_statistics(state, col, start, end, &affected_points_range)
-    };
-    if candidate_refresh == CandidateRefresh::Eager {
-        state = refinement.refresh_error_reduction_caches_for_affected(state, affected_ranges);
+}
+
+/// The affected ranges of every column, and their point ranges indexed by column with the
+/// empty range `(1, 0)` for columns the action leaves untouched.
+fn affected_ranges(
+    state: &FittingState,
+    col: usize,
+    interval: (usize, usize),
+) -> (Vec<AffectedRange>, Vec<(usize, usize)>) {
+    let ranges = state.get_affected_ranges(col, interval);
+    let mut points = vec![(1usize, 0usize); state.p];
+    for range in &ranges {
+        points[range.col] = range.point_range;
     }
-    state
+    (ranges, points)
 }
