@@ -1,5 +1,6 @@
 //! Per-bag gauge fixing and conversions between the `(b, d)` and `a±` factor forms.
 
+use crate::grid_tensor::identification::{center_tilt_axis, EPS};
 use crate::grid_tensor::GridTensor;
 
 use super::{clamped_ln, EPSILON};
@@ -63,31 +64,8 @@ pub(super) fn convert_a_factors_to_bd(
 }
 
 fn center_tilt_per_axis(tilt_values: &mut [Vec<f64>], observation_counts: &[Vec<usize>]) {
-    const EPS: f64 = 1e-12;
-
     for dim in 0..tilt_values.len() {
-        let counts = &observation_counts[dim];
-        let d = &mut tilt_values[dim];
-
-        if counts.is_empty() || d.is_empty() {
-            continue;
-        }
-
-        let weights_sum: f64 = counts.iter().map(|&c| c as f64).sum();
-        if weights_sum <= EPS {
-            continue;
-        }
-
-        let mean = d
-            .iter()
-            .zip(counts.iter())
-            .map(|(&x, &c)| x * (c as f64))
-            .sum::<f64>()
-            / weights_sum;
-
-        for x in d.iter_mut() {
-            *x -= mean;
-        }
+        center_tilt_axis(&mut tilt_values[dim], &observation_counts[dim]);
     }
 }
 
@@ -95,8 +73,6 @@ fn canonicalize_backbone_log_space(
     backbone_values: &mut [Vec<f64>],
     observation_counts: &[Vec<usize>],
 ) {
-    const EPS: f64 = 1e-12;
-
     for dim in 0..backbone_values.len() {
         let counts = &observation_counts[dim];
         let b = &mut backbone_values[dim];
