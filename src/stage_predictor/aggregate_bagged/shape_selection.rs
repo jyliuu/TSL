@@ -92,7 +92,6 @@ pub(super) fn compute_component_shape_distance_precomputed(
     total_distance_sq.sqrt()
 }
 
-#[cfg(not(feature = "use-rayon"))]
 pub(super) fn select_median_tensor_component_shape(
     grids: &[PrecomputedGrid],
     bin_weights: &[Vec<f64>],
@@ -105,85 +104,52 @@ pub(super) fn select_median_tensor_component_shape(
     }
 
     let n = grids.len();
-    let mut min_total_distance = f64::INFINITY;
-    let mut median_index = 0;
-
-    let mut distance_matrix: Vec<Vec<f64>> = vec![vec![0.0; n]; n];
-
     log::info!(
         "Computing pairwise component-shape distances for {} bags",
         n
     );
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let dist =
-                compute_component_shape_distance_precomputed(&grids[i], &grids[j], bin_weights);
-            distance_matrix[i][j] = dist;
-            distance_matrix[j][i] = dist;
-        }
-    }
-
-    log::info!("Finding median bag (medoid) from distance matrix");
-    for i in 0..n {
-        let total_distance: f64 = distance_matrix[i].iter().sum();
-        if total_distance < min_total_distance {
-            min_total_distance = total_distance;
-            median_index = i;
-        }
-    }
-
-    log::info!(
-        "Selected grid {} as median (medoid) with total distance {:.6}",
-        median_index,
-        min_total_distance
-    );
-    (median_index, distance_matrix)
-}
-
-#[cfg(feature = "use-rayon")]
-pub(super) fn select_median_tensor_component_shape(
-    grids: &[PrecomputedGrid],
-    bin_weights: &[Vec<f64>],
-) -> (usize, Vec<Vec<f64>>) {
-    if grids.is_empty() {
-        panic!("Cannot select median from empty grid list");
-    }
-    if grids.len() == 1 {
-        return (0, vec![vec![0.0; 1]; 1]);
-    }
-
-    let n = grids.len();
-    let mut distance_matrix: Vec<Vec<f64>> = vec![vec![0.0; n]; n];
-
-    log::info!(
-        "Computing pairwise component-shape distances for {} bags (parallel)",
-        n
-    );
-
+    let distance = |i: usize, j: usize| {
+        (
+            i,
+            j,
+            compute_component_shape_distance_precomputed(&grids[i], &grids[j], bin_weights),
+        )
+    };
+    #[cfg(feature = "use-rayon")]
     let upper_triangle: Vec<(usize, usize, f64)> = (0..n)
         .into_par_iter()
-        .flat_map(|i| {
-            ((i + 1)..n).into_par_iter().map(move |j| {
-                let dist =
-                    compute_component_shape_distance_precomputed(&grids[i], &grids[j], bin_weights);
-                (i, j, dist)
-            })
-        })
+        .flat_map(|i| ((i + 1)..n).into_par_iter().map(move |j| distance(i, j)))
+        .collect();
+    #[cfg(not(feature = "use-rayon"))]
+    let upper_triangle: Vec<(usize, usize, f64)> = (0..n)
+        .flat_map(|i| ((i + 1)..n).map(move |j| distance(i, j)))
         .collect();
 
+    let mut distance_matrix: Vec<Vec<f64>> = vec![vec![0.0; n]; n];
     for (i, j, dist) in upper_triangle {
         distance_matrix[i][j] = dist;
         distance_matrix[j][i] = dist;
     }
 
     log::info!("Finding median bag (medoid) from distance matrix");
-    let (median_index, min_total_distance) = (0..n)
-        .map(|i| {
-            let total_distance: f64 = distance_matrix[i].iter().sum();
-            (i, total_distance)
-        })
+    let totals = distance_matrix
+        .iter()
+        .map(|row| row.iter().sum::<f64>())
+        .enumerate();
+    // Both builds keep the first minimal total. A NaN total panics under `use-rayon` and
+    // is skipped without it; distances between clamped log factors keep totals finite.
+    #[cfg(feature = "use-rayon")]
+    let (median_index, min_total_distance) = totals
         .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
         .unwrap();
+    #[cfg(not(feature = "use-rayon"))]
+    let (median_index, min_total_distance) = totals.fold((0, f64::INFINITY), |best, (i, total)| {
+        if total < best.1 {
+            (i, total)
+        } else {
+            best
+        }
+    });
 
     log::info!(
         "Selected grid {} as median (medoid) with total distance {:.6}",
