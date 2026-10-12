@@ -19,8 +19,7 @@ use crate::logging::reducer::log_split_reducer;
 
 use caches::reduce_grid_statistics_and_refresh_caches;
 use control::{
-    reduce_apply_scaling, reduce_composite, reduce_loop_state_for_merge,
-    reduce_loop_state_for_resplit, reduce_loop_state_for_split, reduce_terminate,
+    reduce_loop_state_for_merge, reduce_loop_state_for_resplit, reduce_loop_state_for_split,
 };
 use merge::{
     reduce_grid_merge_optimal, reduce_grid_predictions_and_residuals_merge_from_partial_products,
@@ -68,9 +67,7 @@ pub(crate) fn fitting_reducer_with_candidate_refresh<'a>(
 ) -> FittingState<'a> {
     state.require_current_statistics();
     let sampled_split_scoring = state.sampled_split_scoring;
-    let eager = candidate_refresh == CandidateRefresh::Eager
-        || matches!(&action, FittingAction::Composite { .. });
-    if eager {
+    if candidate_refresh == CandidateRefresh::Eager {
         // Untouched intervals retain scores computed before prefix-tail shifts.
         // Materialize pending scores before an action that permits another local proposal.
         if state.split_scores_stale {
@@ -78,23 +75,13 @@ pub(crate) fn fitting_reducer_with_candidate_refresh<'a>(
         }
         state.sampled_split_scoring = false;
     }
-    let mut state = match action {
-        FittingAction::ApplyScaling { factor } => reduce_apply_scaling(state, factor),
-        FittingAction::Terminate { reason } => reduce_terminate(state, reason),
-        FittingAction::Composite { actions } => {
-            // Consecutive subactions can consume the candidate caches.
-            reduce_composite(state, actions, refinement_strategy, split_strategy)
-        }
-        FittingAction::ApplyMerge { .. }
-        | FittingAction::ApplyResplit { .. }
-        | FittingAction::ApplySplit { .. } => reduce_apply_transformation(
-            state,
-            action,
-            refinement_strategy,
-            split_strategy,
-            candidate_refresh,
-        ),
-    };
+    let mut state = reduce_apply_transformation(
+        state,
+        action,
+        refinement_strategy,
+        split_strategy,
+        candidate_refresh,
+    );
     state.sampled_split_scoring = sampled_split_scoring;
     state
 }
@@ -363,7 +350,6 @@ fn reduce_apply_transformation<'a>(
             state = reduce_loop_state_for_resplit(state, &resplit_candidate);
             state
         }
-        _ => unreachable!(),
     };
 
     #[cfg(feature = "evo-logging")]

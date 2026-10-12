@@ -112,7 +112,7 @@ pub(crate) fn max_iterations(n_iter: usize) -> usize {
 /// Propose and apply one structural action.
 ///
 /// Returns `false` once the grid is finished: the split budget is exhausted with merges
-/// disabled, no objective-improving action remains, or the reducer terminated the fit.
+/// disabled, no objective-improving action remains, or the state is marked terminated.
 pub(crate) fn fit_step<'a, R: Rng + ?Sized>(
     state: FittingState<'a>,
     iter: usize,

@@ -249,7 +249,6 @@ pub fn create_simple_split_event(
                 Some(right_count),
             )
         }
-        _ => unreachable!(),
     };
 
     // Compute n_cells_after (total number of cells after the operation)
