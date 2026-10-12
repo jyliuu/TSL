@@ -1,9 +1,11 @@
 //! Resplit and merge scores for the boundaries between adjacent intervals.
 
-use super::gain::{canonical_merge_factors, interval_solver_stats, SplitEvaluator};
+use super::gain::{
+    canonical_merge_factors, huber_weighting, interval_solver_stats, SplitEvaluator,
+};
 use super::RefinementStrategy;
 use crate::grid_tensor::axis_factors;
-use crate::grid_tensor::state::FittingState;
+use crate::grid_tensor::state::{BranchConsensus, FittingState};
 use crate::grid_tensor::two_tensor_solver::{data_loss_gain, log_coordinate_penalty};
 
 impl RefinementStrategy {
@@ -81,47 +83,19 @@ impl RefinementStrategy {
                 log_reference(left_factors.1, right_factors.1),
             );
 
-            let mut s11 = 0.0;
-            let mut s22 = 0.0;
-            let mut s12 = 0.0;
-            let mut t1 = 0.0;
-            let mut t2 = 0.0;
-            let mut current_loss = 0.0;
-            let mut reference_loss = 0.0;
-
-            for (range, factors) in [(start..index, left_factors), (index..end, right_factors)] {
-                for &row in &sorted_indices[range] {
-                    let weight = self.weight(state.residuals[row]);
-                    let partial_plus = state.f_plus[row] / factors.0;
-                    let partial_minus = state.f_minus[row] / factors.1;
-                    let phi_plus = partial_plus * reference.0;
-                    let phi_minus = -partial_minus * reference.1;
-                    let reference_residual = state.labels[row] - phi_plus - phi_minus;
-                    s11 += weight * phi_plus * phi_plus;
-                    s22 += weight * phi_minus * phi_minus;
-                    s12 += weight * phi_plus * phi_minus;
-                    t1 += weight * reference_residual * phi_plus;
-                    t2 += weight * reference_residual * phi_minus;
-                    current_loss += weight * state.residuals[row] * state.residuals[row];
-                    reference_loss += weight * reference_residual * reference_residual;
-                    if let Some((rho, target_plus, target_minus)) = state
-                        .branch_consensus
-                        .as_ref()
-                        .and_then(|consensus| consensus.target(row))
-                    {
-                        s11 += rho * phi_plus * phi_plus;
-                        s22 += rho * phi_minus * phi_minus;
-                        t1 += rho * (target_plus - phi_plus) * phi_plus;
-                        t2 += rho * (-target_minus - phi_minus) * phi_minus;
-                        current_loss += rho
-                            * ((state.f_plus[row] - target_plus).powi(2)
-                                + (state.f_minus[row] - target_minus).powi(2));
-                        reference_loss += rho
-                            * ((phi_plus - target_plus).powi(2)
-                                + (phi_minus + target_minus).powi(2));
-                    }
-                }
-            }
+            let segments = [
+                (&sorted_indices[start..index], left_factors),
+                (&sorted_indices[index..end], right_factors),
+            ];
+            let MergeSums {
+                s11,
+                s22,
+                s12,
+                t1,
+                t2,
+                current_loss,
+                reference_loss,
+            } = self.merge_sums(state, &segments, reference);
 
             let merged_factors = if evaluator.is_stage1() {
                 let multiplier = evaluator.backbone_multiplier(t1, s11);
@@ -157,5 +131,145 @@ impl RefinementStrategy {
                 state.precomputed_statistics.update_pairs_merge[col][i] = (f64::NAN, f64::NAN);
             }
         }
+    }
+
+    /// [`MergeSums::accumulate`] with the loss weights and consensus targets resolved once
+    /// per boundary rather than per row.
+    fn merge_sums(
+        &self,
+        state: &FittingState,
+        segments: &MergeSegments,
+        reference: (f64, f64),
+    ) -> MergeSums {
+        let consensus = state.branch_consensus.as_ref();
+        let (Some(f_plus), Some(f_minus), Some(residuals), Some(labels)) = (
+            state.f_plus.as_slice(),
+            state.f_minus.as_slice(),
+            state.residuals.as_slice(),
+            state.labels.as_slice(),
+        ) else {
+            return MergeSums::accumulate(
+                segments,
+                reference,
+                |row| {
+                    (
+                        state.f_plus[row],
+                        state.f_minus[row],
+                        state.residuals[row],
+                        state.labels[row],
+                    )
+                },
+                |residual| self.weight(residual),
+                |row| consensus.and_then(|consensus| consensus.target(row)),
+            );
+        };
+        let values = |row: usize| (f_plus[row], f_minus[row], residuals[row], labels[row]);
+        match *self {
+            Self::L2Refinement { .. } => MergeSums::accumulate_with_consensus(
+                segments,
+                reference,
+                values,
+                |_| 1.0,
+                consensus,
+            ),
+            Self::HuberRefinement { c, .. } => MergeSums::accumulate_with_consensus(
+                segments,
+                reference,
+                values,
+                |residual| huber_weighting(residual, c),
+                consensus,
+            ),
+        }
+    }
+}
+
+/// Rows of the two intervals around a boundary, each with its interval's axis factors.
+type MergeSegments<'r> = [(&'r [usize], (f64, f64)); 2];
+
+/// Row sums of the reference-centred merge quadratic and of the current and reference
+/// losses over the rows of two adjacent intervals.
+#[derive(Default)]
+struct MergeSums {
+    s11: f64,
+    s22: f64,
+    s12: f64,
+    t1: f64,
+    t2: f64,
+    current_loss: f64,
+    reference_loss: f64,
+}
+
+impl MergeSums {
+    /// [`Self::accumulate`] with the consensus targets read from contiguous full-row
+    /// references when there are no anchors.
+    #[inline(always)]
+    fn accumulate_with_consensus(
+        segments: &MergeSegments,
+        reference: (f64, f64),
+        values: impl Fn(usize) -> (f64, f64, f64, f64),
+        weight: impl Fn(f64) -> f64,
+        consensus: Option<&BranchConsensus>,
+    ) -> Self {
+        let Some(consensus) = consensus else {
+            return Self::accumulate(segments, reference, values, weight, |_| None);
+        };
+        match (
+            &consensus.anchors,
+            consensus.plus.as_slice(),
+            consensus.minus.as_slice(),
+        ) {
+            (None, Some(plus), Some(minus)) => {
+                let rho = consensus.weight;
+                Self::accumulate(segments, reference, values, weight, |row| {
+                    Some((rho, plus[row], minus[row]))
+                })
+            }
+            _ => Self::accumulate(segments, reference, values, weight, |row| {
+                consensus.target(row)
+            }),
+        }
+    }
+
+    /// Sum both intervals' rows in order. `values(row)` is `(f₊, f₋, residual, label)`,
+    /// `weight` maps a residual to its loss weight and `target(row)` gives the row's
+    /// consensus weight and branch targets.
+    #[inline(always)]
+    fn accumulate(
+        segments: &MergeSegments,
+        reference: (f64, f64),
+        values: impl Fn(usize) -> (f64, f64, f64, f64),
+        weight: impl Fn(f64) -> f64,
+        target: impl Fn(usize) -> Option<(f64, f64, f64)>,
+    ) -> Self {
+        let mut sums = Self::default();
+        for &(rows, factors) in segments {
+            for &row in rows {
+                let (f_plus, f_minus, residual, label) = values(row);
+                let weight = weight(residual);
+                let partial_plus = f_plus / factors.0;
+                let partial_minus = f_minus / factors.1;
+                let phi_plus = partial_plus * reference.0;
+                let phi_minus = -partial_minus * reference.1;
+                let reference_residual = label - phi_plus - phi_minus;
+                sums.s11 += weight * phi_plus * phi_plus;
+                sums.s22 += weight * phi_minus * phi_minus;
+                sums.s12 += weight * phi_plus * phi_minus;
+                sums.t1 += weight * reference_residual * phi_plus;
+                sums.t2 += weight * reference_residual * phi_minus;
+                sums.current_loss += weight * residual * residual;
+                sums.reference_loss += weight * reference_residual * reference_residual;
+                if let Some((rho, target_plus, target_minus)) = target(row) {
+                    sums.s11 += rho * phi_plus * phi_plus;
+                    sums.s22 += rho * phi_minus * phi_minus;
+                    sums.t1 += rho * (target_plus - phi_plus) * phi_plus;
+                    sums.t2 += rho * (-target_minus - phi_minus) * phi_minus;
+                    sums.current_loss +=
+                        rho * ((f_plus - target_plus).powi(2) + (f_minus - target_minus).powi(2));
+                    sums.reference_loss += rho
+                        * ((phi_plus - target_plus).powi(2) + (phi_minus + target_minus).powi(2));
+                }
+            }
+        }
+        sums
     }
 }
