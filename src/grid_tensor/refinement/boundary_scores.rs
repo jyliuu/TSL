@@ -142,11 +142,12 @@ impl RefinementStrategy {
         reference: (f64, f64),
     ) -> MergeSums {
         let consensus = state.branch_consensus.as_ref();
-        let (Some(f_plus), Some(f_minus), Some(residuals), Some(labels)) = (
+        let (Some(f_plus), Some(f_minus), Some(residuals), Some(labels), None) = (
             state.f_plus.as_slice(),
             state.f_minus.as_slice(),
             state.residuals.as_slice(),
             state.labels.as_slice(),
+            state.sample_weight,
         ) else {
             return MergeSums::accumulate(
                 segments,
@@ -159,8 +160,14 @@ impl RefinementStrategy {
                         state.labels[row],
                     )
                 },
-                |residual| self.weight(residual),
-                |row| consensus.and_then(|consensus| consensus.target(row)),
+                |row, residual| state.sample_weight(row) * self.weight(residual),
+                |row| {
+                    consensus.and_then(|consensus| consensus.target(row)).map(
+                        |(rho, target_plus, target_minus)| {
+                            (rho * state.sample_weight(row), target_plus, target_minus)
+                        },
+                    )
+                },
             );
         };
         let values = |row: usize| (f_plus[row], f_minus[row], residuals[row], labels[row]);
@@ -169,14 +176,14 @@ impl RefinementStrategy {
                 segments,
                 reference,
                 values,
-                |_| 1.0,
+                |_, _| 1.0,
                 consensus,
             ),
             Self::HuberRefinement { c, .. } => MergeSums::accumulate_with_consensus(
                 segments,
                 reference,
                 values,
-                |residual| huber_weighting(residual, c),
+                |_, residual| huber_weighting(residual, c),
                 consensus,
             ),
         }
@@ -207,7 +214,7 @@ impl MergeSums {
         segments: &MergeSegments,
         reference: (f64, f64),
         values: impl Fn(usize) -> (f64, f64, f64, f64),
-        weight: impl Fn(f64) -> f64,
+        weight: impl Fn(usize, f64) -> f64,
         consensus: Option<&BranchConsensus>,
     ) -> Self {
         let Some(consensus) = consensus else {
@@ -231,21 +238,21 @@ impl MergeSums {
     }
 
     /// Sum both intervals' rows in order. `values(row)` is `(f₊, f₋, residual, label)`,
-    /// `weight` maps a residual to its loss weight and `target(row)` gives the row's
+    /// `weight(row, residual)` is the row's loss weight and `target(row)` gives the row's
     /// consensus weight and branch targets.
     #[inline(always)]
     fn accumulate(
         segments: &MergeSegments,
         reference: (f64, f64),
         values: impl Fn(usize) -> (f64, f64, f64, f64),
-        weight: impl Fn(f64) -> f64,
+        weight: impl Fn(usize, f64) -> f64,
         target: impl Fn(usize) -> Option<(f64, f64, f64)>,
     ) -> Self {
         let mut sums = Self::default();
         for &(rows, factors) in segments {
             for &row in rows {
                 let (f_plus, f_minus, residual, label) = values(row);
-                let weight = weight(residual);
+                let weight = weight(row, residual);
                 let partial_plus = f_plus / factors.0;
                 let partial_minus = f_minus / factors.1;
                 let phi_plus = partial_plus * reference.0;

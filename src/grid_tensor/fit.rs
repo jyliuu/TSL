@@ -50,6 +50,17 @@ pub(crate) fn initialize_state_with_input<'a>(
     hyperparameters: &GridTensorParams,
     prepared: Option<&super::prepared_input::PreparedInput<'_>>,
 ) -> FittingState<'a> {
+    initialize_weighted_state(x, y, None, hyperparameters, prepared)
+}
+
+/// Prepare a stage whose loss weighs row `i` by `sample_weight[i]`.
+pub(crate) fn initialize_weighted_state<'a>(
+    x: ndarray::ArrayView2<'a, f64>,
+    y: ndarray::ArrayView1<'a, f64>,
+    sample_weight: Option<ndarray::ArrayView1<'a, f64>>,
+    hyperparameters: &GridTensorParams,
+    prepared: Option<&super::prepared_input::PreparedInput<'_>>,
+) -> FittingState<'a> {
     if let Some(prepared) = prepared {
         prepared.assert_matches(x, hyperparameters.max_bins);
     }
@@ -59,8 +70,8 @@ pub(crate) fn initialize_state_with_input<'a>(
 
     let split_strategy = hyperparameters.split_strategy_params.get_split_strategy();
 
-    // Initialize state
     let mut state = FittingState::new(x, y);
+    state.sample_weight = sample_weight;
 
     // Initialize logging state if logging is enabled
     #[cfg(feature = "evo-logging")]
@@ -75,7 +86,8 @@ pub(crate) fn initialize_state_with_input<'a>(
     let state =
         refinement_strategy.initialize_with_input(state, prepared, hyperparameters.max_bins);
     let mut state = state;
-    state.current_error = refinement_strategy.weighted_squared_error(&state.residuals);
+    state.current_error =
+        refinement_strategy.weighted_squared_error(&state.residuals, state.sample_weight);
     split_strategy.initialize(state)
 }
 
@@ -231,13 +243,13 @@ pub(crate) fn finish_grid(mut state: FittingState<'_>) -> GridTensor {
 
 /// Identify the fitted grid and evaluate it on the training rows.
 pub(crate) fn finish_fit(state: FittingState<'_>) -> (FitResult, GridTensor) {
-    let (x, labels) = (state.x, state.labels);
+    let (x, labels, sample_weight) = (state.x, state.labels, state.sample_weight);
     let grid_tensor = finish_grid(state);
     // `FitResult` is consistent with the returned `GridTensor`: after identification the
     // returned y_hat/residuals/err equal `grid_tensor.predict(x)` and its residuals.
     let y_hat = grid_tensor.predict(x.view());
     let residuals = &labels - &y_hat;
-    let err = residuals.pow2().mean().unwrap();
+    let err = crate::weighted_mean_squared_error(residuals.view(), sample_weight);
     (
         FitResult {
             err,
@@ -573,7 +585,9 @@ mod tests {
             "{action:?}: score {score}, decrease {decrease}, penalty {penalty}"
         );
         assert!(
-            (after.current_error - refinement.weighted_squared_error(&after.residuals)).abs()
+            (after.current_error
+                - refinement.weighted_squared_error(&after.residuals, after.sample_weight))
+            .abs()
                 <= tolerance
         );
     }

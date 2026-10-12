@@ -31,6 +31,16 @@ fn solve_least_squares(x: ArrayView2<f64>, y: ArrayView1<f64>) -> Option<Array1<
     Some(Array1::from_iter(w.iter().copied()))
 }
 
+/// Rows of `x` and `y` scaled by `√s`, so least squares on them minimises `Σᵢ sᵢ rᵢ²`.
+fn scale_rows_by_root_weight(
+    x: ArrayView2<f64>,
+    y: ArrayView1<f64>,
+    sample_weight: ArrayView1<f64>,
+) -> (Array2<f64>, Array1<f64>) {
+    let root = sample_weight.mapv(f64::sqrt);
+    (&x * &root.view().insert_axis(Axis(1)), &y * &root)
+}
+
 /// Set up logging and event channel if visualdb_path is specified
 fn setup_logging(
     db_path: Option<&String>,
@@ -149,12 +159,13 @@ where
         &Logger,
     ),
 {
-    train_boosted_model_with_preparation(x, y, hyperparameters, true, on_epoch_end)
+    train_boosted_model_with_preparation(x, y, None, hyperparameters, true, on_epoch_end)
 }
 
 fn train_boosted_model_with_preparation<F>(
     x: ArrayView2<f64>,
     y: ArrayView1<f64>,
+    sample_weight: Option<ArrayView1<f64>>,
     hyperparameters: &TSLBoostedParams,
     reuse_input: bool,
     mut on_epoch_end: F,
@@ -215,6 +226,9 @@ where
                 let (_fit_result, mut stage_predictor) = fit_ensemble_with_input(
                     x.view(),
                     y_new.view(),
+                    sample_weight
+                        .as_ref()
+                        .map(|sample_weight| sample_weight.view()),
                     &sp_params,
                     &mut rng,
                     prepared_input.as_ref(),
@@ -263,15 +277,21 @@ where
                 let x_mat = predictions_matrix.slice(s![.., 0..k]);
 
                 // Refit every branch coefficient against the original target.
+                let scaled = sample_weight
+                    .map(|sample_weight| scale_rows_by_root_weight(x_mat, y, sample_weight));
+                let (design, target) = match &scaled {
+                    Some((design, target)) => (design.view(), target.view()),
+                    None => (x_mat.view(), y.view()),
+                };
                 let weights = if hyperparameters.nonnegative_scaling {
                     let mut prior = Array1::zeros(k);
                     for (j, stage) in stage_predictors.iter().enumerate() {
                         prior[2 * j] = stage.scaling_plus.unwrap_or(0.0);
                         prior[2 * j + 1] = stage.scaling_minus.unwrap_or(0.0);
                     }
-                    nonnegative::solve(x_mat, y, prior.view())
+                    nonnegative::solve(design, target, prior.view())
                 } else {
-                    solve_least_squares(x_mat, y)
+                    solve_least_squares(design, target)
                 };
                 let (err, residuals) = if let Some(w) = weights {
                     log::info!("New projected weights (two-tensor mode): {:?}", w);
@@ -296,7 +316,7 @@ where
                     // Update residuals and error
                     let preds_all = x_mat.dot(&w);
                     let residuals = &y - &preds_all;
-                    let err = residuals.mapv(|v| v.powi(2)).mean().unwrap();
+                    let err = crate::weighted_mean_squared_error(residuals.view(), sample_weight);
                     let residuals_owned = residuals.to_owned();
                     (err, residuals_owned)
                 } else {
@@ -307,7 +327,7 @@ where
                     // This is the raw two-tensor prediction without OLS coefficients
                     let combined_preds = &f_plus - &f_minus;
                     let residuals = &y - &combined_preds;
-                    let err = residuals.mapv(|v| v.powi(2)).mean().unwrap();
+                    let err = crate::weighted_mean_squared_error(residuals.view(), sample_weight);
                     (err, residuals.to_owned())
                 };
 
@@ -365,7 +385,10 @@ where
         });
     }
 
-    let err = y_new.iter().map(|&x| x * x).sum::<f64>() / y_new.len() as f64;
+    let err = match sample_weight {
+        Some(_) => crate::weighted_mean_squared_error(y_new.view(), sample_weight),
+        None => y_new.iter().map(|&x| x * x).sum::<f64>() / y_new.len() as f64,
+    };
     let fit_result = FitResult {
         err,
         residuals: y_new.clone(),
@@ -395,6 +418,44 @@ pub fn fit_boosted(
         |_epoch, _stage_predictor, _prev_families, _logger| {
             // Logging is now done before the callback, so nothing to do here
         },
+    )
+}
+
+/// Fit a boosted TSL model to the weighted squared error `Σᵢ sᵢ (yᵢ − F(xᵢ))²`.
+///
+/// Every stage's grid tensors and the per-epoch refit of all stage coefficients minimise
+/// this objective, and a row's branch-consensus term carries the same weight `sᵢ`. The
+/// weights are rescaled to mean one, so the penalties and `min_split_loss` keep the scale
+/// they have in an unweighted fit.
+///
+/// # Panics
+/// If `sample_weight` does not hold one finite, nonnegative entry per row of `x` with a
+/// positive sum.
+pub fn fit_boosted_weighted(
+    x: ArrayView2<f64>,
+    y: ArrayView1<f64>,
+    sample_weight: ArrayView1<f64>,
+    hyperparameters: &TSLBoostedParams,
+) -> (FitResult, TSL) {
+    assert_eq!(
+        sample_weight.len(),
+        x.nrows(),
+        "sample_weight must have one entry per row"
+    );
+    assert!(
+        sample_weight.iter().all(|s| s.is_finite() && *s >= 0.0),
+        "sample_weight must be finite and nonnegative"
+    );
+    let total = sample_weight.sum();
+    assert!(total > 0.0, "sample_weight must have a positive sum");
+    let sample_weight = sample_weight.mapv(|s| s * (x.nrows() as f64 / total));
+    train_boosted_model_with_preparation(
+        x,
+        y,
+        Some(sample_weight.view()),
+        hyperparameters,
+        true,
+        |_epoch, _stage_predictor, _prev_families, _logger| {},
     )
 }
 
@@ -505,8 +566,10 @@ mod prepared_input_tests {
     };
 
     fn assert_parity(x: ArrayView2<f64>, y: ArrayView1<f64>, params: &TSLBoostedParams) {
-        let reference = train_boosted_model_with_preparation(x, y, params, false, |_, _, _, _| {});
-        let actual = train_boosted_model_with_preparation(x, y, params, true, |_, _, _, _| {});
+        let reference =
+            train_boosted_model_with_preparation(x, y, None, params, false, |_, _, _, _| {});
+        let actual =
+            train_boosted_model_with_preparation(x, y, None, params, true, |_, _, _, _| {});
         assert_eq!(
             bincode::serialize(&actual.1).unwrap(),
             bincode::serialize(&reference.1).unwrap()

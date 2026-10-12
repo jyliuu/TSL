@@ -170,7 +170,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         self.verbosity = verbosity
         self.visualdb = visualdb
 
-    def fit(self, X, y):
+    def fit(self, X, y, sample_weight=None):
         """Fit the TSL Boosted regressor to the training data.
 
         Parameters
@@ -179,6 +179,10 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
             The training input samples.
         y : array-like of shape (n_samples,)
             The target values.
+        sample_weight : array-like of shape (n_samples,), optional
+            Nonnegative per-row weights of the squared-error loss
+            ``sum_i w_i (y_i - F(x_i))^2``. They are rescaled to mean one, so the
+            penalties keep their unweighted scale. ``None`` weighs every row by one.
 
         Returns
         -------
@@ -187,6 +191,8 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         """
         # Input validation (optional but recommended for robustness)
         X, y = check_X_y(X, y, accept_sparse=False, dtype=np.float64)
+        if sample_weight is not None:
+            sample_weight = np.ascontiguousarray(sample_weight, dtype=np.float64)
 
         # Use the classmethod `fit` from the original TSL.Boosted class
         # Pass hyperparameters stored in self
@@ -215,6 +221,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
             seed=self.seed,
             verbosity=self.verbosity,
             visualdb=self.visualdb,
+            sample_weight=sample_weight,
         )
 
         # Store the fitted core estimator and the fit result

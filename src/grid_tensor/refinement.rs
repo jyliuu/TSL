@@ -99,13 +99,34 @@ impl RefinementStrategy {
         }
     }
 
+    /// Loss weight of `row`: its sample weight times the refinement weight of its residual.
+    #[inline]
+    pub(crate) fn row_weight(
+        &self,
+        state: &crate::grid_tensor::state::FittingState,
+        row: usize,
+    ) -> f64 {
+        state.sample_weight(row) * self.weight(state.residuals[row])
+    }
+
     /// Current IRLS quadratic surrogate used to compare every structural action
     /// and its stopping tolerance on one loss scale.
-    pub(crate) fn weighted_squared_error(&self, residuals: &ndarray::Array1<f64>) -> f64 {
-        residuals
-            .iter()
-            .map(|&residual| self.weight(residual) * residual * residual)
-            .sum()
+    pub(crate) fn weighted_squared_error(
+        &self,
+        residuals: &ndarray::Array1<f64>,
+        sample_weight: Option<ndarray::ArrayView1<f64>>,
+    ) -> f64 {
+        match sample_weight {
+            None => residuals
+                .iter()
+                .map(|&residual| self.weight(residual) * residual * residual)
+                .sum(),
+            Some(sample_weight) => residuals
+                .iter()
+                .zip(sample_weight)
+                .map(|(&residual, &s)| s * self.weight(residual) * residual * residual)
+                .sum(),
+        }
     }
 
     pub fn update_clamp(&self) -> f64 {
@@ -143,7 +164,7 @@ mod tests {
         };
         let residuals = ndarray::Array1::from_vec(vec![0.5, 2.0, -4.0]);
 
-        assert!((strategy.weighted_squared_error(&residuals) - 6.25).abs() < 1e-12);
+        assert!((strategy.weighted_squared_error(&residuals, None) - 6.25).abs() < 1e-12);
     }
 
     fn params(max_bins: Option<u16>, huber: bool, complexity_penalty: f64) -> GridTensorParams {

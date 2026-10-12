@@ -5,7 +5,7 @@ use crate::stage_predictor::StagePredictor;
 
 mod fitter;
 pub mod params;
-pub use fitter::{fit_boosted, fit_boosted_with_test_error};
+pub use fitter::{fit_boosted, fit_boosted_weighted, fit_boosted_with_test_error};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TSL {

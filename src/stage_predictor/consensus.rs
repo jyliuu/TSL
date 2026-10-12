@@ -17,7 +17,7 @@ use rayon::prelude::*;
 use crate::{
     grid_tensor::{
         fit::{
-            finish_fit, finish_grid, fit_step_with_candidate_refresh, initialize_state_with_input,
+            finish_fit, finish_grid, fit_step_with_candidate_refresh, initialize_weighted_state,
             max_iterations,
         },
         prepared_input::PreparedInput,
@@ -43,6 +43,7 @@ struct Member<'a> {
 pub(super) fn fit_consensus_bag<'a>(
     x: ArrayView2<'a, f64>,
     y: ArrayView1<'a, f64>,
+    sample_weight: Option<ArrayView1<'a, f64>>,
     params: &StagePredictorParams,
     seeds: &[u64],
     initial_state: Option<&FittingState<'a>>,
@@ -89,7 +90,7 @@ pub(super) fn fit_consensus_bag<'a>(
             .map(|(tree_id, &seed)| {
                 let state = in_context(tree_id, epoch, || match initial_state {
                     Some(initial_state) => initial_state.clone(),
-                    None => initialize_state_with_input(x, y, tg_params, prepared),
+                    None => initialize_weighted_state(x, y, sample_weight, tg_params, prepared),
                 });
                 member(tree_id, seed, state)
             })
@@ -418,7 +419,7 @@ mod tests {
     use super::*;
     use crate::{
         grid_tensor::{
-            fit::fit_step,
+            fit::{fit_step, initialize_state_with_input},
             params::{
                 GridTensorParamsBuilder, RefinementStrategyParamsBuilder,
                 SplitStrategyParamsBuilder,
@@ -688,6 +689,7 @@ mod tests {
                     fit_consensus_bag(
                         x.view(),
                         y.view(),
+                        None,
                         &stage_params,
                         &[17, 18, 19, 20],
                         Some(&initial),

@@ -15,11 +15,13 @@ use super::StagePredictor;
 use rayon::prelude::*;
 
 /// Fit one bag member; `fit_results` keeps its training evaluation.
+#[allow(clippy::too_many_arguments)]
 fn fit_grid_tensor_with_context<'a>(
     tree_id: usize,
     seed: u64,
     x: ArrayView2<'a, f64>,
     y: ArrayView1<'a, f64>,
+    sample_weight: Option<ArrayView1<'a, f64>>,
     tg_params: &GridTensorParams,
     initial_state: Option<&FittingState<'a>>,
     fit_results: bool,
@@ -28,7 +30,7 @@ fn fit_grid_tensor_with_context<'a>(
         let mut thread_rng = rand::rngs::StdRng::seed_from_u64(seed);
         let state = match initial_state {
             Some(initial_state) => initial_state.clone(),
-            None => fit::initialize_state(x, y, tg_params),
+            None => fit::initialize_weighted_state(x, y, sample_weight, tg_params, None),
         };
         let state = fit::fit_structure(state, tg_params, &mut thread_rng);
 
@@ -55,21 +57,41 @@ pub fn fit_ensemble<R: Rng + ?Sized>(
     hyperparameters: &StagePredictorParams,
     rng: &mut R,
 ) -> (FitResult, StagePredictor) {
-    fit_ensemble_with_input(x, y, hyperparameters, rng, None)
+    fit_ensemble_with_input(x.view(), y.view(), None, hyperparameters, rng, None)
 }
 
-pub(crate) fn fit_ensemble_with_input<R: Rng + ?Sized>(
+/// Fit one stage to the weighted squared error `Σᵢ sᵢ (yᵢ − f(xᵢ))²`.
+pub fn fit_ensemble_weighted<R: Rng + ?Sized>(
     x: ArrayView2<f64>,
     y: ArrayView1<f64>,
+    sample_weight: ArrayView1<f64>,
+    hyperparameters: &StagePredictorParams,
+    rng: &mut R,
+) -> (FitResult, StagePredictor) {
+    fit_ensemble_with_input(
+        x.view(),
+        y.view(),
+        Some(sample_weight.view()),
+        hyperparameters,
+        rng,
+        None,
+    )
+}
+
+pub(crate) fn fit_ensemble_with_input<'a, R: Rng + ?Sized>(
+    x: ArrayView2<'a, f64>,
+    y: ArrayView1<'a, f64>,
+    sample_weight: Option<ArrayView1<'a, f64>>,
     hyperparameters: &StagePredictorParams,
     rng: &mut R,
     prepared: Option<&grid_tensor::prepared_input::PreparedInput<'_>>,
 ) -> (FitResult, StagePredictor) {
-    let grid_tensors = fit_grid_bag_with_input(x, y, hyperparameters, rng, prepared, false)
-        .into_iter()
-        .map(|(_, grid)| grid)
-        .collect();
-    combine_fitted_grids(x, y, hyperparameters, grid_tensors)
+    let grid_tensors =
+        fit_grid_bag_with_input(x, y, sample_weight, hyperparameters, rng, prepared, false)
+            .into_iter()
+            .map(|(_, grid)| grid)
+            .collect();
+    combine_fitted_grids(x, y, sample_weight, hyperparameters, grid_tensors)
 }
 
 /// Fit the ordered bag and retain each grid's normalized training predictions.
@@ -79,7 +101,7 @@ pub fn fit_grid_bag<R: Rng + ?Sized>(
     hyperparameters: &StagePredictorParams,
     rng: &mut R,
 ) -> Vec<(FitResult, GridTensor)> {
-    fit_grid_bag_with_input(x, y, hyperparameters, rng, None, true)
+    fit_grid_bag_with_input(x.view(), y.view(), None, hyperparameters, rng, None, true)
         .into_iter()
         .map(|(fit, grid)| (fit.expect("bag members keep their fit results"), grid))
         .collect()
@@ -87,9 +109,10 @@ pub fn fit_grid_bag<R: Rng + ?Sized>(
 
 /// Fit the bag; `fit_results` keeps each member's training evaluation, which the
 /// ensemble path does not consume.
-fn fit_grid_bag_with_input<R: Rng + ?Sized>(
-    x: ArrayView2<f64>,
-    y: ArrayView1<f64>,
+fn fit_grid_bag_with_input<'a, R: Rng + ?Sized>(
+    x: ArrayView2<'a, f64>,
+    y: ArrayView1<'a, f64>,
+    sample_weight: Option<ArrayView1<'a, f64>>,
     hyperparameters: &StagePredictorParams,
     rng: &mut R,
     prepared: Option<&grid_tensor::prepared_input::PreparedInput<'_>>,
@@ -108,9 +131,10 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
     let epoch_opt = logging::current_epoch();
     let seeds: Vec<u64> = (0..*n_trees).map(|_| rng.gen()).collect();
     let initial_state = if *n_trees > 1 && !logging::is_logging_enabled() {
-        Some(grid_tensor::fit::initialize_state_with_input(
-            x.view(),
-            y.view(),
+        Some(grid_tensor::fit::initialize_weighted_state(
+            x,
+            y,
+            sample_weight,
             tg_params,
             prepared,
         ))
@@ -120,8 +144,9 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
 
     if *consensus > 0.0 && *n_trees > 1 {
         return super::consensus::fit_consensus_bag(
-            x.view(),
-            y.view(),
+            x,
+            y,
+            sample_weight,
             hyperparameters,
             &seeds,
             initial_state.as_ref(),
@@ -135,8 +160,9 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
         fit_grid_tensor_with_context(
             tree_id,
             seed,
-            x.view(),
-            y.view(),
+            x,
+            y,
+            sample_weight,
             tg_params,
             initial_state.as_ref(),
             fit_results,
@@ -168,6 +194,7 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
 fn combine_fitted_grids(
     x: ArrayView2<f64>,
     y: ArrayView1<f64>,
+    sample_weight: Option<ArrayView1<f64>>,
     hyperparameters: &StagePredictorParams,
     grid_tensors: Vec<GridTensor>,
 ) -> (FitResult, StagePredictor) {
@@ -199,7 +226,7 @@ fn combine_fitted_grids(
     log::debug!("Combined preds mean: {:?}", preds.mean());
 
     let residuals = &y - &preds;
-    let err = residuals.pow2().mean().unwrap();
+    let err = crate::weighted_mean_squared_error(residuals.view(), sample_weight);
     log::info!(
         "Combined tree grid error: {:?}, lambda+: {:?}, lambda-: {:?}",
         err,

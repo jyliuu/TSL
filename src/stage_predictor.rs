@@ -1,6 +1,6 @@
 use super::grid_tensor::GridTensor;
-pub use fitter::{fit_ensemble, fit_grid_bag};
 pub(crate) use fitter::fit_ensemble_with_input;
+pub use fitter::{fit_ensemble, fit_ensemble_weighted, fit_grid_bag};
 use ndarray::{Array1, ArrayView2};
 use serde::{Deserialize, Serialize};
 pub mod params;

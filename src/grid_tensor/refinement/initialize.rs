@@ -39,7 +39,7 @@ impl RefinementStrategy {
             let mut sum_pos = 0.0;
             let mut sum_neg = 0.0;
             for i in 0..state.n {
-                let w = self.weight(state.residuals[i]);
+                let w = self.row_weight(&state, i);
                 let r = state.residuals[i];
                 sum_w += w;
                 if r > 0.0 {
@@ -77,7 +77,7 @@ impl RefinementStrategy {
             let fp = state.f_plus[i];
             let fm = state.f_minus[i];
             let rt = state.r_tilde[i];
-            let w = self.weight(state.residuals[i]);
+            let w = self.row_weight(&state, i);
             state.precomputed_statistics.curvature[i] = CurvatureCache {
                 s11: w * fp * fp,
                 s22: if is_stage1 { 0.0 } else { w * fm * fm },

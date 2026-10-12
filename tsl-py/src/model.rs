@@ -8,7 +8,7 @@ use pyo3::{
     types::{PyList, PyTuple, PyType},
 };
 use tsl::{
-    forest::{fit_boosted, TSL},
+    forest::{fit_boosted, fit_boosted_weighted, TSL},
     stage_predictor::StagePredictor,
 };
 
@@ -311,7 +311,8 @@ impl TSLPy {
         max_bins=None,
         consensus_interval=1,
         nonnegative_scaling=false,
-        consensus_anchors=None
+        consensus_anchors=None,
+        sample_weight=None
     ))]
     #[allow(clippy::too_many_arguments)]
     pub fn _fit<'py>(
@@ -344,6 +345,7 @@ impl TSLPy {
         consensus_interval: usize,
         nonnegative_scaling: bool,
         consensus_anchors: Option<usize>,
+        sample_weight: Option<PyReadonlyArray1<'py, f64>>,
     ) -> PyResult<(TSLPy, FitResultPy)> {
         let options = BoostedFitOptions {
             epochs,
@@ -381,7 +383,45 @@ impl TSLPy {
 
         let params = options.into_params()?;
 
-        let (fit_result, tsl) = fit_boosted(x_contiguous.view(), y_contiguous.view(), &params);
+        let (fit_result, tsl) = match sample_weight {
+            Some(sample_weight) => {
+                let sample_weight = sample_weight.as_array();
+                validate_sample_weight(sample_weight, x_contiguous.nrows())?;
+                let sample_weight = sample_weight.as_standard_layout();
+                fit_boosted_weighted(
+                    x_contiguous.view(),
+                    y_contiguous.view(),
+                    sample_weight.view(),
+                    &params,
+                )
+            }
+            None => fit_boosted(x_contiguous.view(), y_contiguous.view(), &params),
+        };
         Ok((tsl.into(), FitResultPy::from(fit_result)))
     }
+}
+
+/// Rejects sample weights that are misaligned with the rows, negative, non-finite, or all zero.
+fn validate_sample_weight(
+    sample_weight: numpy::ndarray::ArrayView1<f64>,
+    n_rows: usize,
+) -> PyResult<()> {
+    use pyo3::exceptions::PyValueError;
+    if sample_weight.len() != n_rows {
+        return Err(PyValueError::new_err(format!(
+            "sample_weight has {} entries, expected one per row of x ({n_rows})",
+            sample_weight.len()
+        )));
+    }
+    if sample_weight.iter().any(|s| !s.is_finite() || *s < 0.0) {
+        return Err(PyValueError::new_err(
+            "sample_weight must be finite and nonnegative",
+        ));
+    }
+    if sample_weight.sum() <= 0.0 {
+        return Err(PyValueError::new_err(
+            "sample_weight must have a positive sum",
+        ));
+    }
+    Ok(())
 }

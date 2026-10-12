@@ -41,7 +41,7 @@ impl RefinementStrategy {
         let mut deltas = Vec::with_capacity(anchors.rows.len());
         for &row in &anchors.rows {
             // Re-evaluate these row totals to bound drift from repeated reference updates.
-            let point = state.point_statistics(row, self.weight(state.residuals[row]));
+            let point = state.point_statistics(row, self.row_weight(&state, row));
             let statistics = &mut state.precomputed_statistics;
             deltas.push((
                 point.t1 - statistics.c_t1[row],
@@ -94,7 +94,8 @@ impl RefinementStrategy {
             return false;
         };
         let n = state.n;
-        if reference.anchors.is_some() || state.residuals.len() < n {
+        if reference.anchors.is_some() || state.sample_weight.is_some() || state.residuals.len() < n
+        {
             return false;
         }
         let (Some(plus), Some(minus), Some(residual), Some(target_plus), Some(target_minus)) = (
@@ -275,14 +276,14 @@ impl RefinementStrategy {
         if weights_fixed {
             if !Self::refresh_full_row_linear_slices(&mut state) {
                 for i in 0..n {
-                    let point = state.point_statistics(i, self.weight(state.residuals[i]));
+                    let point = state.point_statistics(i, self.row_weight(&state, i));
                     state.precomputed_statistics.c_t1[i] = point.t1;
                     state.precomputed_statistics.c_t2[i] = point.t2;
                 }
             }
         } else {
             for i in 0..n {
-                let point = state.point_statistics(i, self.weight(state.residuals[i]));
+                let point = state.point_statistics(i, self.row_weight(&state, i));
                 let statistics = &mut state.precomputed_statistics;
                 statistics.curvature[i].s11 = point.s11;
                 statistics.curvature[i].s22 = point.s22;
