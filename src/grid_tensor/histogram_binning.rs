@@ -5,16 +5,14 @@
 //! set of quantile bin boundaries per feature, reducing the inner-loop solver
 //! call count from O(n_interval) to O(n_bins).
 //!
-//! In addition, the per-tree sufficient-stat prefix sums (s11, s22, s12, t1,
-//! t2) are *replaced* by length-B bin-cumulative arrays for binned columns:
-//! `binned_prefix_sums_*[col][k]` = sum of `c_*` over sorted positions in
-//! bins `0..=k`. This shrinks the per-call bucket scatter + segment
-//! prefix-sum sweep inside `update_statistics` from O(span) ≈ O(n) to O(B),
-//! which is the actual hot path identified by profiling (~68% self-time).
+//! Binned columns keep their sufficient-statistic prefix sums (s11, s22, s12, t1, t2)
+//! as length-B bin-cumulative arrays: `binned_prefix_sums[col][k]` sums the per-point
+//! statistics over the sorted positions in bins `0..=k`. The per-action bucket scatter
+//! and prefix sweep of `update_statistics`, the hot path of a fit, then costs O(B)
+//! rather than O(n).
 //!
-//! For non-binned columns (`bin_edges[col].is_empty()`, including the entire
-//! `max_bins = None` parity path), the length-n `prefix_sums_*[col]` storage
-//! is retained and used unchanged.
+//! Non-binned columns (`bin_edges[col].is_empty()`, every column when
+//! `max_bins = None`) keep the length-n `prefix_sums[col]`.
 //!
 //! Determinism: bin-edge positions are derived from sorted-position indices,
 //! so the same data + the same max_bins yield the same bins on every run.
@@ -55,9 +53,9 @@ pub(crate) fn quantile_bin_edge_positions(
         let right = distinct.partition_point(|&boundary| boundary < target);
         let boundary = if right == 0 {
             distinct[0]
-        } else if right == distinct.len() {
-            distinct[right - 1]
-        } else if target - distinct[right - 1] <= distinct[right] - target {
+        } else if right == distinct.len()
+            || target - distinct[right - 1] <= distinct[right] - target
+        {
             distinct[right - 1]
         } else {
             distinct[right]
@@ -67,24 +65,6 @@ pub(crate) fn quantile_bin_edge_positions(
         }
     }
     edges
-}
-
-/// Apply histogram-binning NaN mask to the split-candidate caches.
-///
-/// For each feature, marks every sorted position that is NOT a quantile
-/// bin boundary as NaN in `error_reductions_split`, `update_pairs_split_left`,
-/// `update_pairs_split_right`, and `error_reductions_split_pairs`. Bin
-/// boundary positions retain their values (just computed by
-/// `RefinementStrategy::initialize`).
-///
-/// Must be called AFTER `RefinementStrategy::initialize` and BEFORE
-/// `SplitStrategy::initialize` (so that `allowed_intervals` is built from the
-/// binned mask).
-pub fn apply_histogram_binning_mask<'a>(
-    state: FittingState<'a>,
-    max_bins: Option<u16>,
-) -> FittingState<'a> {
-    apply_histogram_binning_mask_with_input(state, max_bins, None)
 }
 
 pub(crate) fn row_bin_indices(sorted_indices: &[usize], edges: &[usize]) -> std::sync::Arc<[u16]> {
@@ -149,6 +129,14 @@ pub(crate) fn rank_ordered_bin_streams(
     )
 }
 
+/// Bin every non-constant feature and mask its non-edge split candidates.
+///
+/// For each feature, marks every sorted position that is not a quantile bin boundary
+/// as NaN in `error_reductions_split`, `update_pairs_split_left`,
+/// `update_pairs_split_right` and `error_reductions_split_pairs`, and replaces the
+/// column's length-n prefix sums with bin-cumulative ones. `RefinementStrategy::initialize`
+/// calls it after building the exact prefix sums and before scoring splits, so
+/// `SplitStrategy::initialize` builds `allowed_intervals` from the binned mask.
 pub(crate) fn apply_histogram_binning_mask_with_input<'a>(
     mut state: FittingState<'a>,
     max_bins: Option<u16>,
@@ -167,9 +155,6 @@ pub(crate) fn apply_histogram_binning_mask_with_input<'a>(
 
     for col in 0..p {
         let sorted_indices = &state.precomputed_statistics.sorted_indices[col];
-        // Build a boolean keep-mask over [0, n).
-        // Position 0 and position n-1 are always NaN (no split before-first /
-        // after-last), so we just need to mark the interior.
         let edges = if let Some(prepared) = prepared {
             prepared.bin_edges[col].clone()
         } else {
@@ -187,6 +172,7 @@ pub(crate) fn apply_histogram_binning_mask_with_input<'a>(
             row_bin_indices(sorted_indices, &edges)
         };
 
+        // Only bin edges remain split candidates.
         let mut keep = vec![false; n];
         for &e in &edges {
             keep[e] = true;
@@ -205,9 +191,8 @@ pub(crate) fn apply_histogram_binning_mask_with_input<'a>(
             }
         }
 
-        // Populate length-B bin-cumulative prefix sums by sampling the
-        // length-n prefix sums at each bin's last position. These will be the
-        // sole storage maintained by `update_statistics` for binned columns.
+        // Length-B bin-cumulative prefix sums sample the length-n prefix sums at each
+        // bin's last position; they are the column's only prefix sums from here on.
         let n_bins = edges.len() + 1;
         let mut binned = Vec::with_capacity(n_bins);
         {
@@ -220,12 +205,8 @@ pub(crate) fn apply_histogram_binning_mask_with_input<'a>(
         }
         state.precomputed_statistics.binned_prefix_sums[col] = binned;
 
-        // Free the length-n prefix sums for binned columns — they are no
-        // longer read once `bin_edges[col]` is non-empty.
         state.precomputed_statistics.prefix_sums[col] = Vec::new();
-
-        // Publish bin-edge positions so the inner split-scan can iterate them
-        // directly instead of walking every sorted position.
+        // Split scoring iterates a binned column's edges.
         state.precomputed_statistics.bin_edges[col] = edges;
     }
 

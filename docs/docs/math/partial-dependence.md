@@ -69,7 +69,7 @@ therefore recover the fitted factor shapes (up to the constants $C^{(\ell)}_{\pm
 </figure>
 
 !!! note "Implementation note — empirical marginalization"
-    `TSL.compute_partial_dependence_function` (`tsl-py/src/lib.rs`) marginalizes over the
+    `TSL.compute_partial_dependence_function` (`tsl-py/src/partial_dependence.rs`) marginalizes over the
     **empirical joint** distribution of the other features, not a product-of-marginals
     reference, so the constants $c^{(\ell)}_{\pm,j}$ are estimated correctly under feature
     correlation. The function returns, per stage, the $(C_+, C_-)$ constants and the curve

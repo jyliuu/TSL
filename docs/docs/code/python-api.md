@@ -154,7 +154,7 @@ TSLRegressor.save(path) -> None
 TSLRegressor.load(path) -> TSLRegressor
 ```
 
-Load a model saved with [`save`](#meth-tslregressor-save); also reads the legacy MPF `.bin` format.
+Load a model saved with [`save`](#meth-tslregressor-save).
 
 | Parameter | Type | Default | Description |
 |------|------|:--:|-------------|
@@ -279,7 +279,7 @@ TSL.save(path) -> None
 TSL.load(path) -> TSL
 ```
 
-Reads the native binary format and the legacy MPF `.bin` format.
+Reads the bincode format written by `save`.
 
 | Parameter | Type | Default | Description |
 |------|------|:--:|-------------|

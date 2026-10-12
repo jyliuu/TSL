@@ -1,269 +1,29 @@
+//! Split strategies: allowed-interval setup, unified action selection and post-split bookkeeping.
+
 use std::cmp::Ordering;
 
-use rand::{seq::index::sample, Rng};
+use rand::Rng;
 
 use crate::grid_tensor::{
-    action::FittingAction,
-    refinement::RefinementStrategy,
-    state::{FittingState, MAX_CONSECUTIVE_RESPLIT},
+    action::FittingAction, refinement::RefinementStrategy, state::FittingState,
+};
+
+mod boundary_candidates;
+mod candidates;
+mod sampling;
+
+pub use candidates::{
+    Interval, MergeCandidate, ResplitCandidate, SplitCandidate, SplitStrategyState,
+};
+use sampling::{
+    best_scored_position, initialize_intervals, sample_best_split, sample_random_split,
+    sample_random_split_positions, sample_top_k_split,
 };
 
 const ACTION_SCORE_RELATIVE_TOLERANCE: f64 = 1e-12;
 
-fn sample_best_split(
-    allowed_intervals: &[Vec<Interval>],
-    error_reductions: &[Vec<f64>],
-) -> Option<(usize, usize, usize, f64)> {
-    let mut best_split_candidate: Option<(usize, usize, usize, f64)> = None;
-
-    for (col, intervals) in allowed_intervals.iter().enumerate() {
-        for (interval_idx, interval) in intervals.iter().enumerate() {
-            for index in interval.start..interval.end() {
-                let err_reduction = error_reductions[col][index];
-                if !err_reduction.is_nan()
-                    && best_split_candidate
-                        .as_ref()
-                        .is_none_or(|current_best| err_reduction > current_best.3)
-                {
-                    best_split_candidate = Some((col, index, interval_idx, err_reduction));
-                }
-            }
-        }
-    }
-    best_split_candidate
-}
-
-fn sample_random_split_positions<R: Rng + ?Sized>(
-    allowed_intervals: &[Vec<Interval>],
-    total_positions: &[usize],
-    colsample_bytree: f64,
-    split_try: usize,
-    rng: &mut R,
-    ncols: usize,
-) -> Vec<(usize, usize, usize)> {
-    let cols_can_be_sampled: Vec<usize> = total_positions
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, &positions)| if positions == 0 { None } else { Some(idx) })
-        .collect();
-
-    let ncols_to_sample = (colsample_bytree * ncols as f64) as usize;
-
-    let cols = if cols_can_be_sampled.len() < ncols_to_sample {
-        sample(rng, ncols, ncols_to_sample).into_vec()
-    } else {
-        cols_can_be_sampled
-    };
-
-    let mut positions = Vec::new();
-    for col in cols {
-        // Use cached total positions for this feature
-        let total_positions = total_positions[col];
-
-        let abstract_indices = if total_positions < split_try {
-            (0..total_positions).collect()
-        } else {
-            sample(rng, total_positions, split_try).into_vec()
-        };
-
-        // Map abstract indices to actual split positions
-        for abstract_idx in abstract_indices {
-            let (split_position, interval_idx) =
-                map_abstract_to_position(allowed_intervals, col, abstract_idx);
-
-            positions.push((col, split_position, interval_idx));
-        }
-    }
-    positions
-}
-
-fn sample_random_split<R: Rng + ?Sized>(
-    allowed_intervals: &[Vec<Interval>],
-    total_positions: &[usize],
-    colsample_bytree: f64,
-    split_try: usize,
-    rng: &mut R,
-    error_reductions: &[Vec<f64>],
-) -> Option<(usize, usize, usize, f64)> {
-    let positions = sample_random_split_positions(
-        allowed_intervals,
-        total_positions,
-        colsample_bytree,
-        split_try,
-        rng,
-        error_reductions.len(),
-    );
-    best_scored_random_position(positions, |col, index| {
-        error_reductions[col].get(index).copied()
-    })
-}
-
-fn best_scored_random_position(
-    positions: Vec<(usize, usize, usize)>,
-    mut score: impl FnMut(usize, usize) -> Option<f64>,
-) -> Option<(usize, usize, usize, f64)> {
-    let mut best: Option<(usize, usize, usize, f64)> = None;
-    for (col, index, interval_idx) in positions {
-        if let Some(gain) = score(col, index) {
-            if !gain.is_nan() && best.as_ref().is_none_or(|candidate| gain > candidate.3) {
-                best = Some((col, index, interval_idx, gain));
-            }
-        }
-    }
-    best
-}
-
-fn sample_top_k_split<R: Rng + ?Sized>(
-    allowed_intervals: &[Vec<Interval>],
-    top_k: usize,
-    must_fill_all_k: bool,
-    rng: &mut R,
-    error_reductions: &[Vec<f64>],
-) -> Option<(usize, usize, usize, f64)> {
-    let mut candidates = Vec::new();
-
-    for (col, intervals) in allowed_intervals.iter().enumerate() {
-        for (interval_idx, interval) in intervals.iter().enumerate() {
-            for index in interval.start..interval.end() {
-                let err_reduction = error_reductions[col][index];
-                if !err_reduction.is_nan() {
-                    candidates.push((col, index, interval_idx, err_reduction));
-                }
-            }
-        }
-    }
-
-    if candidates.is_empty() || (must_fill_all_k && candidates.len() < top_k) {
-        return None;
-    }
-
-    // Sort by error reduction (descending) and take top k
-    candidates.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(Ordering::Equal));
-    candidates.truncate(top_k);
-
-    // Randomly select one from the top k
-    let random_index = rng.gen_range(0..candidates.len());
-    Some(candidates[random_index])
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum SplitType {
-    Split,
-    Merge,
-    Resplit,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Interval {
-    pub start: usize,
-    pub length: usize,
-}
-
-impl Interval {
-    pub fn new(start: usize, length: usize) -> Self {
-        Self { start, length }
-    }
-
-    pub fn end(&self) -> usize {
-        self.start + self.length
-    }
-
-    pub fn contains(&self, position: usize) -> bool {
-        position >= self.start && position < self.end()
-    }
-
-    pub fn overlaps(&self, other: &Interval) -> bool {
-        self.start < other.end() && other.start < self.end()
-    }
-
-    pub fn subtract(&self, forbidden: &Interval) -> Vec<Interval> {
-        if !self.overlaps(forbidden) {
-            return vec![*self];
-        }
-
-        let mut result = Vec::new();
-
-        // Left segment (before forbidden interval)
-        if self.start < forbidden.start {
-            result.push(Interval::new(self.start, forbidden.start - self.start));
-        }
-
-        // Right segment (after forbidden interval)
-        if self.end() > forbidden.end() {
-            result.push(Interval::new(forbidden.end(), self.end() - forbidden.end()));
-        }
-
-        result
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SplitCandidate {
-    pub col: usize,
-    pub error_reduction: f64,
-    pub allowed_interval_idx: usize,
-    pub index: usize,
-    /// Two-tensor updates for left side: (u_plus_L, u_minus_L)
-    pub update_left: (f64, f64),
-    /// Two-tensor updates for right side: (u_plus_R, u_minus_R)
-    pub update_right: (f64, f64),
-}
-
-#[derive(Debug, Clone)]
-pub struct MergeCandidate {
-    pub col: usize,
-    pub error_reduction: f64,
-    pub interval_idx: usize,
-    pub index: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct ResplitCandidate {
-    pub col: usize,
-    pub error_reduction: f64,
-    pub interval_idx: usize,
-    pub index: usize,
-    /// Two-tensor updates for left side: (u_plus_L, u_minus_L)
-    pub update_left: (f64, f64),
-    /// Two-tensor updates for right side: (u_plus_R, u_minus_R)
-    pub update_right: (f64, f64),
-}
-
-/// Split strategy state
-#[derive(Debug, Clone)]
-pub struct SplitStrategyState {
-    /// Valid split intervals per feature [col][n_intervals]
-    pub allowed_intervals: Vec<Vec<Interval>>,
-    /// Total positions per feature [col]
-    pub total_positions: Vec<usize>,
-    pub last_transformation: Option<FittingAction>,
-    pub resplit_enabled: bool,
-    /// Whether merge statistics participate in unified action selection.
-    pub merge_enabled: bool,
-    /// Fixed loss-scale cost of adding one boundary to the grid.
-    pub boundary_penalty: f64,
-}
-
-impl Default for SplitStrategyState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl SplitStrategyState {
-    pub fn new() -> Self {
-        Self {
-            allowed_intervals: vec![],
-            total_positions: vec![],
-            last_transformation: None,
-            resplit_enabled: true,
-            merge_enabled: false,
-            boundary_penalty: 0.0,
-        }
-    }
-}
-
-/// Enum dispatch for all split strategy types (matching actual implementation)
+/// How split positions are proposed (sampled at random, the best one, or one of the top k),
+/// and the thresholds every structural action must clear.
 #[derive(Debug, Clone)]
 pub enum SplitStrategy {
     Random {
@@ -354,49 +114,41 @@ impl SplitStrategy {
         allow_split: bool,
     ) -> Option<FittingAction> {
         state.require_current_statistics();
-        let Self::Random {
-            colsample_bytree,
-            split_try,
-            ..
-        } = self
-        else {
+        let sampled = match self {
+            Self::Random {
+                colsample_bytree,
+                split_try,
+                ..
+            } if state.sampled_split_scoring
+                && state.split_scores_stale
+                && !state.is_stage1_positive_only() =>
+            {
+                Some((*colsample_bytree, *split_try))
+            }
+            _ => None,
+        };
+        let Some((colsample_bytree, split_try)) = sampled else {
             if state.split_scores_stale {
                 refinement.refresh_all_split_scores(state);
             }
             return self.propose_next_action_with_split_budget(state, rng, allow_split);
         };
-        if !state.sampled_split_scoring
-            || !state.split_scores_stale
-            || state.is_stage1_positive_only()
-        {
-            if state.split_scores_stale {
-                refinement.refresh_all_split_scores(state);
-            }
-            return self.propose_next_action_with_split_budget(state, rng, allow_split);
-        }
         let best_split = if allow_split {
             let positions = sample_random_split_positions(
                 &state.split_strategy_state.allowed_intervals,
                 &state.split_strategy_state.total_positions,
-                *colsample_bytree,
-                *split_try,
+                colsample_bytree,
+                split_try,
                 rng,
                 state.p,
             );
-            best_scored_random_position(positions, |col, index| {
+            best_scored_position(positions, |col, index| {
                 refinement.refresh_sampled_split(state, col, index);
                 state.precomputed_statistics.error_reductions_split[col]
                     .get(index)
                     .copied()
             })
-            .map(|(col, index, interval_idx, gain)| SplitCandidate {
-                col,
-                index,
-                allowed_interval_idx: interval_idx,
-                error_reduction: gain,
-                update_left: state.precomputed_statistics.update_pairs_split_left[col][index],
-                update_right: state.precomputed_statistics.update_pairs_split_right[col][index],
-            })
+            .map(|scored| split_candidate(state, scored))
         } else {
             None
         };
@@ -427,13 +179,12 @@ impl SplitStrategy {
 
         let merge_action = best_merge_candidate.map(|candidate| {
             (
-                candidate.error_reduction + state.split_strategy_state.boundary_penalty,
+                merge_score(state, &candidate),
                 FittingAction::ApplyMerge { merge: candidate },
             )
         });
 
-        let tolerance = ACTION_SCORE_RELATIVE_TOLERANCE * state.current_error.abs().max(1.0);
-        let minimum_gain = self.min_split_loss().max(tolerance);
+        let minimum_gain = self.minimum_action_gain(state);
 
         [split_action, resplit_action, merge_action]
             .into_iter()
@@ -447,14 +198,20 @@ impl SplitStrategy {
     pub fn propose_next_merge(&self, state: &FittingState) -> Option<FittingAction> {
         state.require_current_statistics();
         let merge = self.propose_best_merge(state)?;
-        let score = merge.error_reduction + state.split_strategy_state.boundary_penalty;
-        let tolerance = self
-            .min_split_loss()
-            .max(ACTION_SCORE_RELATIVE_TOLERANCE * state.current_error.abs().max(1.0));
-        (score.is_finite() && score > tolerance).then_some(FittingAction::ApplyMerge { merge })
+        let score = merge_score(state, &merge);
+        let minimum_gain = self.minimum_action_gain(state);
+        (score.is_finite() && score > minimum_gain).then_some(FittingAction::ApplyMerge { merge })
     }
 
-    /// Forbids splits around the given position by updating only the specific interval that contained the split
+    /// Score an action must exceed: `min_split_loss`, and at least a tolerance relative to
+    /// the current error.
+    fn minimum_action_gain(&self, state: &FittingState) -> f64 {
+        let tolerance = ACTION_SCORE_RELATIVE_TOLERANCE * state.current_error.abs().max(1.0);
+        self.min_split_loss().max(tolerance)
+    }
+
+    /// Forbids splits within `min_interval_samples` of the split position by cutting that
+    /// neighbourhood out of the allowed interval that contained the split.
     pub fn forbid_around_split<'a>(
         &self,
         mut state: FittingState<'a>,
@@ -464,45 +221,24 @@ impl SplitStrategy {
         let position = split_candidate.index;
         let interval_idx = split_candidate.allowed_interval_idx;
         let col = split_candidate.col;
-        let allowed_intervals = &mut state.split_strategy_state.allowed_intervals;
-        let total_positions = &mut state.split_strategy_state.total_positions;
         let forbidden_start = position.saturating_sub(margin - 1);
         let forbidden_end = position + margin;
         let forbidden_interval = Interval::new(forbidden_start, forbidden_end - forbidden_start);
 
-        // Only update the specific interval that contained the split
-        let original_interval = &allowed_intervals[col][interval_idx];
-        let new_intervals = original_interval.subtract(&forbidden_interval);
-
-        // Remove empty intervals
-        let filtered_intervals: Vec<Interval> = new_intervals
+        let strategy_state = &mut state.split_strategy_state;
+        let original_interval = strategy_state.allowed_intervals[col][interval_idx];
+        let remaining: Vec<Interval> = original_interval
+            .subtract(&forbidden_interval)
             .into_iter()
             .filter(|interval| interval.length > 0)
             .collect();
+        let remaining_positions: usize = remaining.iter().map(|interval| interval.length).sum();
 
-        // Calculate the change in total positions
-        let original_length = original_interval.length;
-        let new_total: usize = filtered_intervals
-            .iter()
-            .map(|interval| interval.length)
-            .sum();
-        let change = new_total as i32 - original_length as i32;
-
-        // Replace the original interval with the new ones
-        if filtered_intervals.is_empty() {
-            // If no intervals remain, remove this interval entirely
-            allowed_intervals[col].remove(interval_idx);
-        } else {
-            // Replace the original interval with the new ones
-            allowed_intervals[col].remove(interval_idx);
-            allowed_intervals[col].extend(filtered_intervals);
-
-            // Re-sort to maintain the sorted order
-            allowed_intervals[col].sort_by_key(|interval| interval.start);
-        }
-
-        // Update the cached total positions
-        total_positions[col] = (total_positions[col] as i32 + change) as usize;
+        // The remaining pieces lie inside the original interval in ascending order, so the
+        // column's disjoint allowed intervals stay sorted by start.
+        strategy_state.allowed_intervals[col].splice(interval_idx..=interval_idx, remaining);
+        strategy_state.total_positions[col] =
+            strategy_state.total_positions[col] + remaining_positions - original_interval.length;
 
         state
     }
@@ -550,114 +286,6 @@ impl SplitStrategy {
         }
     }
 
-    fn propose_best_merge(&self, state: &FittingState) -> Option<MergeCandidate> {
-        if !state.split_strategy_state.merge_enabled {
-            return None;
-        }
-
-        let mut best: Option<MergeCandidate> = None;
-        for (col, ((raw_gains, merged_factors), boundaries)) in state
-            .precomputed_statistics
-            .error_reductions_merge
-            .iter()
-            .zip(state.precomputed_statistics.update_pairs_merge.iter())
-            .zip(state.boundaries.iter())
-            .enumerate()
-        {
-            for (interval_idx, ((&error_reduction, &factors), &index)) in raw_gains
-                .iter()
-                .zip(merged_factors.iter())
-                .zip(boundaries.iter())
-                .enumerate()
-            {
-                if !error_reduction.is_finite()
-                    || !factors.0.is_finite()
-                    || !factors.1.is_finite()
-                    || factors.0 <= 0.0
-                    || factors.1 <= 0.0
-                {
-                    continue;
-                }
-
-                if best
-                    .as_ref()
-                    .is_none_or(|candidate| error_reduction > candidate.error_reduction)
-                {
-                    best = Some(MergeCandidate {
-                        col,
-                        error_reduction,
-                        interval_idx,
-                        index,
-                    });
-                }
-            }
-        }
-        best
-    }
-
-    fn propose_best_resplit(&self, state: &FittingState) -> Option<ResplitCandidate> {
-        if !state.split_strategy_state.resplit_enabled {
-            return None;
-        }
-        // Prevent too many consecutive resplits to avoid infinite loops
-        if state.loop_state.consecutive_resplits >= MAX_CONSECUTIVE_RESPLIT {
-            return None;
-        }
-        let mut best_resplit_candidate: Option<ResplitCandidate> = None;
-        for (col_idx, (err_reductions, boundaries)) in state
-            .precomputed_statistics
-            .error_reductions_resplit
-            .iter()
-            .zip(state.boundaries.iter())
-            .enumerate()
-        {
-            for (index, (&err_reduction, &data_index)) in
-                err_reductions.iter().zip(boundaries.iter()).enumerate()
-            {
-                // Skip NaN values to prevent panic in partial_cmp
-                if err_reduction.is_nan() {
-                    continue;
-                }
-                if let Some(last_transformation) =
-                    state.split_strategy_state.last_transformation.as_ref()
-                {
-                    match last_transformation {
-                        FittingAction::ApplySplit { split } => {
-                            if col_idx == split.col && data_index == split.index {
-                                continue;
-                            }
-                        }
-                        FittingAction::ApplyResplit { resplit } => {
-                            if col_idx == resplit.col && data_index == resplit.index {
-                                continue;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                if best_resplit_candidate
-                    .as_ref()
-                    .is_none_or(|sc| err_reduction > sc.error_reduction)
-                {
-                    let update_left =
-                        state.precomputed_statistics.update_pairs_resplit_left[col_idx][index];
-                    let update_right =
-                        state.precomputed_statistics.update_pairs_resplit_right[col_idx][index];
-                    let candidate = ResplitCandidate {
-                        col: col_idx,
-                        index: data_index,
-                        error_reduction: err_reduction,
-                        interval_idx: index,
-                        update_left,
-                        update_right,
-                    };
-                    best_resplit_candidate = Some(candidate);
-                }
-            }
-        }
-        best_resplit_candidate
-    }
-
     fn propose_best_split<R: Rng + ?Sized>(
         &self,
         state: &FittingState,
@@ -668,820 +296,315 @@ impl SplitStrategy {
                 colsample_bytree,
                 split_try,
                 ..
-            } => {
-                // Random strategy implementation - uses state.strategy_state for allowed intervals
-                sample_random_split(
-                    &state.split_strategy_state.allowed_intervals,
-                    &state.split_strategy_state.total_positions,
-                    *colsample_bytree,
-                    *split_try,
-                    rng,
-                    &state.precomputed_statistics.error_reductions_split,
-                )
-            }
-            SplitStrategy::Best { .. } => {
-                // Best strategy implementation - uses state.working_buffers for error reductions
-                sample_best_split(
-                    &state.split_strategy_state.allowed_intervals,
-                    &state.precomputed_statistics.error_reductions_split,
-                )
-            }
+            } => sample_random_split(
+                &state.split_strategy_state.allowed_intervals,
+                &state.split_strategy_state.total_positions,
+                *colsample_bytree,
+                *split_try,
+                rng,
+                &state.precomputed_statistics.error_reductions_split,
+            ),
+            SplitStrategy::Best { .. } => sample_best_split(
+                &state.split_strategy_state.allowed_intervals,
+                &state.precomputed_statistics.error_reductions_split,
+            ),
             SplitStrategy::TopK {
                 top_k,
                 must_fill_all_k,
                 ..
-            } => {
-                // Top-k strategy implementation
-                sample_top_k_split(
-                    &state.split_strategy_state.allowed_intervals,
-                    *top_k,
-                    *must_fill_all_k,
-                    rng,
-                    &state.precomputed_statistics.error_reductions_split,
-                )
-            }
+            } => sample_top_k_split(
+                &state.split_strategy_state.allowed_intervals,
+                *top_k,
+                *must_fill_all_k,
+                rng,
+                &state.precomputed_statistics.error_reductions_split,
+            ),
         };
-
-        if let Some((col, index, interval_idx, err_reduction)) = best_split_info {
-            let update_left = state.precomputed_statistics.update_pairs_split_left[col][index];
-            let update_right = state.precomputed_statistics.update_pairs_split_right[col][index];
-            Some(SplitCandidate {
-                col,
-                index,
-                error_reduction: err_reduction,
-                allowed_interval_idx: interval_idx,
-                update_left,
-                update_right,
-            })
-        } else {
-            None
-        }
+        best_split_info.map(|scored| split_candidate(state, scored))
     }
 }
 
-fn map_abstract_to_position(
-    allowed_intervals: &[Vec<Interval>],
-    col: usize,
-    abstract_idx: usize,
-) -> (usize, usize) {
-    let mut remaining = abstract_idx;
-    for (interval_idx, interval) in allowed_intervals[col].iter().enumerate() {
-        if remaining < interval.length {
-            return (interval.start + remaining, interval_idx);
-        }
-        remaining -= interval.length;
+/// Split candidate at a scored position `(col, index, allowed_interval_idx, error_reduction)`,
+/// with the cached updates of its two sides.
+fn split_candidate(
+    state: &FittingState,
+    (col, index, allowed_interval_idx, error_reduction): (usize, usize, usize, f64),
+) -> SplitCandidate {
+    SplitCandidate {
+        col,
+        index,
+        error_reduction,
+        allowed_interval_idx,
+        update_left: state.precomputed_statistics.update_pairs_split_left[col][index],
+        update_right: state.precomputed_statistics.update_pairs_split_right[col][index],
     }
-    // This should never happen if abstract_idx is valid
-    panic!("Invalid abstract index: {}", abstract_idx);
 }
 
-fn initialize_intervals(
-    error_reductions: &[Vec<f64>],
-    min_interval_samples: usize,
-) -> (Vec<Vec<Interval>>, Vec<usize>) {
-    let mut allowed_intervals = vec![Vec::new(); error_reductions.len()];
-    let mut total_positions = vec![0; error_reductions.len()];
-
-    for (col, col_error_reductions) in error_reductions.iter().enumerate() {
-        let mut intervals = Vec::new();
-        let mut current_start = None;
-
-        for (pos, &err_reduction) in col_error_reductions.iter().enumerate() {
-            if !err_reduction.is_nan() {
-                if current_start.is_none() {
-                    current_start = Some(pos);
-                }
-            } else if let Some(start) = current_start {
-                intervals.push(Interval::new(start, pos - start));
-                current_start = None;
-            }
-        }
-
-        if let Some(start) = current_start {
-            intervals.push(Interval::new(start, col_error_reductions.len() - start));
-        }
-
-        intervals.retain(|interval| interval.length > 0);
-
-        let n = col_error_reductions.len();
-        let margin = min_interval_samples;
-        let global_start = margin;
-        let global_end = n.saturating_sub(margin - 1);
-        let new_intervals: Vec<Interval> = intervals
-            .into_iter()
-            .filter_map(|interval| {
-                let old_end = interval.end();
-                let start = interval.start.max(global_start);
-                let end = old_end.min(global_end);
-                if end > start {
-                    Some(Interval::new(start, end - start))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let total = new_intervals.iter().map(|interval| interval.length).sum();
-        allowed_intervals[col] = new_intervals;
-        total_positions[col] = total;
-    }
-
-    (allowed_intervals, total_positions)
+/// A merge recovers the cost of the boundary it removes.
+fn merge_score(state: &FittingState, merge: &MergeCandidate) -> f64 {
+    merge.error_reduction + state.split_strategy_state.boundary_penalty
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::grid_tensor::state::FittingState;
+    use std::collections::BTreeSet;
+
     use ndarray::{Array1, Array2};
     use rand::{rngs::StdRng, SeedableRng};
 
-    // Helper to create a mock FittingState for testing
-    fn create_mock_state(error_reductions: Vec<Vec<f64>>) -> FittingState<'static> {
-        let n = 20;
-        let p = error_reductions.len();
+    use super::*;
+    use crate::grid_tensor::state::MAX_CONSECUTIVE_RESPLIT;
 
-        // Create dummy data
-        let x_data = Array2::zeros((n, p));
-        let y_data = Array1::zeros(n);
+    const NAN: f64 = f64::NAN;
 
-        // Leak to get 'static lifetime (only for tests)
-        let x_static = Box::leak(Box::new(x_data));
-        let y_static = Box::leak(Box::new(y_data));
-
-        let mut state = FittingState::new(x_static.view(), y_static.view());
-
-        // Set up precomputed statistics with our error reductions
-        state.precomputed_statistics.error_reductions_split = error_reductions;
+    /// A 20-row state with error 20 (loss scale 1) and the given split scores per column.
+    fn scored_state(split_gains: Vec<Vec<f64>>) -> FittingState<'static> {
+        let x: &'static Array2<f64> = Box::leak(Box::new(Array2::zeros((20, split_gains.len()))));
+        let y: &'static Array1<f64> = Box::leak(Box::new(Array1::zeros(20)));
+        let mut state = FittingState::new(x.view(), y.view());
+        state.current_error = 20.0;
+        state.precomputed_statistics.error_reductions_split = split_gains;
         state.precomputed_statistics.initialized = true;
-
         state
     }
 
-    fn best_strategy(complexity_penalty: f64) -> SplitStrategy {
+    /// Adds one merge candidate at boundary 10 of column 0 with valid merged factors.
+    fn with_merge(mut state: FittingState<'static>, gain: f64) -> FittingState<'static> {
+        state.boundaries[0] = vec![10];
+        state.precomputed_statistics.error_reductions_merge[0] = vec![gain];
+        state.precomputed_statistics.update_pairs_merge[0] = vec![(1.0, 1.0)];
+        state
+    }
+
+    fn best(min_interval_samples: usize, complexity_penalty: f64) -> SplitStrategy {
         SplitStrategy::Best {
-            min_interval_samples: 1,
+            min_interval_samples,
             complexity_penalty,
             min_split_loss: 0.0,
         }
     }
 
-    fn create_merge_state(
-        complexity_penalty: f64,
-        boundaries: Vec<usize>,
-        raw_gains: Vec<f64>,
-        merge_factors: Vec<(f64, f64)>,
-        current_error: f64,
-    ) -> (SplitStrategy, FittingState<'static>) {
-        let strategy = best_strategy(complexity_penalty);
-        let mut state = create_mock_state(vec![vec![f64::NAN; 20]]);
-        state.current_error = current_error;
-        state = strategy.initialize(state);
-        state.boundaries[0] = boundaries;
-        state.precomputed_statistics.error_reductions_merge[0] = raw_gains;
-        state.precomputed_statistics.update_pairs_merge[0] = merge_factors;
-        (strategy, state)
+    fn propose(strategy: &SplitStrategy, state: &FittingState) -> Option<FittingAction> {
+        strategy.propose_next_action(state, &mut StdRng::seed_from_u64(42))
     }
 
+    fn proposed_split(strategy: &SplitStrategy, state: &FittingState) -> SplitCandidate {
+        match propose(strategy, state) {
+            Some(FittingAction::ApplySplit { split }) => split,
+            action => panic!("expected a split, got {action:?}"),
+        }
+    }
+
+    /// A positive finite complexity penalty enables merges and fixes the boundary cost at
+    /// `penalty · (initial error / n) · dof · ln n`, with one degree of freedom per boundary
+    /// in the positive-only first stage and two once the negative branch is active.
     #[test]
-    fn initialize_enables_merges_only_for_positive_finite_penalties() {
-        for penalty in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            let strategy = best_strategy(penalty);
-            let state = strategy.initialize(create_mock_state(vec![vec![1.0; 20]]));
+    fn boundary_cost_is_fixed_at_initialization_for_positive_finite_penalties() {
+        for penalty in [0.0, -1.0, NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let strategy = best(1, penalty);
+            let state = with_merge(
+                strategy.initialize(scored_state(vec![vec![NAN; 20]])),
+                100.0,
+            );
             assert!(!state.split_strategy_state.merge_enabled);
+            assert_eq!(state.split_strategy_state.boundary_penalty, 0.0);
+            assert!(strategy.propose_next_merge(&state).is_none());
         }
 
-        let strategy = best_strategy(1.0);
-        let state = strategy.initialize(create_mock_state(vec![vec![1.0; 20]]));
+        let ln_n = 20.0_f64.ln();
+        let strategy = best(1, 1.0);
+        let mut state = with_merge(strategy.initialize(scored_state(vec![vec![NAN; 20]])), -2.0);
         assert!(state.split_strategy_state.merge_enabled);
+        assert!((state.split_strategy_state.boundary_penalty - ln_n).abs() < 1e-12);
+
+        // At the initial loss scale the merge scores −2 + ln 20 > 0 for any later error.
+        state.current_error = 2.0;
+        assert!(strategy.propose_next_merge(&state).is_some());
+
+        let mut signed = scored_state(vec![vec![NAN; 20]]);
+        signed.lambda_minus = 1.0;
+        let signed = strategy.initialize(signed);
+        assert!((signed.split_strategy_state.boundary_penalty - 2.0 * ln_n).abs() < 1e-12);
     }
 
+    /// A split pays the boundary cost and a merge recovers it, so the selector ranks a split
+    /// against its inverse merge by their penalized scores.
     #[test]
-    fn unified_selector_ranks_merge_against_split() {
-        let strategy = best_strategy(1.0);
-        let mut split_gains = vec![f64::NAN; 20];
-        split_gains[5] = 1.0;
-        let mut state = create_mock_state(vec![split_gains]);
-        state = strategy.initialize(state);
-        state.boundaries[0] = vec![10];
-        state.precomputed_statistics.error_reductions_merge[0] = vec![100.0];
-        state.precomputed_statistics.update_pairs_merge[0] = vec![(1.0, 1.0)];
-
-        let mut rng = StdRng::seed_from_u64(42);
-        assert!(matches!(
-            strategy.propose_next_action(&state, &mut rng),
-            Some(FittingAction::ApplyMerge { .. })
-        ));
-    }
-
-    #[test]
-    fn boundary_penalty_uses_fixed_initial_scale_and_model_degrees_of_freedom() {
-        let (_, state) = create_merge_state(1.0, vec![10], vec![0.0], vec![(1.0, 1.0)], 20.0);
-        let expected_stage1 = 20.0_f64.ln();
-        assert!((state.split_strategy_state.boundary_penalty - expected_stage1).abs() < 1e-12);
-
-        let strategy = best_strategy(1.0);
-        let mut state = create_mock_state(vec![vec![f64::NAN; 20]]);
-        state.current_error = 20.0;
-        state.lambda_minus = 1.0;
-        let state = strategy.initialize(state);
-        assert!(
-            (state.split_strategy_state.boundary_penalty - 2.0 * expected_stage1).abs() < 1e-12
-        );
-    }
-
-    #[test]
-    fn boundary_penalty_is_fixed_after_initialization() {
-        let (_, mut state) = create_merge_state(1.0, vec![10], vec![0.0], vec![(1.0, 1.0)], 20.0);
-        let initial = state.split_strategy_state.boundary_penalty;
-        state.current_error = 2_000.0;
-        assert_eq!(state.split_strategy_state.boundary_penalty, initial);
-    }
-
-    #[test]
-    fn split_and_inverse_merge_pay_opposite_boundary_costs() {
-        let strategy = best_strategy(1.0);
-        let mut split_gains = vec![f64::NAN; 20];
+    fn split_pays_and_merge_recovers_the_boundary_cost() {
+        let strategy = best(1, 1.0);
+        let mut split_gains = vec![NAN; 20];
         split_gains[5] = 4.0;
-        let mut state = create_mock_state(vec![split_gains]);
-        state.current_error = 20.0;
-        state = strategy.initialize(state);
-        state.boundaries[0] = vec![10];
-        state.precomputed_statistics.error_reductions_merge[0] = vec![-4.0];
-        state.precomputed_statistics.update_pairs_merge[0] = vec![(1.0, 1.0)];
+        let mut state = with_merge(strategy.initialize(scored_state(vec![split_gains])), -4.0);
 
-        let mut rng = StdRng::seed_from_u64(42);
+        // With ln 20 ≈ 3, the split scores 4 − 3 = 1 and the merge −4 + 3 = −1.
         assert!(matches!(
-            strategy.propose_next_action(&state, &mut rng),
+            propose(&strategy, &state),
             Some(FittingAction::ApplySplit { .. })
         ));
 
+        // The split scores 2 − 3 = −1 and the merge −2 + 3 = 1.
         state.precomputed_statistics.error_reductions_split[0][5] = 2.0;
         state.precomputed_statistics.error_reductions_merge[0][0] = -2.0;
         assert!(matches!(
-            strategy.propose_next_action(&state, &mut rng),
+            propose(&strategy, &state),
             Some(FittingAction::ApplyMerge { .. })
         ));
     }
 
+    /// Merges with non-finite or non-positive merged factors are skipped, and the best valid
+    /// merge is proposed only when its penalized score is positive.
     #[test]
-    fn unified_selector_rejects_negative_effective_merge_score() {
-        let (strategy, state) =
-            create_merge_state(1.0, vec![10], vec![-6.0], vec![(1.0, 1.0)], 20.0);
+    fn merge_proposals_skip_invalid_factors_and_non_improving_scores() {
+        let strategy = best(1, 1.0);
+        let mut state = strategy.initialize(scored_state(vec![vec![NAN; 20]]));
+        state.boundaries[0] = vec![1, 10, 15, 17];
+        state.precomputed_statistics.error_reductions_merge[0] = vec![-5.0, 1.0, 100.0, 50.0];
+        state.precomputed_statistics.update_pairs_merge[0] =
+            vec![(2.0, 2.0), (4.0, 4.0), (NAN, 7.0), (0.0, 3.0)];
 
+        let Some(FittingAction::ApplyMerge { merge }) = strategy.propose_next_merge(&state) else {
+            panic!("expected a merge");
+        };
+        assert_eq!((merge.col, merge.interval_idx, merge.index), (0, 1, 10));
+        assert_eq!(merge.error_reduction, 1.0);
+
+        // With the second merge at −6, the best valid merge scores −5 + ln 20 < 0.
+        state.precomputed_statistics.error_reductions_merge[0][1] = -6.0;
         assert!(strategy.propose_next_merge(&state).is_none());
     }
 
+    /// The distinct split positions TopK proposes over repeated draws.
+    fn top_k_draws(split_gains: Vec<f64>, top_k: usize, must_fill_all_k: bool) -> BTreeSet<usize> {
+        let strategy = SplitStrategy::TopK {
+            top_k,
+            must_fill_all_k,
+            min_interval_samples: 1,
+            complexity_penalty: 0.0,
+            min_split_loss: 0.0,
+        };
+        let state = strategy.initialize(scored_state(vec![split_gains]));
+        let mut rng = StdRng::seed_from_u64(42);
+        (0..64)
+            .filter_map(|_| strategy.propose_next_action(&state, &mut rng))
+            .map(|action| match action {
+                FittingAction::ApplySplit { split } => split.index,
+                action => panic!("expected a split, got {action:?}"),
+            })
+            .collect()
+    }
+
     #[test]
-    fn unified_selector_ranks_merge_score_and_skips_invalid_factors() {
-        let (strategy, state) = create_merge_state(
-            1.0,
-            vec![1, 10, 15],
-            vec![-5.0, 1.0, 100.0],
-            vec![(2.0, 2.0), (4.0, 4.0), (f64::NAN, 7.0)],
-            20.0,
+    fn top_k_draws_among_the_k_best_scored_positions() {
+        // Unscored positions are skipped; the two best are 5 at index 2 and 4 at index 4.
+        assert_eq!(
+            top_k_draws(vec![NAN, 1.0, 5.0, NAN, 4.0, 3.0], 2, false),
+            BTreeSet::from([2, 4])
         );
 
-        let Some(FittingAction::ApplyMerge { merge }) = strategy.propose_next_merge(&state) else {
-            panic!("expected a merge action");
-        };
-        assert_eq!(merge.col, 0);
-        assert_eq!(merge.interval_idx, 1);
-        assert_eq!(merge.index, 10);
-        assert_eq!(merge.error_reduction, 1.0);
+        // With fewer than k candidates, all of them are drawn unless all k must be filled.
+        let three = vec![NAN, 1.0, 2.0, 3.0, NAN];
+        assert_eq!(
+            top_k_draws(three.clone(), 5, false),
+            BTreeSet::from([1, 2, 3])
+        );
+        assert_eq!(
+            top_k_draws(three.clone(), 3, true),
+            BTreeSet::from([1, 2, 3])
+        );
+        assert!(top_k_draws(three, 5, true).is_empty());
+        assert!(top_k_draws(vec![NAN; 3], 2, false).is_empty());
     }
 
     #[test]
-    fn test_top_k_splits_selects_from_top_k() {
-        let error_reductions = vec![
-            vec![f64::NAN, 1.0, 5.0, 2.0, 4.0, 3.0], // top 2 are: 5.0, 4.0
+    fn random_samples_at_most_split_try_allowed_positions_per_column() {
+        // Unscored positions and the `min_interval_samples` margin at either end are excluded.
+        let gains = vec![
+            vec![NAN, 1.0, 2.0, 3.0, 4.0, 5.0, NAN, NAN, 8.0, 9.0, 10.0],
+            vec![NAN, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
         ];
-        let strategy = SplitStrategy::TopK {
-            top_k: 2,
-            must_fill_all_k: false,
-            min_interval_samples: 1,
-            complexity_penalty: 0.0,
-            min_split_loss: 0.0,
-        };
-        let mut state = create_mock_state(error_reductions);
-        state = strategy.initialize(state);
+        let (allowed, totals) = initialize_intervals(&gains, 2);
+        assert_eq!(
+            allowed,
+            vec![
+                vec![Interval::new(2, 4), Interval::new(8, 2)],
+                vec![Interval::new(2, 7)]
+            ]
+        );
+        assert_eq!(totals, vec![6, 7]);
 
         let mut rng = StdRng::seed_from_u64(42);
-        let action = strategy.propose_next_action(&state, &mut rng);
-
-        // Should select one of the top 2 splits
-        assert!(action.is_some());
-        if let Some(FittingAction::ApplySplit { split }) = action {
-            let (col, index) = (split.col, split.index);
-            assert_eq!(col, 0);
-            assert!(index == 2 || index == 4); // Either 5.0 at index 2 or 4.0 at index 4
+        for split_try in [1, 3, 10] {
+            let positions =
+                sample_random_split_positions(&allowed, &totals, 1.0, split_try, &mut rng, 2);
+            assert!(!positions.is_empty());
+            for (col, intervals) in allowed.iter().enumerate() {
+                let sampled: Vec<usize> = positions
+                    .iter()
+                    .filter(|&&(c, _, _)| c == col)
+                    .map(|&(_, index, interval_idx)| {
+                        assert!(intervals[interval_idx].contains(index));
+                        index
+                    })
+                    .collect();
+                assert!(sampled.len() <= split_try);
+                assert_eq!(sampled.iter().collect::<BTreeSet<_>>().len(), sampled.len());
+            }
         }
     }
 
     #[test]
-    fn test_top_k_splits_must_fill_all_k_true() {
-        let error_reductions = vec![
-            vec![f64::NAN, 1.0, 2.0, 3.0, f64::NAN], // Only 3 valid splits
-        ];
-        let strategy = SplitStrategy::TopK {
-            top_k: 5,
-            must_fill_all_k: true,
-            min_interval_samples: 1,
-            complexity_penalty: 0.0,
-            min_split_loss: 0.0,
-        };
-        let mut state = create_mock_state(error_reductions);
-        state = strategy.initialize(state);
-
-        let mut rng = StdRng::seed_from_u64(42);
-        let action = strategy.propose_next_action(&state, &mut rng);
-
-        // Should return None because we can't fill all k=5 splits (only 3 valid)
-        assert!(action.is_none());
-    }
-
-    #[test]
-    fn test_top_k_splits_must_fill_all_k_false() {
-        let error_reductions = vec![
-            vec![f64::NAN, 1.0, 2.0, 3.0, f64::NAN], // Only 3 valid splits
-        ];
-        let strategy = SplitStrategy::TopK {
-            top_k: 5,
-            must_fill_all_k: false,
-            min_interval_samples: 1,
-            complexity_penalty: 0.0,
-            min_split_loss: 0.0,
-        };
-        let mut state = create_mock_state(error_reductions);
-        state = strategy.initialize(state);
-
-        let mut rng = StdRng::seed_from_u64(42);
-        let action = strategy.propose_next_action(&state, &mut rng);
-
-        // Should return a result because must_fill_all_k is false
-        assert!(action.is_some());
-    }
-
-    #[test]
-    fn test_top_k_splits_multiple_calls() {
-        let error_reductions = vec![vec![f64::NAN, 1.0, 5.0, 2.0, 4.0, 3.0]];
-        let strategy = SplitStrategy::TopK {
-            top_k: 2,
-            must_fill_all_k: false,
-            min_interval_samples: 1,
-            complexity_penalty: 0.0,
-            min_split_loss: 0.0,
-        };
-        let mut state = create_mock_state(error_reductions);
-        state = strategy.initialize(state);
-
-        let mut rng = StdRng::seed_from_u64(42);
-
-        // First split from top-k
-        let action1 = strategy.propose_next_action(&state, &mut rng);
-        assert!(action1.is_some());
-        if let Some(FittingAction::ApplySplit { split }) = action1 {
-            // Forbid around the selected split
-            state = strategy.forbid_around_split(state, &split);
-        }
-
-        // Second split should still work
-        let action2 = strategy.propose_next_action(&state, &mut rng);
-        assert!(action2.is_some());
-    }
-
-    #[test]
-    fn test_top_k_splits_empty_heap() {
-        let error_reductions = vec![
-            vec![f64::NAN, f64::NAN, f64::NAN], // No valid splits
-        ];
-        let strategy = SplitStrategy::TopK {
-            top_k: 2,
-            must_fill_all_k: false,
-            min_interval_samples: 1,
-            complexity_penalty: 0.0,
-            min_split_loss: 0.0,
-        };
-        let mut state = create_mock_state(error_reductions);
-        state = strategy.initialize(state);
-
-        let mut rng = StdRng::seed_from_u64(42);
-        let action = strategy.propose_next_action(&state, &mut rng);
-
-        assert!(action.is_none());
-    }
-
-    #[test]
-    fn test_top_k_splits_nan_handling() {
-        let error_reductions = vec![vec![f64::NAN, 1.0, f64::NAN, 3.0, f64::NAN, 2.0]];
-        let strategy = SplitStrategy::TopK {
-            top_k: 2,
-            must_fill_all_k: false,
-            min_interval_samples: 1,
-            complexity_penalty: 0.0,
-            min_split_loss: 0.0,
-        };
-        let mut state = create_mock_state(error_reductions);
-        state = strategy.initialize(state);
-
-        let mut rng = StdRng::seed_from_u64(42);
-        let action = strategy.propose_next_action(&state, &mut rng);
-
-        assert!(action.is_some());
-        if let Some(FittingAction::ApplySplit { split }) = action {
-            let (col, index) = (split.col, split.index);
-            let err_reductions = &state.precomputed_statistics.error_reductions_split;
-            assert!(!err_reductions[col][index].is_nan());
-            // Should be one of the valid non-NaN positions
-            assert!(index == 1 || index == 3 || index == 5);
-        }
-    }
-
-    // random_split_tests
-
-    #[test]
-    fn test_random_split_exact_split_try_less_than_total_positions() {
-        let error_reductions = vec![vec![f64::NAN, 1.0, 2.0, 3.0, 4.0]];
-        let strategy = SplitStrategy::Random {
+    fn random_proposes_the_best_sampled_split_above_min_split_loss() {
+        let random = |min_split_loss| SplitStrategy::Random {
             split_try: 10,
             colsample_bytree: 1.0,
             min_interval_samples: 1,
             complexity_penalty: 0.0,
-            min_split_loss: 0.0,
+            min_split_loss,
         };
-        let mut state = create_mock_state(error_reductions);
-        state = strategy.initialize(state);
+        let gains = vec![vec![NAN, 0.1, 0.2, NAN, 0.4, 0.5, NAN, 0.3]];
 
-        let mut rng = StdRng::seed_from_u64(42);
-        let action = strategy.propose_next_action(&state, &mut rng);
-        assert!(action.is_some());
+        let strategy = random(0.0);
+        let state = strategy.initialize(scored_state(gains.clone()));
+        assert_eq!(proposed_split(&strategy, &state).index, 5);
+
+        let strategy = random(0.5);
+        let state = strategy.initialize(scored_state(gains));
+        assert!(propose(&strategy, &state).is_none());
     }
 
     #[test]
-    fn test_random_split_exact_split_try() {
-        let error_reductions = vec![vec![
-            f64::NAN,
-            1.0,
-            2.0,
-            3.0,
-            4.0,
-            f64::NAN,
-            f64::NAN,
-            f64::NAN,
-            8.0,
-            9.0,
-            10.0,
-            11.0,
-            12.0,
-        ]];
-        let min_interval_samples = 4;
-        let (allowed_intervals, total_positions) =
-            initialize_intervals(&error_reductions, min_interval_samples);
+    fn best_proposes_the_highest_scored_split_outside_forbidden_regions() {
+        let strategy = best(2, 0.0);
+        let gains = vec![NAN, NAN, 1.0, 4.0, 5.0, 4.0, NAN, 3.0, 2.0, NAN];
+        let mut state = strategy.initialize(scored_state(vec![gains]));
 
-        // Check initialization creates correct intervals
-        assert_eq!(total_positions, vec![3]);
-        assert_eq!(
-            allowed_intervals,
-            vec![vec![Interval::new(4, 1), Interval::new(8, 2)]]
-        );
+        let split = proposed_split(&strategy, &state);
+        assert_eq!((split.col, split.index, split.error_reduction), (0, 4, 5.0));
 
-        let mut rng = StdRng::seed_from_u64(42);
-        let result = sample_random_split(
-            &allowed_intervals,
-            &total_positions,
-            1.0,
-            1,
-            &mut rng,
-            &error_reductions,
-        );
-        assert!(result.is_some());
+        // A margin of 2 forbids positions 3..6, including both runner-up neighbours.
+        state = strategy.forbid_around_split(state, &split);
+        assert_eq!(state.split_strategy_state.total_positions, vec![3]);
+        let split = proposed_split(&strategy, &state);
+        assert_eq!((split.index, split.error_reduction), (7, 3.0));
     }
 
     #[test]
-    fn test_random_split_exact_initialization() {
-        let error_reductions = vec![
-            vec![
-                f64::NAN,
-                1.0,
-                2.0,
-                3.0,
-                4.0,
-                5.0,
-                f64::NAN,
-                f64::NAN,
-                8.0,
-                9.0,
-                10.0,
-            ], // column 0
-            vec![f64::NAN, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], // column 1
-        ];
-        let min_interval_samples = 2;
-        let (allowed_intervals, total_positions) =
-            initialize_intervals(&error_reductions, min_interval_samples);
+    fn best_prefers_a_better_resplit_until_the_consecutive_resplit_limit() {
+        let strategy = best(1, 0.0);
+        let gains = vec![NAN, 3.0, 3.0, NAN, 3.0, 3.0, NAN, 3.0];
+        let mut state = strategy.initialize(scored_state(vec![gains]));
+        state.boundaries[0] = vec![3];
+        let statistics = &mut state.precomputed_statistics;
+        statistics.error_reductions_resplit[0] = vec![20.0];
+        statistics.update_pairs_resplit_left[0] = vec![(0.0, 0.0)];
+        statistics.update_pairs_resplit_right[0] = vec![(0.0, 0.0)];
 
-        // Should have 2 features, each with intervals
-        assert_eq!(allowed_intervals.len(), 2);
-        assert_eq!(allowed_intervals[0].len(), 2);
-        assert_eq!(allowed_intervals[0][0], Interval::new(2, 4));
-        assert_eq!(allowed_intervals[0][1], Interval::new(8, 2));
-        assert_eq!(allowed_intervals[1].len(), 1);
-        assert_eq!(allowed_intervals[1][0], Interval::new(2, 7));
-        assert_eq!(total_positions, vec![6, 7]);
-    }
+        assert!(matches!(
+            propose(&strategy, &state),
+            Some(FittingAction::ApplyResplit { .. })
+        ));
 
-    #[test]
-    fn test_random_split_exact_multiple_splits() {
-        let error_reductions = vec![
-            vec![f64::NAN, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0], // column 0
-        ];
-        let min_interval_samples = 2;
-        let (allowed_intervals, total_positions) =
-            initialize_intervals(&error_reductions, min_interval_samples);
-
-        let mut rng = StdRng::seed_from_u64(42);
-
-        // Multiple splits should work
-        let result1 = sample_random_split(
-            &allowed_intervals,
-            &total_positions,
-            1.0,
-            1,
-            &mut rng,
-            &error_reductions,
-        );
-        assert!(result1.is_some());
-
-        let result2 = sample_random_split(
-            &allowed_intervals,
-            &total_positions,
-            1.0,
-            1,
-            &mut rng,
-            &error_reductions,
-        );
-        assert!(result2.is_some());
-
-        // Third split should still work (we're not modifying intervals between calls)
-        let result3 = sample_random_split(
-            &allowed_intervals,
-            &total_positions,
-            1.0,
-            1,
-            &mut rng,
-            &error_reductions,
-        );
-        assert!(result3.is_some());
-    }
-
-    #[test]
-    fn test_random_split_exact_nan_handling() {
-        let error_reductions = vec![
-            vec![f64::NAN, f64::NAN, 2.0, f64::NAN, 4.0], // column 0 with NaN values
-            vec![f64::NAN, 1.0, f64::NAN, 3.0, f64::NAN], // column 1 with NaN values
-        ];
-        let min_interval_samples = 1;
-        let (allowed_intervals, total_positions) =
-            initialize_intervals(&error_reductions, min_interval_samples);
-
-        let mut rng = StdRng::seed_from_u64(42);
-        let result = sample_random_split(
-            &allowed_intervals,
-            &total_positions,
-            1.0,
-            2,
-            &mut rng,
-            &error_reductions,
-        );
-        let (col, index, _interval_idx, _err) = result.unwrap();
-        assert!(!error_reductions[col][index].is_nan());
-    }
-
-    #[test]
-    fn test_random_split_filters_splits_below_min_split_loss() {
-        // Create minimal test data
-        let x = Array2::from_shape_vec(
-            (10, 1),
-            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
-        )
-        .unwrap();
-        let y = Array1::from_vec(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
-
-        // Create state
-        let mut state = FittingState::new(x.view(), y.view());
-
-        // Manually set error reductions with some below min_split_loss
-        state.precomputed_statistics.error_reductions_split[0] =
-            vec![f64::NAN, 0.1, 0.2, f64::NAN, 0.4, 0.5, f64::NAN, 0.3];
-        state.precomputed_statistics.initialized = true;
-
-        // Create strategy with high min_split_loss
-        let strategy = SplitStrategy::Random {
-            split_try: 1,
-            colsample_bytree: 1.0,
-            min_interval_samples: 1,
-            complexity_penalty: 0.0,
-            min_split_loss: 0.5, // Higher than all error reductions
-        };
-
-        state = strategy.initialize(state);
-
-        let mut rng = StdRng::seed_from_u64(42);
-        let action = strategy.propose_next_action(&state, &mut rng);
-
-        // Should return None because all splits are below min_split_loss
-        assert!(action.is_none());
-    }
-
-    // best_split_tests
-
-    #[test]
-    fn test_best_split_picks_resplit_if_better() {
-        use crate::grid_tensor::state::FittingState;
-        use ndarray::{Array1, Array2};
-
-        // Create minimal test data
-        let x = Array2::from_shape_vec(
-            (10, 1),
-            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
-        )
-        .unwrap();
-        let y = Array1::from_vec(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
-
-        // Create state
-        let mut state = FittingState::new(x.view(), y.view());
-
-        // Set up boundaries to enable resplit
-        state.boundaries[0] = vec![3, 7]; // Two intervals: [0,3) and [3,7) and [7,10)
-
-        // Set error reductions: split=1.0, resplit=2.0 (better)
-        state.precomputed_statistics.error_reductions_split[0] =
-            vec![f64::NAN, 1.0, 1.0, f64::NAN, 1.0, 1.0, f64::NAN, 1.0];
-        state.precomputed_statistics.error_reductions_resplit[0] = vec![2.0, 2.0]; // Two resplit candidates
-        state.precomputed_statistics.update_pairs_resplit_left[0] = vec![(0.0, 0.0), (0.0, 0.0)];
-        state.precomputed_statistics.update_pairs_resplit_right[0] = vec![(0.0, 0.0), (0.0, 0.0)];
-        state.precomputed_statistics.initialized = true;
-
-        // Create strategy
-        let strategy = SplitStrategy::Best {
-            min_interval_samples: 1,
-            complexity_penalty: 0.0,
-            min_split_loss: 0.0,
-        };
-
-        state = strategy.initialize(state);
-
-        let mut rng = StdRng::seed_from_u64(42);
-        let action = strategy.propose_next_action(&state, &mut rng);
-
-        // Should return a resplit action because resplit (2.0) > split (1.0)
-        match action {
-            Some(crate::grid_tensor::action::FittingAction::ApplyResplit { .. }) => {
-                // Expected: resplit action selected
-            }
-            _ => panic!("Expected resplit action, got: {:?}", action),
-        }
-    }
-
-    #[test]
-    fn test_best_split_prevents_consecutive_resplits() {
-        use crate::grid_tensor::{action::FittingAction, state::FittingState};
-        use ndarray::{Array1, Array2};
-
-        // Create minimal test data
-        let x = Array2::from_shape_vec(
-            (10, 1),
-            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
-        )
-        .unwrap();
-        let y = Array1::from_vec(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
-
-        // Create state
-        let mut state = FittingState::new(x.view(), y.view());
-
-        // Set up boundaries to enable resplit
-        state.boundaries[0] = vec![3]; // Two intervals: [0,3) and [3,10)
-
-        // Set error reductions: split=3.0 (best), resplit=2.0 (but consecutive prevention should make split win)
-        state.precomputed_statistics.error_reductions_split[0] =
-            vec![f64::NAN, 3.0, 3.0, f64::NAN, 3.0, 3.0, f64::NAN, 3.0];
-        state.precomputed_statistics.error_reductions_resplit[0] = vec![20.0]; // resplit with very high error reduction
-        state.precomputed_statistics.update_pairs_resplit_left[0] = vec![(0.0, 0.0)]; // u_plus=0, u_minus=0 means no change
-        state.precomputed_statistics.update_pairs_resplit_right[0] = vec![(0.0, 0.0)];
-        state.precomputed_statistics.initialized = true;
-
-        // Set last transformation to a resplit at the same position
-        let last_resplit = crate::grid_tensor::splitting::ResplitCandidate {
-            col: 0,
-            index: 3, // Same position as one of our resplit candidates
-            error_reduction: 2.0,
-            interval_idx: 0,
-            update_left: (0.0, 0.0),
-            update_right: (0.0, 0.0),
-        };
-        state.split_strategy_state.last_transformation = Some(FittingAction::ApplyResplit {
-            resplit: last_resplit,
-        });
-
-        // Create strategy
-        let strategy = SplitStrategy::Best {
-            min_interval_samples: 1,
-            complexity_penalty: 0.0,
-            min_split_loss: 0.0,
-        };
-
-        state = strategy.initialize(state);
-
-        let mut rng = StdRng::seed_from_u64(42);
-        let action = strategy.propose_next_action(&state, &mut rng);
-
-        // Should return a split action instead of resplit because consecutive resplit is prevented
-        match action {
-            Some(FittingAction::ApplySplit { .. }) => {
-                // Expected: split action selected instead of resplit
-            }
-            _ => panic!(
-                "Expected split action (consecutive resplit prevented), got: {:?}",
-                action
-            ),
-        }
-    }
-
-    #[test]
-    fn test_best_split_handles_forbidding_correctly() {
-        use crate::grid_tensor::state::FittingState;
-        use ndarray::{Array1, Array2};
-
-        // Create minimal test data
-        let x = Array2::from_shape_vec(
-            (10, 1),
-            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
-        )
-        .unwrap();
-        let y = Array1::from_vec(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
-
-        // Create state
-        let mut state = FittingState::new(x.view(), y.view());
-
-        // Set error reductions with clear best choice
-        state.precomputed_statistics.error_reductions_split[0] =
-            vec![f64::NAN, 1.0, 5.0, 3.0, 4.0, 2.0, f64::NAN, 1.0];
-        state.precomputed_statistics.initialized = true;
-
-        // Create strategy
-        let strategy = SplitStrategy::Best {
-            min_interval_samples: 1,
-            complexity_penalty: 0.0,
-            min_split_loss: 0.0,
-        };
-
-        state = strategy.initialize(state);
-
-        let mut rng = StdRng::seed_from_u64(42);
-        let action1 = strategy.propose_next_action(&state, &mut rng);
-
-        // Should pick the best split (5.0 at index 2)
-        match action1 {
-            Some(crate::grid_tensor::action::FittingAction::ApplySplit { split }) => {
-                assert_eq!(split.col, 0);
-                assert_eq!(split.index, 2);
-                assert_eq!(split.error_reduction, 5.0);
-            }
-            _ => panic!("Expected split action, got: {:?}", action1),
-        }
-
-        // After forbidding around the split, the same position should not be available
-        let split_candidate = crate::grid_tensor::splitting::SplitCandidate {
-            col: 0,
-            index: 2,
-            error_reduction: 5.0,
-            allowed_interval_idx: 0,
-            update_left: (0.0, 0.0),
-            update_right: (0.0, 0.0),
-        };
-        state = strategy.forbid_around_split(state, &split_candidate);
-        let action2 = strategy.propose_next_action(&state, &mut rng);
-
-        // Should pick the next best available split (4.0 at index 4)
-        match action2 {
-            Some(crate::grid_tensor::action::FittingAction::ApplySplit { split }) => {
-                assert_eq!(split.col, 0);
-                assert_eq!(split.index, 4); // Next best after forbidding index 2
-                assert_eq!(split.error_reduction, 4.0);
-            }
-            _ => panic!(
-                "Expected split action at different position, got: {:?}",
-                action2
-            ),
-        }
-    }
-
-    #[test]
-    fn test_best_split_nan_handling() {
-        let error_reductions = vec![vec![f64::NAN, f64::NAN, 3.0, f64::NAN, 2.0]];
-        let min_interval_samples = 1;
-        let (allowed_intervals, _) = initialize_intervals(&error_reductions, min_interval_samples);
-
-        let result = sample_best_split(&allowed_intervals, &error_reductions);
-        assert_eq!(result, Some((0, 2, 0, 3.0))); // Should pick 3.0 as it's better than 2.0
+        state.loop_state.consecutive_resplits = MAX_CONSECUTIVE_RESPLIT;
+        assert_eq!(proposed_split(&strategy, &state).error_reduction, 3.0);
     }
 }

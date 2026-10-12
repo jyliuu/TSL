@@ -1,3 +1,28 @@
+/// Floor for observation totals, backbone norms and `λ±` during identification.
+pub(crate) const EPS: f64 = 1e-12;
+
+/// Center one axis's tilts at their observation-weighted mean and return that mean;
+/// `None` leaves an axis without bins or observations unchanged.
+pub(crate) fn center_tilt_axis(tilt: &mut [f64], counts: &[usize]) -> Option<f64> {
+    if counts.is_empty() || tilt.is_empty() {
+        return None;
+    }
+    let weights_sum: f64 = counts.iter().sum::<usize>() as f64;
+    if weights_sum <= EPS {
+        return None;
+    }
+    let mean = tilt
+        .iter()
+        .zip(counts.iter())
+        .map(|(&x, &w)| x * w as f64)
+        .sum::<f64>()
+        / weights_sum;
+    for x in tilt.iter_mut() {
+        *x -= mean;
+    }
+    Some(mean)
+}
+
 /// L2 identification / normalization (prediction-preserving).
 ///
 /// - Backbone weighted L2 normalization per axis (pushes scale into λ_±)
@@ -10,7 +35,6 @@ pub fn l2_identify(
     lambda_plus: &mut f64,
     lambda_minus: &mut f64,
 ) {
-    const EPS: f64 = 1e-12;
     debug_assert_eq!(backbone_values.len(), tilt_values.len());
     debug_assert_eq!(backbone_values.len(), observation_counts.len());
 
@@ -44,25 +68,9 @@ pub fn l2_identify(
     // 8.2 Tilt centering: d_j^k <- d_j^k - c_j, λ_+ *= exp(Σ c_j), λ_- *= exp(-Σ c_j)
     let mut c_sum = 0.0;
     for dim in 0..tilt_values.len() {
-        let counts = &observation_counts[dim];
-        let d = &mut tilt_values[dim];
-        if counts.is_empty() || d.is_empty() {
-            continue;
+        if let Some(mean) = center_tilt_axis(&mut tilt_values[dim], &observation_counts[dim]) {
+            c_sum += mean;
         }
-        let weights_sum: f64 = counts.iter().sum::<usize>() as f64;
-        if weights_sum <= EPS {
-            continue;
-        }
-        let mean = d
-            .iter()
-            .zip(counts.iter())
-            .map(|(&x, &w)| x * w as f64)
-            .sum::<f64>()
-            / weights_sum;
-        for x in d.iter_mut() {
-            *x -= mean;
-        }
-        c_sum += mean;
     }
 
     *lambda_plus *= c_sum.exp();

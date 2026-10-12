@@ -19,7 +19,7 @@ This is a Cargo workspace (root crate `tsl_rust` + member `tsl-py`).
 ```sh
 cargo build --release
 cargo test -p tsl_rust --release                       # full core test suite (owns tests/)
-cargo test -p tsl_rust --release test_fit_result_is_correct   # single test by name
+cargo test -p tsl_rust --release fit_result_and_grid_reproduce_the_fitted_predictions   # single test by name
 cargo test --release --test forest                     # one integration-test file (tests/forest.rs)
 ```
 The core is pure Rust — no system libraries are required to build. Default cargo features
@@ -124,15 +124,16 @@ quantile-binning of split candidates in `histogram_binning.rs` (the `max_bins` p
 Parameters use builder types throughout (`params.rs` in each module; the top-level
 `TSLBoostedParamsBuilder` in `src/forest/params.rs` flattens them).
 
-### Python layer (`tsl-py/src/lib.rs`)
+### Python layer (`tsl-py/src/`)
 
-PyO3 module `tensorsl._tensorsl` exposes `TSL`, `GridTensor`, `StagePredictor`, `FitResult`.
+PyO3 module `tensorsl._tensorsl` (registered in `lib.rs`, one module per class) exposes
+`TSL`, `GridTensor`, `StagePredictor`, `FitResult`.
 `TSL.fit(...)` is a classmethod taking flat hyperparameters (mapped onto the Rust
 builders). `TSLRegressor` (`python/tensorsl/sklearn.py`) is the sklearn-compatible wrapper —
 the main user entry point. Partial dependence is computed in Rust
 (`compute_partial_dependence_function`, marginalizing over the empirical joint, not
 assuming feature independence). `tensorsl.plot` (lazy-imported, needs matplotlib) holds the
-diagnostics. `TSL.load(...)` reads the legacy MPF `.bin` format.
+diagnostics. `TSL.save`/`TSL.load` write and read the model as bincode.
 
 ### evo-logging → dashboard
 
