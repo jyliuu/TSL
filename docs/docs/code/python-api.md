@@ -30,8 +30,8 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
              min_split_loss=0.0, min_interval_samples=1, refinement_strategy="l2",
              update_clamp=float("inf"), tilt_tau=0.01,
              tilt_rho=0.0, split_strategy="random", top_k=10, must_fill_all_k=True,
-             similarity_threshold=0.0, consensus=0.0, seed=42, verbosity=1,
-             visualdb=None)
+             similarity_threshold=0.0, consensus=0.0, bootstrap=True, seed=42,
+             verbosity=1, visualdb=None)
 ```
 
 **Parameters**
@@ -57,6 +57,7 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
 | `must_fill_all_k` | `bool` | `True` | (for `top_k`) require all $k$ slots |
 | `similarity_threshold` | `float` | `0.0` | bag trim $\xi$ (`0` keeps all) |
 | `consensus` | `float` | `0.0` | lockstep [consensus](../math/bagging-aggregation.md#consensus-fitting) strength $\rho\ge0$ (`0` fits grids independently) |
+| `bootstrap` | `bool` | `True` | fit each grid of an independent bag (`consensus=0`, `n_trees > 1`) to its own [bootstrap resample](../math/bagging-aggregation.md#bootstrap-resampling) of the rows; `False` fits every grid to all rows |
 | `seed` | `int` | `42` | RNG seed (fits are deterministic) |
 | `verbosity` | `int` | `1` | log verbosity |
 | `visualdb` | `str | None` | `None` | evo-logging SQLite path |
@@ -72,7 +73,7 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
 ### `fit` { #meth-tslregressor-fit }
 
 ```python
-TSLRegressor.fit(X, y) -> TSLRegressor
+TSLRegressor.fit(X, y, sample_weight=None) -> TSLRegressor
 ```
 
 Fit the model. Delegates to [`TSL.fit`](#cmeth-tsl-fit), storing the fitted core model in
@@ -84,6 +85,7 @@ Fit the model. Delegates to [`TSL.fit`](#cmeth-tsl-fit), storing the fitted core
 |------|------|:--:|-------------|
 | `X` | `ndarray (n_samples, n_features)` | _required_ | training features (array or DataFrame) |
 | `y` | `ndarray (n_samples,)` | _required_ | training targets |
+| `sample_weight` | `ndarray (n_samples,) | None` | `None` | nonnegative per-row weights $s_i$ of the loss $\sum_i s_i\,(y_i-\hat m(x_i))^2$, passed to [`TSL.fit`](#cmeth-tsl-fit); `None` weighs every row by one |
 
 **Returns**
 
@@ -187,7 +189,8 @@ TSL.fit(x, y, epochs, decay, n_trees, n_iter, split_try, colsample_bysplit, alph
         update_clamp, tilt_tau, tilt_rho, split_strategy, top_k,
         must_fill_all_k, similarity_threshold, consensus, seed, verbosity,
         visualdb=None, *, max_bins=None, consensus_interval=1,
-        nonnegative_scaling=False, consensus_anchors=None)
+        nonnegative_scaling=False, consensus_anchors=None, bootstrap=True,
+        sample_weight=None)
         -> tuple[TSL, FitResult]
 ```
 
@@ -204,6 +207,8 @@ Fit a boosted TSL model.
 | `consensus_interval` | `int` | `1` | keyword-only maximum local action attempts per frozen peer reference; must be at least 1; used when `consensus > 0` and `n_trees > 1` |
 | `consensus_anchors` | `int | None` | `None` | keyword-only training-row sample size for the consensus penalty; positive integers below the training row count sample that many shared anchors; `None` or a count at least the training row count uses every row |
 | `nonnegative_scaling` | `bool` | `False` | keyword-only constraint on the joint outer branch coefficients; `True` uses bounded nonnegative least squares |
+| `bootstrap` | `bool` | `True` | keyword-only; fit each grid of an independent bag (`consensus=0`, `n_trees > 1`) to its own [bootstrap resample](../math/bagging-aggregation.md#bootstrap-resampling) of the rows; `False` fits every grid to all rows |
+| `sample_weight` | `ndarray (n_samples,) | None` | `None` | keyword-only per-row weights $s_i$ of the loss $\sum_i s_i\,(y_i-\hat m(x_i))^2$; finite, nonnegative, one per row, with a positive sum; `None` weighs every row by one |
 
 `max_bins` limits candidate split locations per feature, while `n_iter` controls
 the grid's structural budget. Histogram boundaries snap past blocks of equal
@@ -230,8 +235,22 @@ to zero. The bounded active-set solver retains the best feasible training-loss
 incumbent, including the preceding model with zero coefficients for the new stage.
 See [coefficient backfitting](../math/fitting.md#coefficient-backfitting).
 
-These keyword-only options are available on native `TSL.fit` and the Rust
-builders. The `TSLRegressor` constructor does not expose them.
+`max_bins`, `consensus_interval`, `consensus_anchors` and `nonnegative_scaling` are
+available on native `TSL.fit` and the Rust builders. The `TSLRegressor` constructor does
+not expose them.
+
+`sample_weight` is also an argument of
+[`TSLRegressor.fit`](#meth-tslregressor-fit). It multiplies each row's squared residual and its
+[branch-consensus](../math/bagging-aggregation.md#consensus-fitting) term in every grid
+fit, and the [coefficient backfit](../math/fitting.md#coefficient-backfitting) solves the
+same weighted least squares. The weights are rescaled to mean one, so `alpha`,
+`tilt_tau`, `tilt_rho`, `min_split_loss`, `complexity_penalty` and `consensus` keep the
+scale they have in an unweighted fit, and multiplying every weight by a constant leaves
+the objective unchanged. `min_interval_samples` counts rows, whatever their weight. A
+weighted fit reports the weighted mean squared residual $\sum_i s_i r_i^2/\sum_i s_i$ in
+`FitResult.err`. Weights of the wrong length, negative or non-finite weights, and
+weights summing to zero raise `ValueError`. See
+[Rust: weighted fits](forest.md#weighted-fits).
 
 **Returns**
 
@@ -520,6 +539,6 @@ Training diagnostics, returned alongside a fitted model.
 
 | Name | Type | Description |
 |------|------|-------------|
-| `err` | `float` | final training loss |
+| `err` | `float` | final training loss: the mean squared residual, weighted by `sample_weight` in a weighted fit |
 | `residuals` | `ndarray (n_samples,)` | training residuals |
 | `y_hat` | `ndarray (n_samples,)` | training predictions |

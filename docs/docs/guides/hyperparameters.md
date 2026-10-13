@@ -7,6 +7,13 @@ and `TSL.fit(...)`, and mapped onto the nested Rust
 (`SplitStrategyParams`, `RefinementStrategyParams`). Defaults below are the `TSLRegressor`
 constructor defaults; native-only options are listed separately.
 
+!!! note "Sample weights"
+    The `sample_weight` argument of
+    [`TSLRegressor.fit`](../code/python-api.md#meth-tslregressor-fit) and
+    [`TSL.fit`](../code/python-api.md#cmeth-tsl-fit) is rescaled to mean one, so the
+    penalties below and `min_split_loss` keep the scale they have in an unweighted fit.
+    `min_interval_samples` counts rows, whatever their weight.
+
 ## Boosting (forest level)
 
 | Param | Default | Meaning |
@@ -24,6 +31,7 @@ constructor defaults; native-only options are listed separately.
 | `n_trees` | `10` | grid tensors fit per stage ($n_{\text{grids}}$); more reduces variance |
 | `similarity_threshold` | `0.0` | trim $\xi$ — keep top $\lceil(1-\xi)n_{\text{trees}}\rceil$ bags by similarity (`0` keeps all) |
 | `consensus` | `0.0` | [consensus](../math/bagging-aggregation.md#consensus-fitting) strength $\rho$: penalize disagreement with the other grids' training branches (`0` fits grids independently) |
+| `bootstrap` | `True` | fit each grid of an independent bag (`consensus=0`, `n_trees > 1`) to its own [bootstrap resample](../math/bagging-aggregation.md#bootstrap-resampling) of the rows; `False` fits every grid to all rows, so the grids differ only in their random split proposals |
 
 The aggregation mode (`Mean` / `GeometricMean` / `Combined`) is set internally; see
 [Bagging & aggregation](../math/bagging-aggregation.md).
