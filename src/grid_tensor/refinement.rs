@@ -143,7 +143,7 @@ mod tests {
     use rand::{rngs::StdRng, SeedableRng};
 
     use crate::grid_tensor::{
-        fit::{fit_step, initialize_state_with_input},
+        fit::{fit_step, initialize_state_with_input, initialize_weighted_state},
         params::{
             GridTensorParams, GridTensorParamsBuilder, RefinementStrategyParamsBuilder,
             SplitStrategyParamsBuilder,
@@ -211,12 +211,19 @@ mod tests {
     fn fitted_state<'a>(
         x: &'a Array2<f64>,
         y: &'a Array1<f64>,
+        sample_weight: Option<&'a Array1<f64>>,
         max_bins: Option<u16>,
         huber: bool,
         complexity_penalty: f64,
     ) -> (FittingState<'a>, RefinementStrategy) {
         let params = params(max_bins, huber, complexity_penalty);
-        let state = initialize_state_with_input(x.view(), y.view(), &params, None);
+        let state = initialize_weighted_state(
+            x.view(),
+            y.view(),
+            sample_weight.map(|weights| weights.view()),
+            &params,
+            None,
+        );
         (
             fit(state, &params, 7),
             params.refinement_strategy_params.get_refinement_strategy(),
@@ -279,17 +286,25 @@ mod tests {
     }
 
     /// The row caches, binned prefix sums and every split, resplit and merge score are
-    /// maintained incrementally after each action; a full rebuild must reproduce them.
+    /// maintained incrementally after each action; a full rebuild must reproduce them,
+    /// with or without sample weights.
     #[test]
     fn refresh_reproduces_incremental_caches() {
         let mut merged = false;
-        for signed in [false, true] {
+        let weights = Array1::from_shape_fn(240, |i| ((i * 7) % 5) as f64 / 2.0);
+        for (signed, weighted) in [(false, false), (true, false), (false, true), (true, true)] {
             for max_bins in [None, Some(16)] {
                 for huber in [false, true] {
                     for complexity_penalty in [0.0, 0.5] {
                         let (x, y, _) = data(signed);
-                        let (state, strategy) =
-                            fitted_state(&x, &y, max_bins, huber, complexity_penalty);
+                        let (state, strategy) = fitted_state(
+                            &x,
+                            &y,
+                            weighted.then_some(&weights),
+                            max_bins,
+                            huber,
+                            complexity_penalty,
+                        );
                         assert!(!state.boundaries.iter().all(Vec::is_empty));
                         merged |= state.loop_state.merge_count > 0;
                         let rebuilt = strategy.refresh_statistics(state.clone());
@@ -385,7 +400,7 @@ mod tests {
                 let pulled = fit(strategy.refresh_statistics(pulled), &params, 5);
                 assert_caches_close(&strategy.refresh_statistics(pulled.clone()), &pulled);
 
-                let (plain, _) = fitted_state(&x, &y, max_bins, huber, 0.0);
+                let (plain, _) = fitted_state(&x, &y, None, max_bins, huber, 0.0);
                 let mut cleared = plain.clone();
                 cleared.branch_consensus = Some(consensus(&other, 1.5));
                 cleared = strategy.refresh_statistics(cleared);
