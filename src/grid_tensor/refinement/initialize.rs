@@ -17,8 +17,9 @@ impl RefinementStrategy {
         max_bins: Option<u16>,
     ) -> FittingState<'a> {
         self.assert_valid_update_clamp();
-        // Check if Stage 1 positive-only mode: all residuals are nonnegative
-        let is_stage1 = state.residuals.iter().all(|&r| r >= 0.0);
+        // Stage-1 positive-only mode: every row that carries weight has a nonnegative residual.
+        let is_stage1 =
+            (0..state.n).all(|i| state.residuals[i] >= 0.0 || state.sample_weight(i) == 0.0);
 
         // Initialize two-tensor lambdas from current outer residuals (labels - stage prediction).
         const EPS_LAMBDA: f64 = 1e-10;
