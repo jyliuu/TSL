@@ -35,6 +35,7 @@ def fitted():
         n_iter=8,
         split_try=4,
         colsample_bysplit=1.0,
+        bootstrap=False,
         seed=0,
         verbosity=0,
     )
@@ -47,7 +48,8 @@ def fitted_2stage():
     normalization is defined where each stage's OLS scaling stays non-negative,
     which holds while the model is not staged past this toy signal's effective
     rank; a third stage here lands on a near-collinear system whose scaling can
-    turn negative."""
+    turn negative. Every grid fits all rows, so the staged system stays the one
+    these checks were built on."""
     rng = np.random.RandomState(0)
     n, p = 400, 4
     X = rng.randn(n, p)
@@ -59,6 +61,7 @@ def fitted_2stage():
         n_iter=8,
         split_try=4,
         colsample_bysplit=1.0,
+        bootstrap=False,
         seed=0,
         verbosity=0,
     )

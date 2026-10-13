@@ -40,6 +40,7 @@ pub struct BoostedFitOptions<'a> {
     pub consensus_interval: usize,
     pub nonnegative_scaling: bool,
     pub consensus_anchors: Option<usize>,
+    pub bootstrap: bool,
 }
 
 impl BoostedFitOptions<'_> {
@@ -82,6 +83,7 @@ impl BoostedFitOptions<'_> {
             .consensus_interval(self.consensus_interval)
             .nonnegative_scaling(self.nonnegative_scaling)
             .consensus_anchors(self.consensus_anchors)
+            .bootstrap(self.bootstrap)
             .max_bins(self.max_bins)
             .seed(self.seed)
             .log_level(match self.verbosity {

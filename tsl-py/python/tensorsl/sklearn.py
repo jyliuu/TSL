@@ -98,6 +98,11 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         where ``c_plus`` and ``c_minus`` are the mean branches of the other grids. The
         grids converge to one latent representation; the term also damps updates.
         ``0.0`` fits the grids independently.
+    bootstrap : bool, default=True
+        Fit each grid of an independent bag (``consensus=0``, ``n_trees > 1``) to its
+        own bootstrap resample of the rows: a row's weight is multiplied by the number
+        of times it is drawn in ``n`` draws with replacement. ``False`` fits every grid
+        to all rows, so the grids differ only in their random split proposals.
     seed : int, default=42
         Random seed for reproducibility.
     verbosity : int, default=1
@@ -137,6 +142,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         must_fill_all_k: bool = True,
         similarity_threshold: float = 0.0,
         consensus: float = 0.0,
+        bootstrap: bool = True,
         seed: int = 42,
         verbosity: int = 1,
         visualdb: Optional[str] = None,
@@ -166,6 +172,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         self.must_fill_all_k = must_fill_all_k
         self.similarity_threshold = similarity_threshold
         self.consensus = consensus
+        self.bootstrap = bootstrap
         self.seed = seed
         self.verbosity = verbosity
         self.visualdb = visualdb
@@ -218,6 +225,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
             must_fill_all_k=self.must_fill_all_k,
             similarity_threshold=self.similarity_threshold,
             consensus=self.consensus,
+            bootstrap=self.bootstrap,
             seed=self.seed,
             verbosity=self.verbosity,
             visualdb=self.visualdb,

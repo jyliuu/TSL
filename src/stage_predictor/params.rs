@@ -19,6 +19,8 @@ pub struct StagePredictorParams {
     pub consensus_interval: usize,
     /// Optional uniform training-row sample for the branch-consensus penalty.
     pub consensus_anchors: Option<usize>,
+    /// Fit every grid of an independent bag to its own bootstrap resample of the rows.
+    pub bootstrap: bool,
 }
 
 #[derive(Debug)]
@@ -30,6 +32,7 @@ pub struct StagePredictorParamsBuilder {
     consensus: f64,
     consensus_interval: usize,
     consensus_anchors: Option<usize>,
+    bootstrap: bool,
 }
 
 impl StagePredictorParamsBuilder {
@@ -42,6 +45,7 @@ impl StagePredictorParamsBuilder {
             consensus: 0.0,
             consensus_interval: 1,
             consensus_anchors: None,
+            bootstrap: true,
         }
     }
 
@@ -85,6 +89,14 @@ impl StagePredictorParamsBuilder {
         self
     }
 
+    /// Fit each grid of an independent bag (`consensus` 0, at least two grids) to a
+    /// bootstrap resample: row `i` is weighted by the number of times it is drawn in `n`
+    /// draws with replacement. A consensus bag fits every grid to all rows.
+    pub fn bootstrap(mut self, bootstrap: bool) -> Self {
+        self.bootstrap = bootstrap;
+        self
+    }
+
     pub fn n_iter(mut self, n_iter: usize) -> Self {
         self.tg_params_builder = self.tg_params_builder.n_iter(n_iter);
         self
@@ -114,6 +126,7 @@ impl StagePredictorParamsBuilder {
             consensus: self.consensus,
             consensus_interval: self.consensus_interval,
             consensus_anchors: self.consensus_anchors,
+            bootstrap: self.bootstrap,
         }
     }
 }

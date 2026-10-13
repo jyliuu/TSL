@@ -312,6 +312,7 @@ impl TSLPy {
         consensus_interval=1,
         nonnegative_scaling=false,
         consensus_anchors=None,
+        bootstrap=true,
         sample_weight=None
     ))]
     #[allow(clippy::too_many_arguments)]
@@ -345,6 +346,7 @@ impl TSLPy {
         consensus_interval: usize,
         nonnegative_scaling: bool,
         consensus_anchors: Option<usize>,
+        bootstrap: bool,
         sample_weight: Option<PyReadonlyArray1<'py, f64>>,
     ) -> PyResult<(TSLPy, FitResultPy)> {
         let options = BoostedFitOptions {
@@ -374,6 +376,7 @@ impl TSLPy {
             consensus_interval,
             nonnegative_scaling,
             consensus_anchors,
+            bootstrap,
         };
         options.validate()?;
         let x = x.as_array();
