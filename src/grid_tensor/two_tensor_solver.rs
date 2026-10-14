@@ -222,8 +222,12 @@ struct Quadratic {
     tolerance: f64,
 }
 
+// `SolverParams::solve` runs once per candidate split position. Inlining these
+// methods keeps the scaled system in registers instead of writing it to the
+// stack on every call, which dominates exact-candidate fits.
 impl Quadratic {
     /// `None` for a zero, non-finite or indefinite system.
+    #[inline(always)]
     fn new(a11: f64, a12: f64, a22: f64) -> Option<Self> {
         let scale = a11.abs().max(a12.abs()).max(a22.abs());
         if scale <= 0.0 || !scale.is_finite() {
@@ -251,11 +255,13 @@ impl Quadratic {
     }
 
     /// Whether the system has a numerically null direction.
+    #[inline(always)]
     fn rank_deficient(&self) -> bool {
         self.determinant <= self.tolerance
     }
 
     /// Minimum-norm solution with numerically null directions truncated.
+    #[inline(always)]
     fn solve(&self, t1: f64, t2: f64) -> Option<(f64, f64)> {
         let Self {
             a,
@@ -297,6 +303,7 @@ impl Quadratic {
     }
 
     /// Common update `u_+ = u_-` minimizing the quadratic along the zero-tilt direction.
+    #[inline(always)]
     fn zero_tilt(&self, t1: f64, t2: f64) -> Option<f64> {
         let trace = self.a + self.c;
         let curvature = trace + 2.0 * self.b;
