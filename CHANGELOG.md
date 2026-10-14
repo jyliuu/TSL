@@ -4,6 +4,41 @@ All notable changes to TSL are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com) and the project adheres to
 [Semantic Versioning](https://semver.org).
 
+## [0.6.0] - 2026-10-14
+
+### Breaking changes
+
+- Bagged fits (`n_trees > 1`, `consensus=0`) fit each grid to its own bootstrap
+  resample of the rows by default, in Rust and Python, so fitted models differ from
+  0.5.0. Pass `bootstrap=False` (Rust: `.bootstrap(false)`) to fit every grid to all
+  rows (#52)
+- `TSLRegressor` and `TSL.fit` default to `max_bins=4095` quantile bins per feature
+  instead of every distinct value, so default Python fits differ from 0.5.0. Pass
+  `max_bins="exact"` for every distinct value; `TSL.fit(max_bins=None)` still selects
+  it. The Rust builders keep every distinct value by default (#54)
+
+### Features
+
+- **stage:** Bagged grids fit bootstrap resamples again (`bootstrap`), restoring the
+  row resampling of bagging (#52)
+- **forest:** Fits take per-row sample weights: `fit_boosted_weighted` in Rust and
+  `sample_weight=` on `TSLRegressor.fit` and `TSL.fit` (#52)
+- **tsl-py:** `TSLRegressor` accepts `max_bins`: an integer of at least 2 for quantile
+  bins, or `"exact"` (#54)
+
+### Performance
+
+- Exact-candidate fits are about 1.4× faster (33 s → 24 s on the California housing
+  test configuration) with bit-identical models (#53)
+- At the 4095-bin default, Python fits are 1.2–5× faster than with exact candidates
+  on eight OpenML datasets, with similar accuracy (#54)
+
+### Documentation
+
+- Sample weights and bootstrap resampling, with a bootstrap section in the bagging
+  math page (#52)
+- The hyperparameters guide explains how `max_bins` picks split candidates (#54)
+
 ## [0.5.0] - 2026-10-12
 
 ### Breaking changes
