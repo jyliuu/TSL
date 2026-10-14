@@ -2,7 +2,7 @@
 Scikit-learn compatible wrappers for TSL models.
 """
 
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 from sklearn.utils.validation import check_array, check_X_y
@@ -103,6 +103,13 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         own bootstrap resample of the rows: a row's weight is multiplied by the number
         of times it is drawn in ``n`` draws with replacement. ``False`` fits every grid
         to all rows, so the grids differ only in their random split proposals.
+    max_bins : int or "exact", default=4095
+        Split candidates per feature. An integer of at least 2 limits candidates to
+        the edges of up to that many quantile bins of the feature, so a feature with
+        at most that many distinct values keeps every one; ``"exact"`` (or ``None``)
+        considers every distinct value. Binned fits are faster than ``"exact"`` even
+        when they keep every candidate, and score far fewer on features with more
+        distinct values than bins.
     seed : int, default=42
         Random seed for reproducibility.
     verbosity : int, default=1
@@ -143,6 +150,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         similarity_threshold: float = 0.0,
         consensus: float = 0.0,
         bootstrap: bool = True,
+        max_bins: Union[int, str, None] = 4095,
         seed: int = 42,
         verbosity: int = 1,
         visualdb: Optional[str] = None,
@@ -173,6 +181,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         self.similarity_threshold = similarity_threshold
         self.consensus = consensus
         self.bootstrap = bootstrap
+        self.max_bins = max_bins
         self.seed = seed
         self.verbosity = verbosity
         self.visualdb = visualdb
@@ -226,6 +235,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
             similarity_threshold=self.similarity_threshold,
             consensus=self.consensus,
             bootstrap=self.bootstrap,
+            max_bins=self.max_bins,
             seed=self.seed,
             verbosity=self.verbosity,
             visualdb=self.visualdb,

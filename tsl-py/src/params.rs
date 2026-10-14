@@ -1,6 +1,10 @@
 //! Maps the flat Python fit keyword arguments onto the core parameter builders.
 
-use pyo3::{exceptions::PyValueError, prelude::*};
+use pyo3::{
+    exceptions::{PyTypeError, PyValueError},
+    prelude::*,
+    types::{PyBool, PyString},
+};
 use tsl::{
     forest::params::{TSLBoostedParams, TSLBoostedParamsBuilder},
     grid_tensor::{
@@ -11,6 +15,62 @@ use tsl::{
         GridTensorParams, GridTensorParamsBuilder,
     },
 };
+
+/// Quantile bins per feature when a fit does not set `max_bins`.
+pub const DEFAULT_MAX_BINS: u16 = 4095;
+
+/// Split candidates per feature: every distinct value, or at most this many
+/// quantile bins. Python passes an integer of at least 2, or `"exact"` or `None`
+/// for every distinct value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MaxBins {
+    Exact,
+    Bins(u16),
+}
+
+impl MaxBins {
+    /// The core builders' form: `None` selects every distinct value.
+    pub fn bin_budget(self) -> Option<u16> {
+        match self {
+            MaxBins::Exact => None,
+            MaxBins::Bins(bins) => Some(bins),
+        }
+    }
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for MaxBins {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        if obj.is_none() {
+            return Ok(MaxBins::Exact);
+        }
+        if obj.is_instance_of::<PyString>() {
+            let name: String = obj.extract()?;
+            return if name == "exact" {
+                Ok(MaxBins::Exact)
+            } else {
+                Err(PyValueError::new_err(format!(
+                    "max_bins must be an integer of at least 2 or 'exact', got '{name}'"
+                )))
+            };
+        }
+        let not_an_integer =
+            || PyTypeError::new_err("max_bins must be an integer of at least 2 or 'exact'");
+        if obj.is_instance_of::<PyBool>() {
+            return Err(not_an_integer());
+        }
+        let bins: i64 = obj.extract().map_err(|_| not_an_integer())?;
+        if bins < 2 {
+            return Err(PyValueError::new_err(format!(
+                "max_bins must be at least 2, or 'exact' for every distinct value; got {bins}"
+            )));
+        }
+        u16::try_from(bins).map(MaxBins::Bins).map_err(|_| {
+            PyValueError::new_err(format!("max_bins must be at most {}, got {bins}", u16::MAX))
+        })
+    }
+}
 
 /// The keyword arguments of `TSL.fit` that configure the boosted fit.
 pub struct BoostedFitOptions<'a> {
@@ -36,7 +96,7 @@ pub struct BoostedFitOptions<'a> {
     pub seed: u64,
     pub verbosity: u8,
     pub visualdb: Option<String>,
-    pub max_bins: Option<u16>,
+    pub max_bins: MaxBins,
     pub consensus_interval: usize,
     pub nonnegative_scaling: bool,
     pub consensus_anchors: Option<usize>,
@@ -51,9 +111,6 @@ impl BoostedFitOptions<'_> {
             return Err(PyValueError::new_err(format!(
                 "consensus must be finite and nonnegative, got {consensus}"
             )));
-        }
-        if self.max_bins.is_some_and(|bins| bins < 2) {
-            return Err(PyValueError::new_err("max_bins must be at least 2"));
         }
         if self.consensus_interval == 0 {
             return Err(PyValueError::new_err(
@@ -84,7 +141,7 @@ impl BoostedFitOptions<'_> {
             .nonnegative_scaling(self.nonnegative_scaling)
             .consensus_anchors(self.consensus_anchors)
             .bootstrap(self.bootstrap)
-            .max_bins(self.max_bins)
+            .max_bins(self.max_bins.bin_budget())
             .seed(self.seed)
             .log_level(match self.verbosity {
                 0 => "off",

@@ -47,13 +47,12 @@ The aggregation mode (`Mean` / `GeometricMean` / `Combined`) is set internally; 
 | `min_interval_samples` | `1` | minimum observations on each side of a split |
 | `min_split_loss` | `0.0` | minimum objective reduction to accept any structural action |
 | `complexity_penalty` | `0.0` | fixed-scale boundary cost used by split, resplit, and merge (`0.0` disables merge candidates) |
+| `max_bins` | `4095` | split candidates per feature: the edges of up to that many quantile bins, or `"exact"` for every distinct value |
 | `top_k` | `10` | (for `top_k`) sample from the top-$k$ candidates |
 | `must_fill_all_k` | `True` | (for `top_k`) require all $k$ slots filled |
 
-The native [`TSL.fit`](../code/python-api.md#cmeth-tsl-fit) method also accepts the
-keyword-only `max_bins` option. `None` uses all eligible distinct-value positions;
-an integer of at least 2 limits candidates to quantile boundaries. This controls
-search resolution separately from `n_iter` and leaves bag randomization in place.
+`max_bins` controls search resolution separately from `n_iter` and leaves bag
+randomization in place; see [how `max_bins` picks split candidates](#how-max_bins-picks-split-candidates).
 
 !!! tip "Choosing a split strategy"
     `random` (the default) is usually best for speed and generalizes well; `best_split`
@@ -64,6 +63,39 @@ search resolution separately from `n_iter` and leaves bag randomization in place
     grid's initial loss scale. Splits pay the cost, resplits leave it unchanged, and merges
     recover it. Start with a small value such as `0.01`, measure validation error and
     boundary count, and increase it when a smaller model is worth the extra bias.
+
+### How `max_bins` picks split candidates { #how-max_bins-picks-split-candidates }
+
+For each feature, before fitting:
+
+1. The training rows are sorted by the feature. A split can only fall between two
+   different values, so the possible split points are the boundaries where the sorted
+   value changes; tied values always stay on the same side. This holds for `"exact"`
+   as well.
+2. If the feature has at most $B$ = `max_bins` distinct values, every boundary is kept,
+   and the candidates are the same as with `"exact"`.
+3. Otherwise the cut points target equal-count bins. With $n$ training rows, the $k$-th
+   target is sorted position $\lfloor kn/B\rfloor$ for $k=1,\dots,B-1$. Each target moves
+   to the nearest boundary (the lower one on a tie), and targets that land on the same
+   boundary are merged, so a feature with long runs of tied values gets fewer than $B$
+   bins.
+
+For example, take ten rows whose sorted values are `1 1 1 2 2 3 4 4 4 5`:
+
+| `max_bins` | bins | split candidates |
+|:--:|---|---|
+| `3` | `{1,1,1}` `{2,2,3}` `{4,4,4,5}` | between 1 and 2, between 3 and 4 |
+| `5` or more | one bin per value | every boundary, as with `"exact"` |
+
+During the fit each feature's sufficient statistics are kept per bin instead of per
+row. Scoring a candidate is a constant-time lookup, and the update after each action
+adds every affected row's change to its bin and sweeps the $B$ bins rather than the
+$n$ sorted rows. A binned fit is therefore faster than `"exact"` even when it keeps
+every candidate: a feature with 52 distinct values over 16,512 rows is swept as 52
+bins. Such a fit is not bit-identical to the `"exact"` one, because its statistics
+are accumulated per bin. The scoring itself is unchanged; see
+[search and stopping](../math/fitting.md#search-boundary-budget-and-stopping) and
+[GridTensor: histogram binning](../code/grid-tensor.md#histogram-binning).
 
 ## Refinement solver (per node)
 
@@ -96,7 +128,6 @@ available through the Rust builders. They are not `TSLRegressor` constructor arg
 
 | Param | Default | Meaning |
 |-------|:------:|---------|
-| `max_bins` | `None` | quantile candidate budget; integers must be at least 2 |
 | `consensus_interval` | `1` | maximum action attempts per grid against a frozen peer reference; must be at least 1 |
 | `consensus_anchors` | `None` | positive training-row sample size for the consensus penalty; `None` or a count at least the training row count uses the full-row path |
 | `nonnegative_scaling` | `False` | constrain the joint outer branch coefficients to be nonnegative using a bounded active-set least-squares solve |

@@ -30,8 +30,8 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
              min_split_loss=0.0, min_interval_samples=1, refinement_strategy="l2",
              update_clamp=float("inf"), tilt_tau=0.01,
              tilt_rho=0.0, split_strategy="random", top_k=10, must_fill_all_k=True,
-             similarity_threshold=0.0, consensus=0.0, bootstrap=True, seed=42,
-             verbosity=1, visualdb=None)
+             similarity_threshold=0.0, consensus=0.0, bootstrap=True, max_bins=4095,
+             seed=42, verbosity=1, visualdb=None)
 ```
 
 **Parameters**
@@ -58,6 +58,7 @@ TSLRegressor(epochs=10, n_trees=10, n_iter=10, decay=1.0, split_try=10,
 | `similarity_threshold` | `float` | `0.0` | bag trim $\xi$ (`0` keeps all) |
 | `consensus` | `float` | `0.0` | lockstep [consensus](../math/bagging-aggregation.md#consensus-fitting) strength $\rho\ge0$ (`0` fits grids independently) |
 | `bootstrap` | `bool` | `True` | fit each grid of an independent bag (`consensus=0`, `n_trees > 1`) to its own [bootstrap resample](../math/bagging-aggregation.md#bootstrap-resampling) of the rows; `False` fits every grid to all rows |
+| `max_bins` | `int | "exact"` | `4095` | split candidates per feature: an integer of at least 2 limits them to the edges of up to that many quantile bins; `"exact"` (or `None`) considers every distinct value |
 | `seed` | `int` | `42` | RNG seed (fits are deterministic) |
 | `verbosity` | `int` | `1` | log verbosity |
 | `visualdb` | `str | None` | `None` | evo-logging SQLite path |
@@ -188,7 +189,7 @@ TSL.fit(x, y, epochs, decay, n_trees, n_iter, split_try, colsample_bysplit, alph
         complexity_penalty, min_split_loss, min_interval_samples, refinement_strategy,
         update_clamp, tilt_tau, tilt_rho, split_strategy, top_k,
         must_fill_all_k, similarity_threshold, consensus, seed, verbosity,
-        visualdb=None, *, max_bins=None, consensus_interval=1,
+        visualdb=None, *, max_bins=4095, consensus_interval=1,
         nonnegative_scaling=False, consensus_anchors=None, bootstrap=True,
         sample_weight=None)
         -> tuple[TSL, FitResult]
@@ -203,7 +204,7 @@ Fit a boosted TSL model.
 | `x` | `ndarray (n_samples, n_features)` | _required_ | training features (`float64`) |
 | `y` | `ndarray (n_samples,)` | _required_ | training targets |
 | _hyperparameters_ | — | — | same names/types as the [`TSLRegressor` constructor](#cls-tslregressor) |
-| `max_bins` | `int | None` | `None` | keyword-only quantile candidate budget for this native fit; integers must be at least 2; `None` uses all eligible distinct-value positions |
+| `max_bins` | `int | "exact"` | `4095` | keyword-only split candidates per feature: an integer of at least 2 limits them to the edges of up to that many quantile bins; `"exact"` (or `None`) considers every distinct value |
 | `consensus_interval` | `int` | `1` | keyword-only maximum local action attempts per frozen peer reference; must be at least 1; used when `consensus > 0` and `n_trees > 1` |
 | `consensus_anchors` | `int | None` | `None` | keyword-only training-row sample size for the consensus penalty; positive integers below the training row count sample that many shared anchors; `None` or a count at least the training row count uses every row |
 | `nonnegative_scaling` | `bool` | `False` | keyword-only constraint on the joint outer branch coefficients; `True` uses bounded nonnegative least squares |
@@ -211,9 +212,12 @@ Fit a boosted TSL model.
 | `sample_weight` | `ndarray (n_samples,) | None` | `None` | keyword-only per-row weights $s_i$ of the loss $\sum_i s_i\,(y_i-\hat m(x_i))^2$; finite, nonnegative, one per row, with a positive sum; `None` weighs every row by one |
 
 `max_bins` limits candidate split locations per feature, while `n_iter` controls
-the grid's structural budget. Histogram boundaries snap past blocks of equal
-values so a split does not divide tied observations. This native `TSL.fit` option
-retains independent randomized bags when `consensus=0`.
+the grid's structural budget. A feature with at most `max_bins` distinct values keeps
+every distinct value as a candidate. Binned fits are faster than `"exact"` even then,
+and score far fewer candidates on features with more distinct values than bins.
+Histogram boundaries snap past blocks of equal values so a split does not divide
+tied observations, and bags stay randomized when `consensus=0`. The Rust builders
+default to every distinct value (`max_bins(None)`).
 
 `consensus_interval=1` updates peer references before each action attempt. Larger
 values retain the reference for a batch, reducing full refreshes while changing the
@@ -235,7 +239,7 @@ to zero. The bounded active-set solver retains the best feasible training-loss
 incumbent, including the preceding model with zero coefficients for the new stage.
 See [coefficient backfitting](../math/fitting.md#coefficient-backfitting).
 
-`max_bins`, `consensus_interval`, `consensus_anchors` and `nonnegative_scaling` are
+`consensus_interval`, `consensus_anchors` and `nonnegative_scaling` are
 available on native `TSL.fit` and the Rust builders. The `TSLRegressor` constructor does
 not expose them.
 
