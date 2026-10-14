@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from tensorsl import TSL
+from tensorsl import TSL, TSLRegressor
 
 
 def data():
@@ -23,17 +23,33 @@ def test_histogram_candidates_bound_every_bag(consensus):
     assert np.isfinite(model.predict(x)).all()
 
 
-def test_none_preserves_exact_candidate_path():
+def test_default_bins_and_exact_candidate_path():
     x, y = data()
     config = dict(epochs=2, n_trees=3, n_iter=16, verbosity=0)
     default, _ = TSL.fit(x, y, **config)
-    exact, _ = TSL.fit(x, y, max_bins=None, **config)
-    np.testing.assert_array_equal(default.predict(x), exact.predict(x))
+    binned, _ = TSL.fit(x, y, max_bins=4095, **config)
+    np.testing.assert_array_equal(default.predict(x), binned.predict(x))
+    exact, _ = TSL.fit(x, y, max_bins="exact", **config)
+    unset, _ = TSL.fit(x, y, max_bins=None, **config)
+    np.testing.assert_array_equal(exact.predict(x), unset.predict(x))
     assert any(len(grid.splits[0]) > 3 for stage in exact.stage_predictors for grid in stage.grid_tensors)
 
 
-@pytest.mark.parametrize("max_bins", [0, 1])
-def test_histogram_bin_count_validation(max_bins):
+def test_regressor_passes_max_bins_to_the_fit():
     x, y = data()
-    with pytest.raises(ValueError, match="max_bins must be at least 2"):
+    config = dict(epochs=2, n_trees=3, n_iter=16, verbosity=0)
+    assert TSLRegressor().get_params()["max_bins"] == 4095
+    for max_bins in [4, "exact"]:
+        regressor = TSLRegressor(max_bins=max_bins, **config).fit(x, y)
+        model, _ = TSL.fit(x, y, max_bins=max_bins, **config)
+        np.testing.assert_array_equal(regressor.predict(x), model.predict(x))
+
+
+@pytest.mark.parametrize(
+    "max_bins, error",
+    [(0, ValueError), (1, ValueError), ("bins", ValueError), (2.5, TypeError), (True, TypeError)],
+)
+def test_histogram_bin_count_validation(max_bins, error):
+    x, y = data()
+    with pytest.raises(error, match="max_bins must be"):
         TSL.fit(x, y, epochs=1, max_bins=max_bins)

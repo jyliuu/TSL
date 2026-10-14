@@ -13,8 +13,11 @@ use tsl::{
 };
 
 use crate::{
-    feature_importance, fit_result::FitResultPy, params::BoostedFitOptions, partial_dependence,
-    persistence, stage_predictor::StagePredictorPy,
+    feature_importance,
+    fit_result::FitResultPy,
+    params::{BoostedFitOptions, MaxBins, DEFAULT_MAX_BINS},
+    partial_dependence, persistence,
+    stage_predictor::StagePredictorPy,
 };
 
 #[derive(Debug)]
@@ -308,7 +311,7 @@ impl TSLPy {
         verbosity=1,
         visualdb=None,
         *,
-        max_bins=None,
+        max_bins=MaxBins::Bins(DEFAULT_MAX_BINS),
         consensus_interval=1,
         nonnegative_scaling=false,
         consensus_anchors=None,
@@ -342,7 +345,7 @@ impl TSLPy {
         seed: u64,
         verbosity: u8,
         visualdb: Option<String>,
-        max_bins: Option<u16>,
+        max_bins: MaxBins,
         consensus_interval: usize,
         nonnegative_scaling: bool,
         consensus_anchors: Option<usize>,
