@@ -41,7 +41,7 @@ pub(super) fn apply<'a>(
 
     state = refresh_action_statistics(state, col, (start, end), plan, refinement);
     state = split_strategy.forbid_around_split(state, &split);
-    state.current_error = refinement.weighted_squared_error(&state.residuals);
+    state.current_error = refinement.weighted_squared_error(&state.residuals, state.sample_weight);
     state.loop_state.record_split();
     state
 }

@@ -50,6 +50,34 @@ belongs to the same feature view and `max_bins` configuration throughout the fit
 If a `visualdb_path` is set (and `evo-logging` is on), per-stage snapshots — grid JSON,
 $\tilde{m}_+/\tilde{m}_-$ arrays, scaling — are streamed to SQLite; see [Logging](logging.md).
 
+## Weighted fits { #weighted-fits }
+
+`fit_boosted_weighted(x, y, sample_weight, &TSLBoostedParams) -> (FitResult, TSL)` runs the
+same loop on the weighted squared error $\sum_i s_i\,(y_i-\hat m(x_i))^2$:
+
+- the weights are rescaled to mean one, $s_i \leftarrow n\,s_i/\sum_k s_k$, so the
+  penalties and `min_split_loss` keep the scale they have in an unweighted fit;
+- in every grid fit, row $i$'s loss weight is $s_i\,w(e_i)$, with $w$ the L2 or Huber
+  weight of [Starting one grid](../math/fitting.md#starting-one-grid), and $s_i$ also
+  multiplies the row's [branch-consensus](../math/bagging-aggregation.md#consensus-fitting)
+  term. These weights enter the solver statistics, the merge sums, and the grid error
+  $\sum_i s_i\,w(e_i)\,e_i^2$ that scales the boundary penalty and the tolerance an
+  action must clear;
+- the [coefficient backfit](../math/fitting.md#coefficient-backfitting) solves least
+  squares on the rows of $\Phi_\ell$ and $Y$ scaled by $\sqrt{s_i}$, which minimizes
+  $\sum_i s_i\,(Y_i-(\Phi_\ell\gamma)_i)^2$, with or without `nonnegative_scaling`;
+- `FitResult.err` and each stage's error are the weighted mean squared residual
+  $\sum_i s_i r_i^2/\sum_i s_i$.
+
+It panics unless `sample_weight` holds one finite, nonnegative entry per row of `x` with a
+positive sum; the Python bindings check the same conditions and raise `ValueError`.
+Weighted fits update the per-row statistics row by row; unweighted fits use the
+contiguous-slice kernels where the array layout allows. `fit_boosted` is the fit with
+every $s_i=1$.
+
+`stage_predictor::fit_ensemble_weighted(x, y, sample_weight, &StagePredictorParams, rng)`
+fits one stage to $\sum_i s_i\,(y_i-f(x_i))^2$ and uses the weights as given.
+
 ## Parameters (`forest/params.rs`)
 
 `TSLBoostedParams` is the top-level config, flattened by `TSLBoostedParamsBuilder`:

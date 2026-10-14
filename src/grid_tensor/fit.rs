@@ -50,6 +50,17 @@ pub(crate) fn initialize_state_with_input<'a>(
     hyperparameters: &GridTensorParams,
     prepared: Option<&super::prepared_input::PreparedInput<'_>>,
 ) -> FittingState<'a> {
+    initialize_weighted_state(x, y, None, hyperparameters, prepared)
+}
+
+/// Prepare a stage whose loss weighs row `i` by `sample_weight[i]`.
+pub(crate) fn initialize_weighted_state<'a>(
+    x: ndarray::ArrayView2<'a, f64>,
+    y: ndarray::ArrayView1<'a, f64>,
+    sample_weight: Option<ndarray::ArrayView1<'a, f64>>,
+    hyperparameters: &GridTensorParams,
+    prepared: Option<&super::prepared_input::PreparedInput<'_>>,
+) -> FittingState<'a> {
     if let Some(prepared) = prepared {
         prepared.assert_matches(x, hyperparameters.max_bins);
     }
@@ -59,8 +70,8 @@ pub(crate) fn initialize_state_with_input<'a>(
 
     let split_strategy = hyperparameters.split_strategy_params.get_split_strategy();
 
-    // Initialize state
     let mut state = FittingState::new(x, y);
+    state.sample_weight = sample_weight;
 
     // Initialize logging state if logging is enabled
     #[cfg(feature = "evo-logging")]
@@ -75,7 +86,8 @@ pub(crate) fn initialize_state_with_input<'a>(
     let state =
         refinement_strategy.initialize_with_input(state, prepared, hyperparameters.max_bins);
     let mut state = state;
-    state.current_error = refinement_strategy.weighted_squared_error(&state.residuals);
+    state.current_error =
+        refinement_strategy.weighted_squared_error(&state.residuals, state.sample_weight);
     split_strategy.initialize(state)
 }
 
@@ -231,13 +243,13 @@ pub(crate) fn finish_grid(mut state: FittingState<'_>) -> GridTensor {
 
 /// Identify the fitted grid and evaluate it on the training rows.
 pub(crate) fn finish_fit(state: FittingState<'_>) -> (FitResult, GridTensor) {
-    let (x, labels) = (state.x, state.labels);
+    let (x, labels, sample_weight) = (state.x, state.labels, state.sample_weight);
     let grid_tensor = finish_grid(state);
     // `FitResult` is consistent with the returned `GridTensor`: after identification the
     // returned y_hat/residuals/err equal `grid_tensor.predict(x)` and its residuals.
     let y_hat = grid_tensor.predict(x.view());
     let residuals = &labels - &y_hat;
-    let err = residuals.pow2().mean().unwrap();
+    let err = crate::weighted_mean_squared_error(residuals.view(), sample_weight);
     (
         FitResult {
             err,
@@ -432,12 +444,19 @@ mod tests {
     fn action_states<'a>(
         x: &'a Array2<f64>,
         y: &'a Array1<f64>,
+        sample_weight: Option<&'a Array1<f64>>,
         params: &GridTensorParams,
     ) -> Vec<FittingState<'a>> {
         let refinement = params.refinement_strategy_params.get_refinement_strategy();
         let split = params.split_strategy_params.get_split_strategy();
         let mut rng = StdRng::seed_from_u64(0);
-        let mut states = vec![initialize_state(x.view(), y.view(), params)];
+        let mut states = vec![initialize_weighted_state(
+            x.view(),
+            y.view(),
+            sample_weight.map(|weights| weights.view()),
+            params,
+            None,
+        )];
         for iter in 0..max_iterations(params.n_iter) {
             let state = states.last().unwrap().clone();
             let (state, advanced) =
@@ -565,7 +584,10 @@ mod tests {
             .residuals
             .iter()
             .zip(&after.residuals)
-            .map(|(&before, &now)| refinement.weight(before) * (before * before - now * now))
+            .enumerate()
+            .map(|(row, (&before, &now))| {
+                state.sample_weight(row) * refinement.weight(before) * (before * before - now * now)
+            })
             .sum();
         let tolerance = 1e-9 * state.current_error.max(1.0);
         assert!(
@@ -573,7 +595,9 @@ mod tests {
             "{action:?}: score {score}, decrease {decrease}, penalty {penalty}"
         );
         assert!(
-            (after.current_error - refinement.weighted_squared_error(&after.residuals)).abs()
+            (after.current_error
+                - refinement.weighted_squared_error(&after.residuals, after.sample_weight))
+            .abs()
                 <= tolerance
         );
     }
@@ -630,8 +654,8 @@ mod tests {
     }
 
     /// Every cached split, resplit and merge score equals the penalized loss decrease of
-    /// applying it, for L2 and Huber objectives, every penalty, a multiplier cap, and both
-    /// two-tensor and stage-1 (positive target) states along a fit.
+    /// applying it, for L2 and Huber objectives, every penalty, a multiplier cap, sample
+    /// weights, and both two-tensor and stage-1 (positive target) states along a fit.
     #[test]
     fn action_scores_equal_the_penalized_loss_decrease_when_applied() {
         let refinements = [
@@ -652,13 +676,14 @@ mod tests {
                 .tilt_rho(0.01),
         ];
         let mut checked = [0usize; 3];
+        let weights = Array1::from_shape_fn(24, |i| ((i * 7) % 5) as f64 / 2.0);
         for refinement in refinements {
-            for offset in [0.0, 3.0] {
+            for (offset, weighted) in [(0.0, false), (3.0, false), (0.0, true), (3.0, true)] {
                 let (x, y) = data(offset);
                 let params = params(refinement.clone(), 1e-3);
                 let strategy = params.refinement_strategy_params.get_refinement_strategy();
                 let split = params.split_strategy_params.get_split_strategy();
-                for state in action_states(&x, &y, &params) {
+                for state in action_states(&x, &y, weighted.then_some(&weights), &params) {
                     for action in cached_actions(&state) {
                         checked[match action {
                             FittingAction::ApplySplit { .. } => 0,
@@ -693,7 +718,7 @@ mod tests {
         let mut checked = 0;
         for offset in [0.0, 3.0] {
             let (x, y) = data(offset);
-            for state in action_states(&x, &y, &params) {
+            for state in action_states(&x, &y, None, &params) {
                 for action in cached_actions(&state) {
                     let FittingAction::ApplySplit { split } = &action else {
                         continue;
@@ -723,7 +748,7 @@ mod tests {
         let (x, y) = data(0.0);
         let refinement = RefinementStrategyParamsBuilder::new().alpha(0.01);
         for refinement in [refinement.clone().l2(), refinement.huber()] {
-            let states = action_states(&x, &y, &params(refinement, 1e-3));
+            let states = action_states(&x, &y, None, &params(refinement, 1e-3));
             for state in &states {
                 assert!(state.lambda_plus > 0.0 && state.lambda_minus > 0.0);
                 assert!(state.backbone_values.iter().flatten().all(|&b| b > 0.0));
@@ -752,7 +777,7 @@ mod tests {
             let strategy = params.refinement_strategy_params.get_refinement_strategy();
             let (v_min, v_max) = strategy.multiplier_bounds();
             let mut binding = false;
-            for pair in action_states(&x, &y, &params).windows(2) {
+            for pair in action_states(&x, &y, None, &params).windows(2) {
                 let [before, after] = [&pair[0], &pair[1]];
                 for row in 0..x.nrows() {
                     for v in [

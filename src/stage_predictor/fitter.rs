@@ -15,20 +15,23 @@ use super::StagePredictor;
 use rayon::prelude::*;
 
 /// Fit one bag member; `fit_results` keeps its training evaluation.
+#[allow(clippy::too_many_arguments)]
 fn fit_grid_tensor_with_context<'a>(
     tree_id: usize,
     seed: u64,
     x: ArrayView2<'a, f64>,
     y: ArrayView1<'a, f64>,
+    sample_weight: Option<ArrayView1<'a, f64>>,
     tg_params: &GridTensorParams,
     initial_state: Option<&FittingState<'a>>,
+    prepared: Option<&grid_tensor::prepared_input::PreparedInput<'_>>,
     fit_results: bool,
 ) -> (Option<FitResult>, GridTensor) {
     logging::with_tree_id(tree_id, || {
         let mut thread_rng = rand::rngs::StdRng::seed_from_u64(seed);
         let state = match initial_state {
             Some(initial_state) => initial_state.clone(),
-            None => fit::initialize_state(x, y, tg_params),
+            None => fit::initialize_weighted_state(x, y, sample_weight, tg_params, prepared),
         };
         let state = fit::fit_structure(state, tg_params, &mut thread_rng);
 
@@ -55,21 +58,41 @@ pub fn fit_ensemble<R: Rng + ?Sized>(
     hyperparameters: &StagePredictorParams,
     rng: &mut R,
 ) -> (FitResult, StagePredictor) {
-    fit_ensemble_with_input(x, y, hyperparameters, rng, None)
+    fit_ensemble_with_input(x.view(), y.view(), None, hyperparameters, rng, None)
 }
 
-pub(crate) fn fit_ensemble_with_input<R: Rng + ?Sized>(
+/// Fit one stage to the weighted squared error `Σᵢ sᵢ (yᵢ − f(xᵢ))²`.
+pub fn fit_ensemble_weighted<R: Rng + ?Sized>(
     x: ArrayView2<f64>,
     y: ArrayView1<f64>,
+    sample_weight: ArrayView1<f64>,
+    hyperparameters: &StagePredictorParams,
+    rng: &mut R,
+) -> (FitResult, StagePredictor) {
+    fit_ensemble_with_input(
+        x.view(),
+        y.view(),
+        Some(sample_weight.view()),
+        hyperparameters,
+        rng,
+        None,
+    )
+}
+
+pub(crate) fn fit_ensemble_with_input<'a, R: Rng + ?Sized>(
+    x: ArrayView2<'a, f64>,
+    y: ArrayView1<'a, f64>,
+    sample_weight: Option<ArrayView1<'a, f64>>,
     hyperparameters: &StagePredictorParams,
     rng: &mut R,
     prepared: Option<&grid_tensor::prepared_input::PreparedInput<'_>>,
 ) -> (FitResult, StagePredictor) {
-    let grid_tensors = fit_grid_bag_with_input(x, y, hyperparameters, rng, prepared, false)
-        .into_iter()
-        .map(|(_, grid)| grid)
-        .collect();
-    combine_fitted_grids(x, y, hyperparameters, grid_tensors)
+    let grid_tensors =
+        fit_grid_bag_with_input(x, y, sample_weight, hyperparameters, rng, prepared, false)
+            .into_iter()
+            .map(|(_, grid)| grid)
+            .collect();
+    combine_fitted_grids(x, y, sample_weight, hyperparameters, grid_tensors)
 }
 
 /// Fit the ordered bag and retain each grid's normalized training predictions.
@@ -79,7 +102,7 @@ pub fn fit_grid_bag<R: Rng + ?Sized>(
     hyperparameters: &StagePredictorParams,
     rng: &mut R,
 ) -> Vec<(FitResult, GridTensor)> {
-    fit_grid_bag_with_input(x, y, hyperparameters, rng, None, true)
+    fit_grid_bag_with_input(x.view(), y.view(), None, hyperparameters, rng, None, true)
         .into_iter()
         .map(|(fit, grid)| (fit.expect("bag members keep their fit results"), grid))
         .collect()
@@ -87,9 +110,10 @@ pub fn fit_grid_bag<R: Rng + ?Sized>(
 
 /// Fit the bag; `fit_results` keeps each member's training evaluation, which the
 /// ensemble path does not consume.
-fn fit_grid_bag_with_input<R: Rng + ?Sized>(
-    x: ArrayView2<f64>,
-    y: ArrayView1<f64>,
+fn fit_grid_bag_with_input<'a, R: Rng + ?Sized>(
+    x: ArrayView2<'a, f64>,
+    y: ArrayView1<'a, f64>,
+    sample_weight: Option<ArrayView1<'a, f64>>,
     hyperparameters: &StagePredictorParams,
     rng: &mut R,
     prepared: Option<&grid_tensor::prepared_input::PreparedInput<'_>>,
@@ -99,6 +123,7 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
         n_trees,
         tg_params,
         consensus,
+        bootstrap,
         ..
     } = hyperparameters;
 
@@ -107,10 +132,29 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
     let fit_results = fit_results || logging::is_logging_enabled();
     let epoch_opt = logging::current_epoch();
     let seeds: Vec<u64> = (0..*n_trees).map(|_| rng.gen()).collect();
+    if *bootstrap && *n_trees > 1 && *consensus == 0.0 {
+        let bag = BootstrapBag {
+            x,
+            y,
+            sample_weight,
+            tg_params,
+            fit_results,
+        };
+        // Bootstrap members share the sort orders and binning of the rows, not their weights.
+        return match prepared {
+            Some(prepared) => bag.fit(&seeds, epoch_opt, prepared),
+            None => {
+                let prepared =
+                    grid_tensor::prepared_input::PreparedInput::new(x, tg_params.max_bins);
+                bag.fit(&seeds, epoch_opt, &prepared)
+            }
+        };
+    }
     let initial_state = if *n_trees > 1 && !logging::is_logging_enabled() {
-        Some(grid_tensor::fit::initialize_state_with_input(
-            x.view(),
-            y.view(),
+        Some(grid_tensor::fit::initialize_weighted_state(
+            x,
+            y,
+            sample_weight,
             tg_params,
             prepared,
         ))
@@ -120,8 +164,9 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
 
     if *consensus > 0.0 && *n_trees > 1 {
         return super::consensus::fit_consensus_bag(
-            x.view(),
-            y.view(),
+            x,
+            y,
+            sample_weight,
             hyperparameters,
             &seeds,
             initial_state.as_ref(),
@@ -135,39 +180,108 @@ fn fit_grid_bag_with_input<R: Rng + ?Sized>(
         fit_grid_tensor_with_context(
             tree_id,
             seed,
-            x.view(),
-            y.view(),
+            x,
+            y,
+            sample_weight,
             tg_params,
             initial_state.as_ref(),
+            None,
             fit_results,
         )
     };
+    let fitted_grids = fit_members(&seeds, epoch_opt, fit_member);
+    drop(initial_state);
+    fitted_grids
+}
 
+/// Fit one member per seed, in parallel with the `use-rayon` feature.
+fn fit_members<F>(
+    seeds: &[u64],
+    epoch_opt: Option<usize>,
+    fit_member: F,
+) -> Vec<(Option<FitResult>, GridTensor)>
+where
+    F: Fn(usize, u64) -> (Option<FitResult>, GridTensor) + Sync,
+{
     #[cfg(not(feature = "use-rayon"))]
-    let fitted_grids = seeds
-        .iter()
-        .enumerate()
-        .map(|(tree_id, &seed)| fit_member(tree_id, seed))
-        .collect();
+    {
+        let _ = epoch_opt;
+        seeds
+            .iter()
+            .enumerate()
+            .map(|(tree_id, &seed)| fit_member(tree_id, seed))
+            .collect()
+    }
 
     // Rayon workers carry no logging context, so each member re-enters the epoch.
     #[cfg(feature = "use-rayon")]
-    let fitted_grids = seeds
+    seeds
         .par_iter()
         .enumerate()
         .map(|(tree_id, &seed)| match epoch_opt {
             Some(epoch) => logging::with_epoch(epoch, || fit_member(tree_id, seed)),
             None => fit_member(tree_id, seed),
         })
-        .collect();
+        .collect()
+}
 
-    drop(initial_state);
-    fitted_grids
+/// The rows and settings shared by the members of a bootstrap bag.
+struct BootstrapBag<'a, 'p> {
+    x: ArrayView2<'a, f64>,
+    y: ArrayView1<'a, f64>,
+    sample_weight: Option<ArrayView1<'a, f64>>,
+    tg_params: &'p GridTensorParams,
+    fit_results: bool,
+}
+
+impl BootstrapBag<'_, '_> {
+    /// Fit one member per seed, each to its own bootstrap resample of the rows.
+    fn fit(
+        &self,
+        seeds: &[u64],
+        epoch_opt: Option<usize>,
+        prepared: &grid_tensor::prepared_input::PreparedInput<'_>,
+    ) -> Vec<(Option<FitResult>, GridTensor)> {
+        fit_members(seeds, epoch_opt, |tree_id, seed| {
+            let weights = bootstrap_weights(seed, self.sample_weight, self.x.nrows());
+            fit_grid_tensor_with_context(
+                tree_id,
+                seed,
+                self.x.view(),
+                self.y.view(),
+                Some(weights.view()),
+                self.tg_params,
+                None,
+                Some(prepared),
+                self.fit_results,
+            )
+        })
+    }
+}
+
+/// Bootstrap weights of one member: each row's sample weight times the number of times it
+/// is drawn in `n` uniform draws with replacement, from a stream derived from `seed`.
+fn bootstrap_weights(
+    seed: u64,
+    sample_weight: Option<ArrayView1<f64>>,
+    n: usize,
+) -> ndarray::Array1<f64> {
+    const BOOTSTRAP_STREAM: u64 = 0x9E37_79B9_7F4A_7C15;
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed ^ BOOTSTRAP_STREAM);
+    let mut weights = ndarray::Array1::<f64>::zeros(n);
+    for _ in 0..n {
+        weights[rng.gen_range(0..n)] += 1.0;
+    }
+    if let Some(sample_weight) = sample_weight {
+        weights *= &sample_weight;
+    }
+    weights
 }
 
 fn combine_fitted_grids(
     x: ArrayView2<f64>,
     y: ArrayView1<f64>,
+    sample_weight: Option<ArrayView1<f64>>,
     hyperparameters: &StagePredictorParams,
     grid_tensors: Vec<GridTensor>,
 ) -> (FitResult, StagePredictor) {
@@ -199,7 +313,7 @@ fn combine_fitted_grids(
     log::debug!("Combined preds mean: {:?}", preds.mean());
 
     let residuals = &y - &preds;
-    let err = residuals.pow2().mean().unwrap();
+    let err = crate::weighted_mean_squared_error(residuals.view(), sample_weight);
     log::info!(
         "Combined tree grid error: {:?}, lambda+: {:?}, lambda-: {:?}",
         err,

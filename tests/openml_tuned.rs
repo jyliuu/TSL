@@ -87,6 +87,7 @@ mod tests {
             )
 
 
+            .bootstrap(false)
             .seed(42)
             .build();
 
@@ -137,6 +138,7 @@ mod tests {
             )
 
 
+            .bootstrap(false)
             .seed(42)
             .build();
 
@@ -188,6 +190,7 @@ mod tests {
             )
 
 
+            .bootstrap(false)
             .seed(42)
             .build();
 
@@ -239,6 +242,7 @@ mod tests {
             )
 
 
+            .bootstrap(false)
             .seed(42)
             .build();
 

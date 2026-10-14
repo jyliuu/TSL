@@ -17,8 +17,9 @@ impl RefinementStrategy {
         max_bins: Option<u16>,
     ) -> FittingState<'a> {
         self.assert_valid_update_clamp();
-        // Check if Stage 1 positive-only mode: all residuals are nonnegative
-        let is_stage1 = state.residuals.iter().all(|&r| r >= 0.0);
+        // Stage-1 positive-only mode: every row that carries weight has a nonnegative residual.
+        let is_stage1 =
+            (0..state.n).all(|i| state.residuals[i] >= 0.0 || state.sample_weight(i) == 0.0);
 
         // Initialize two-tensor lambdas from current outer residuals (labels - stage prediction).
         const EPS_LAMBDA: f64 = 1e-10;
@@ -39,7 +40,7 @@ impl RefinementStrategy {
             let mut sum_pos = 0.0;
             let mut sum_neg = 0.0;
             for i in 0..state.n {
-                let w = self.weight(state.residuals[i]);
+                let w = self.row_weight(&state, i);
                 let r = state.residuals[i];
                 sum_w += w;
                 if r > 0.0 {
@@ -77,7 +78,7 @@ impl RefinementStrategy {
             let fp = state.f_plus[i];
             let fm = state.f_minus[i];
             let rt = state.r_tilde[i];
-            let w = self.weight(state.residuals[i]);
+            let w = self.row_weight(&state, i);
             state.precomputed_statistics.curvature[i] = CurvatureCache {
                 s11: w * fp * fp,
                 s22: if is_stage1 { 0.0 } else { w * fm * fm },

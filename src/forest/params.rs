@@ -124,6 +124,11 @@ impl TSLBoostedParamsBuilder {
         self
     }
 
+    pub fn bootstrap(mut self, bootstrap: bool) -> Self {
+        self.sp_params_builder = self.sp_params_builder.bootstrap(bootstrap);
+        self
+    }
+
     pub fn max_bins(mut self, max_bins: Option<u16>) -> Self {
         self.sp_params_builder = self.sp_params_builder.max_bins(max_bins);
         self

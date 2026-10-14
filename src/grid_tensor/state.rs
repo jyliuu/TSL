@@ -46,6 +46,8 @@ pub struct FittingState<'a> {
     // Data references (immutable)
     pub x: ArrayView2<'a, f64>,
     pub labels: ArrayView1<'a, f64>,
+    /// Per-row multiplier of every loss and consensus term; `None` weighs each row by one.
+    pub sample_weight: Option<ArrayView1<'a, f64>>,
     pub n: usize,
     pub p: usize,
 
@@ -95,6 +97,7 @@ impl<'a> Clone for FittingState<'a> {
             current_error: self.current_error,
             x: self.x,
             labels: self.labels,
+            sample_weight: self.sample_weight,
             n: self.n,
             p: self.p,
             precomputed_statistics: self.precomputed_statistics.clone(),
@@ -168,6 +171,7 @@ impl<'a> FittingState<'a> {
         Self {
             x,
             labels: y,
+            sample_weight: None,
             backbone_values,
             tilt_values,
             boundaries: vec![vec![]; p],
@@ -196,10 +200,17 @@ impl<'a> FittingState<'a> {
         }
     }
 
+    /// The sample weight of `row`.
+    #[inline]
+    pub(crate) fn sample_weight(&self, row: usize) -> f64 {
+        self.sample_weight.map_or(1.0, |weights| weights[row])
+    }
+
     /// Per-row sufficient statistics of the penalized local objective.
     ///
     /// With branch consensus `ρ, c₊, c₋`, the objective adds
-    /// `ρ (f₊ − c₊)² + ρ (f₋ − c₋)²` per row, which contributes to `s11`, `s22`, `t1` and `t2`.
+    /// `ρ (f₊ − c₊)² + ρ (f₋ − c₋)²` per row, scaled by the row's sample weight, which
+    /// contributes to `s11`, `s22`, `t1` and `t2`. `weight` is the row's full loss weight.
     #[inline]
     pub(crate) fn point_statistics(&self, row: usize, weight: f64) -> PrefixStats {
         self.point_statistics_impl::<true>(row, weight)
@@ -225,6 +236,7 @@ impl<'a> FittingState<'a> {
             .as_ref()
             .and_then(|consensus| consensus.target(row))
         {
+            let rho = rho * self.sample_weight(row);
             stats.s11 += rho * fp * fp;
             stats.s22 += rho * fm * fm;
             if LINEAR {

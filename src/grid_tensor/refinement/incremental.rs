@@ -65,9 +65,9 @@ impl RefinementStrategy {
             .iter()
             .map(|&pt| {
                 let new = if LINEAR {
-                    state.point_statistics(pt, self.weight(state.residuals[pt]))
+                    state.point_statistics(pt, self.row_weight(&state, pt))
                 } else {
-                    state.point_curvature_statistics(pt, self.weight(state.residuals[pt]))
+                    state.point_curvature_statistics(pt, self.row_weight(&state, pt))
                 };
                 let statistics = &state.precomputed_statistics;
                 let old = statistics.curvature[pt];

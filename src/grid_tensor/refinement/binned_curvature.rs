@@ -135,6 +135,7 @@ impl RefinementStrategy {
                 ]
                 .into_iter()
                 .all(|length| length == n)
+                    && state.sample_weight.is_none()
                 {
                     let rho = reference.weight;
                     let curvature = &mut state.precomputed_statistics.curvature[..n];
@@ -155,7 +156,7 @@ impl RefinementStrategy {
             }
         }
         for &row in updated_points {
-            let point = state.point_curvature_statistics(row, self.weight(state.residuals[row]));
+            let point = state.point_curvature_statistics(row, self.row_weight(state, row));
             deltas.push([
                 point.s11 - state.precomputed_statistics.curvature[row].s11,
                 point.s22 - state.precomputed_statistics.curvature[row].s22,

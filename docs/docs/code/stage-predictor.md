@@ -49,7 +49,11 @@ pub enum Aggregation { Mean, GeometricMean, Combined }
 `fit_ensemble` builds a stage:
 
 1. derive `n_trees` seeds and fit that many `GridTensor`s independently when
-   `consensus=0` — in parallel under the `use-rayon` feature;
+   `consensus=0` — in parallel under the `use-rayon` feature. With `bootstrap` (the
+   default), each grid fits its own
+   [bootstrap resample](../math/bagging-aggregation.md#bootstrap-resampling): row $i$'s
+   weight is multiplied by its draw count in $n$ draws with replacement, from a stream
+   derived from the grid's seed;
 2. align them to a common grid (`refine_grids_to_union_two_tensor`) and center each
    axis's log-backbone and tilt for factor-shape comparison;
 3. similarity-filter and combine them into `primary_grid_tensor`
@@ -58,9 +62,18 @@ pub enum Aggregation { Mean, GeometricMean, Combined }
    [coefficient backfit](../math/fitting.md#coefficient-backfitting) sets the outer
    `scaling_plus`/`scaling_minus` values.
 
-For bags with multiple grids and split logging disabled, initialization computes the
-deterministic fitting state once and clones it for each independently seeded grid.
-Logging-enabled fits initialize each grid in its own logging context.
+`fit_ensemble_weighted(x, y, sample_weight, params, rng)` builds the same stage for the
+weighted loss $\sum_i s_i\,(y_i-f(x_i))^2$: every grid in the bag, including a
+consensus bag, weighs row $i$'s loss and consensus terms by $s_i$, and the returned
+`FitResult.err` is the weighted mean squared residual. It uses the weights as given;
+`fit_boosted_weighted` rescales them to mean one before fitting its stages. See
+[weighted fits](forest.md#weighted-fits).
+
+For bags whose grids fit all rows, with multiple grids and split logging disabled,
+initialization computes the deterministic fitting state once and clones it for each
+independently seeded grid. A bootstrap bag shares the rows' sort orders and histogram
+bins (`PreparedInput`) and initializes each grid from its own weights. Logging-enabled
+fits initialize each grid in its own logging context.
 
 With `consensus` $\rho>0$, the bag is fitted in lockstep (`consensus.rs`). Every
 grid starts from the shared initial state. Each round, an eligible grid receives
@@ -133,7 +146,8 @@ bit patterns. This preserves each branch, its predictions, and total observation
 ## Parameters (`params.rs`)
 
 `StagePredictorParams` carries `n_trees`, the nested `GridTensorParams`,
-`similarity_threshold` ($\xi$), `aggregation_method`, `consensus` ($\rho$), and
-`consensus_interval` (default 1), and `consensus_anchors` (default `None`), with a fluent
+`similarity_threshold` ($\xi$), `aggregation_method`, `consensus` ($\rho$),
+`consensus_interval` (default 1), `consensus_anchors` (default `None`), and `bootstrap`
+(default `true`), with a fluent
 `StagePredictorParamsBuilder` that delegates to `GridTensorParamsBuilder`. See
 [Architecture → builder pattern](architecture.md#the-builder-pattern).

@@ -98,6 +98,11 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         where ``c_plus`` and ``c_minus`` are the mean branches of the other grids. The
         grids converge to one latent representation; the term also damps updates.
         ``0.0`` fits the grids independently.
+    bootstrap : bool, default=True
+        Fit each grid of an independent bag (``consensus=0``, ``n_trees > 1``) to its
+        own bootstrap resample of the rows: a row's weight is multiplied by the number
+        of times it is drawn in ``n`` draws with replacement. ``False`` fits every grid
+        to all rows, so the grids differ only in their random split proposals.
     seed : int, default=42
         Random seed for reproducibility.
     verbosity : int, default=1
@@ -137,6 +142,7 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         must_fill_all_k: bool = True,
         similarity_threshold: float = 0.0,
         consensus: float = 0.0,
+        bootstrap: bool = True,
         seed: int = 42,
         verbosity: int = 1,
         visualdb: Optional[str] = None,
@@ -166,11 +172,12 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         self.must_fill_all_k = must_fill_all_k
         self.similarity_threshold = similarity_threshold
         self.consensus = consensus
+        self.bootstrap = bootstrap
         self.seed = seed
         self.verbosity = verbosity
         self.visualdb = visualdb
 
-    def fit(self, X, y):
+    def fit(self, X, y, sample_weight=None):
         """Fit the TSL Boosted regressor to the training data.
 
         Parameters
@@ -179,6 +186,10 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
             The training input samples.
         y : array-like of shape (n_samples,)
             The target values.
+        sample_weight : array-like of shape (n_samples,), optional
+            Nonnegative per-row weights of the squared-error loss
+            ``sum_i w_i (y_i - F(x_i))^2``. They are rescaled to mean one, so the
+            penalties keep their unweighted scale. ``None`` weighs every row by one.
 
         Returns
         -------
@@ -187,6 +198,8 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
         """
         # Input validation (optional but recommended for robustness)
         X, y = check_X_y(X, y, accept_sparse=False, dtype=np.float64)
+        if sample_weight is not None:
+            sample_weight = np.ascontiguousarray(sample_weight, dtype=np.float64)
 
         # Use the classmethod `fit` from the original TSL.Boosted class
         # Pass hyperparameters stored in self
@@ -212,9 +225,11 @@ class TSLRegressor(BaseEstimator, RegressorMixin):
             must_fill_all_k=self.must_fill_all_k,
             similarity_threshold=self.similarity_threshold,
             consensus=self.consensus,
+            bootstrap=self.bootstrap,
             seed=self.seed,
             verbosity=self.verbosity,
             visualdb=self.visualdb,
+            sample_weight=sample_weight,
         )
 
         # Store the fitted core estimator and the fit result

@@ -2,7 +2,9 @@
 
 A stage is an **aggregate of $n_{\text{grids}}$ bagged grids**, fitted with separate
 random seeds and combined into one stage component. At `consensus=0` their fitting
-objectives are independent; positive consensus couples their training branches.
+objectives are independent, and each grid fits its own
+[bootstrap resample](#bootstrap-resampling) of the rows; positive consensus couples
+their training branches.
 This page covers the combination math; the code lives in [`StagePredictor`](../code/stage-predictor.md)
 (`fit_ensemble`, `aggregate_bagged_two_tensor`, `combine_grids`).
 
@@ -17,6 +19,23 @@ so independently fitted factors need not lie in a comparable gauge — two grids
 align → normalize → reference → filter → average pipeline below makes factor shapes
 comparable and can reduce disagreement in the retained bag. It does not identify a
 unique latent decomposition.
+
+## Bootstrap resampling
+
+In an independent bag ($\rho=0$, $n_{\text{grids}}>1$) with `bootstrap` on, grid $c$
+draws $n$ rows uniformly with replacement and counts $k_i^{(c)}$, the number of times row
+$i$ is drawn, so $(k_1^{(c)},\dots,k_n^{(c)})$ is multinomial with $n$ trials and equal
+probabilities $1/n$. The grid then minimizes the weighted squared error
+$\sum_i s_i\,k_i^{(c)}\,(y_i-f(x_i))^2$, with $s_i$ the [sample weight](../code/forest.md#weighted-fits)
+($s_i=1$ without one). This is the squared error of the resample with row $i$
+repeated $k_i^{(c)}$ times. The counts sum to $n$, so without sample weights the
+penalties keep the scale they have on all rows.
+
+Every grid shares the sort orders and histogram bins of the full rows: a row with
+$k_i^{(c)}=0$ leaves the grid's loss but still supplies split candidates and counts
+toward `min_interval_samples`. The counts come from a stream derived from the grid's
+seed, so a fit is deterministic for a given `seed`. With `bootstrap=False` every grid
+fits all rows, and the grids differ only in their random split proposals.
 
 ## Consensus fitting
 
