@@ -47,13 +47,16 @@ The aggregation mode (`Mean` / `GeometricMean` / `Combined`) is set internally; 
 | `min_interval_samples` | `1` | minimum observations on each side of a split |
 | `min_split_loss` | `0.0` | minimum objective reduction to accept any structural action |
 | `complexity_penalty` | `0.0` | fixed-scale boundary cost used by split, resplit, and merge (`0.0` disables merge candidates) |
+| `max_bins` | `4095` | split candidates per feature: the edges of up to that many quantile bins, or `"exact"` for every distinct value |
 | `top_k` | `10` | (for `top_k`) sample from the top-$k$ candidates |
 | `must_fill_all_k` | `True` | (for `top_k`) require all $k$ slots filled |
 
-The native [`TSL.fit`](../code/python-api.md#cmeth-tsl-fit) method also accepts the
-keyword-only `max_bins` option. `None` uses all eligible distinct-value positions;
-an integer of at least 2 limits candidates to quantile boundaries. This controls
-search resolution separately from `n_iter` and leaves bag randomization in place.
+`max_bins` controls search resolution separately from `n_iter` and leaves bag
+randomization in place. An integer of at least 2 limits candidates to quantile-bin
+edges; a feature with at most that many distinct values keeps all of them, so the
+default of 4095 bins matches the exact candidates on any feature with up to 4095
+distinct values. Binned fits are faster than `"exact"` (or `None`) even when they
+keep every candidate.
 
 !!! tip "Choosing a split strategy"
     `random` (the default) is usually best for speed and generalizes well; `best_split`
@@ -96,7 +99,6 @@ available through the Rust builders. They are not `TSLRegressor` constructor arg
 
 | Param | Default | Meaning |
 |-------|:------:|---------|
-| `max_bins` | `None` | quantile candidate budget; integers must be at least 2 |
 | `consensus_interval` | `1` | maximum action attempts per grid against a frozen peer reference; must be at least 1 |
 | `consensus_anchors` | `None` | positive training-row sample size for the consensus penalty; `None` or a count at least the training row count uses the full-row path |
 | `nonnegative_scaling` | `False` | constrain the joint outer branch coefficients to be nonnegative using a bounded active-set least-squares solve |
