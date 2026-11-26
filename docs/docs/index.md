@@ -76,6 +76,11 @@ models in `examples/models/` are used by default. See the
 [examples README](https://github.com/jyliuu/TSL/blob/main/tsl-py/examples/README.md) for
 the full per-script output list and flags.
 
+The scripts run on the current `tensorsl` package. The paper's tables and figures, built
+with the TSL version that produced them (commit `7a4e1e6`), are reproduced together with
+the fitted models, data and tuning logs in the
+[reproducibility package](https://github.com/jyliuu/tsl-benchmark-reproducibility).
+
 ## How the codebase is organized
 
 The model is a three-level hierarchy, and the `src/` module tree mirrors it exactly:
@@ -106,3 +111,28 @@ model. From there: [Fitting](math/fitting.md) and
   [Hyperparameters](guides/hyperparameters.md) reference, then [Examples](#examples).
 - **Working on the code?** Start with [Architecture](code/architecture.md) and its two
   critical invariants, then the per-module pages.
+
+## Citation
+
+TSL is introduced in *Beyond Additive Decompositions: Interpretability Through
+Separability* (ICML 2026, [PMLR 306](https://proceedings.mlr.press/v306/liu26aw.html);
+[arXiv:2605.31200](https://arxiv.org/abs/2605.31200)). The code, data, fitted models and
+tuning logs behind every table and figure of the paper are in the
+[reproducibility package](https://github.com/jyliuu/tsl-benchmark-reproducibility). If you
+use TSL, please cite
+
+```bibtex
+@InProceedings{pmlr-v306-liu26aw,
+  title     = {Beyond Additive Decompositions: Interpretability Through Separability},
+  author    = {Liu, Jinyang and Hiabu, Munir},
+  booktitle = {Proceedings of the 43rd International Conference on Machine Learning},
+  pages     = {76490--76537},
+  year      = {2026},
+  editor    = {Zhang, Tong and Dudik, Miroslav and Jaggi, Martin and Agarwal, Alekh and Li, Sharon and Schuurmans, Dale and Zhu, Jerry and Berkenkamp, Felix and Dong, Hanze and Bietti, Alberto},
+  volume    = {306},
+  series    = {Proceedings of Machine Learning Research},
+  month     = {06--11 Jul},
+  publisher = {PMLR},
+  url       = {https://proceedings.mlr.press/v306/liu26aw.html}
+}
+```
