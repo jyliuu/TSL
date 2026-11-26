@@ -387,6 +387,32 @@ and pay for higher-order interactions one term at a time; SHAP and functional AN
 likewise distribute a prediction additively across features. TSL instead captures
 interactions through the *multiplicative* structure of each stage — a single rank-1
 product already binds all $p$ features together.
+
+## Citation
+
+TSL is introduced in *Beyond Additive Decompositions: Interpretability Through
+Separability* (ICML 2026, [PMLR 306](https://proceedings.mlr.press/v306/liu26aw.html);
+[arXiv:2605.31200](https://arxiv.org/abs/2605.31200)). The code, data, fitted models and
+tuning logs behind every table and figure of the paper are in the
+[reproducibility package](https://github.com/jyliuu/tsl-benchmark-reproducibility). If you
+use TSL, please cite
+
+```bibtex
+@InProceedings{pmlr-v306-liu26aw,
+  title     = {Beyond Additive Decompositions: Interpretability Through Separability},
+  author    = {Liu, Jinyang and Hiabu, Munir},
+  booktitle = {Proceedings of the 43rd International Conference on Machine Learning},
+  pages     = {76490--76537},
+  year      = {2026},
+  editor    = {Zhang, Tong and Dudik, Miroslav and Jaggi, Martin and Agarwal, Alekh and Li, Sharon and Schuurmans, Dale and Zhu, Jerry and Berkenkamp, Felix and Dong, Hanze and Bietti, Alberto},
+  volume    = {306},
+  series    = {Proceedings of Machine Learning Research},
+  month     = {06--11 Jul},
+  publisher = {PMLR},
+  url       = {https://proceedings.mlr.press/v306/liu26aw.html}
+}
+```
+
 ## License
 
 MIT License — see [LICENSE](LICENSE).
